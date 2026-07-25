@@ -1,0 +1,699 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import type { ChangeEvent, Dispatch, FormEvent, SetStateAction } from "react";
+import type { User } from "@supabase/supabase-js";
+import { canonicalTaskId, initialTasks, Task, TaskPrefix, TaskPriority, TaskStatus } from "@/lib/tasks";
+import { isSupabaseConfigured, supabase } from "@/lib/supabase";
+import { countCloudTasks, fetchCloudTasks, saveCloudTasks } from "@/lib/supabaseTasks";
+
+const STORAGE_KEY = "asaf-task-tracker-v1";
+
+const statusLabels: Record<TaskStatus, string> = {
+  open: "פתוחה",
+  in_progress: "בטיפול",
+  waiting: "ממתינה",
+  done: "בוצעה",
+  cancelled: "בוטלה",
+};
+
+const priorityLabels: Record<TaskPriority, string> = {
+  high: "גבוהה",
+  important: "חשובה",
+  normal: "רגילה",
+  low: "נמוכה",
+};
+
+type StatRow = {
+  label: string;
+  value: number;
+};
+
+type ImportSummary = {
+  added: number;
+  updated: number;
+  skipped: number;
+};
+
+const todayIso = () => {
+  const now = new Date();
+  now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+  return now.toISOString().slice(0, 10);
+};
+
+function formatDate(value?: string) {
+  if (!value) return "";
+  return new Intl.DateTimeFormat("he-IL").format(new Date(`${value}T00:00:00`));
+}
+
+function isTaskPrefix(value: unknown): value is TaskPrefix {
+  return value === "P" || value === "W";
+}
+
+function isTaskStatus(value: unknown): value is TaskStatus {
+  return typeof value === "string" && Object.keys(statusLabels).includes(value);
+}
+
+function isTaskPriority(value: unknown): value is TaskPriority {
+  return typeof value === "string" && Object.keys(priorityLabels).includes(value);
+}
+
+function optionalString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function normalizeImportedTask(value: unknown): Task | null {
+  if (!value || typeof value !== "object") return null;
+  const task = value as Record<string, unknown>;
+  const id = typeof task.id === "string" ? canonicalTaskId(task.id) : null;
+  const prefix = isTaskPrefix(task.prefix) ? task.prefix : id?.[0];
+  const number = id ? Number(id.slice(1)) : Number.NaN;
+  if (!id || !isTaskPrefix(prefix) || prefix !== id[0] || !Number.isInteger(number) || number <= 0) return null;
+  if (typeof task.title !== "string" || !task.title.trim()) return null;
+  if (typeof task.category !== "string" || !task.category.trim()) return null;
+  if (!isTaskPriority(task.priority) || !isTaskStatus(task.status)) return null;
+
+  return {
+    id,
+    prefix,
+    number,
+    title: task.title.trim(),
+    category: task.category.trim(),
+    priority: task.priority,
+    status: task.status,
+    dueDate: optionalString(task.dueDate),
+    createdAt: optionalString(task.createdAt),
+    completedAt: optionalString(task.completedAt),
+    notes: optionalString(task.notes),
+  };
+}
+
+function getImportTasks(value: unknown): unknown[] {
+  if (Array.isArray(value)) return value;
+  if (value && typeof value === "object" && Array.isArray((value as { tasks?: unknown }).tasks)) {
+    return (value as { tasks: unknown[] }).tasks;
+  }
+  return [];
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "שגיאה לא ידועה";
+}
+
+function mergeUniqueTasks(tasks: Task[]) {
+  return Array.from(new Map(tasks.map((task) => [task.id, task])).values())
+    .sort((a, b) => a.prefix.localeCompare(b.prefix) || a.number - b.number);
+}
+
+let cachedTasksRaw: string | null | undefined;
+let cachedTasks = initialTasks;
+const taskStoreListeners = new Set<() => void>();
+
+function parseStoredTasks(raw: string | null) {
+  if (!raw) return initialTasks;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    const imported = getImportTasks(parsed).map(normalizeImportedTask);
+    if (imported.length === 0 && Array.isArray(parsed)) return [];
+    if (imported.some((task) => !task)) return initialTasks;
+    return mergeUniqueTasks(imported as Task[]);
+  } catch {
+    return initialTasks;
+  }
+}
+
+function getTasksSnapshot() {
+  if (typeof window === "undefined") return initialTasks;
+  const raw = window.localStorage.getItem(STORAGE_KEY);
+  if (raw === cachedTasksRaw) return cachedTasks;
+  cachedTasksRaw = raw;
+  cachedTasks = parseStoredTasks(raw);
+  return cachedTasks;
+}
+
+function getServerTasksSnapshot() {
+  return initialTasks;
+}
+
+function subscribeTasks(listener: () => void) {
+  taskStoreListeners.add(listener);
+  const handleStorage = (event: StorageEvent) => {
+    if (event.key === STORAGE_KEY) listener();
+  };
+  window.addEventListener("storage", handleStorage);
+  return () => {
+    taskStoreListeners.delete(listener);
+    window.removeEventListener("storage", handleStorage);
+  };
+}
+
+function writeTasks(nextTasks: Task[]) {
+  const raw = JSON.stringify(nextTasks);
+  cachedTasksRaw = raw;
+  cachedTasks = nextTasks;
+  window.localStorage.setItem(STORAGE_KEY, raw);
+  taskStoreListeners.forEach((listener) => listener());
+}
+
+function usePersistentTasks(): [Task[], Dispatch<SetStateAction<Task[]>>] {
+  const tasks = useSyncExternalStore(subscribeTasks, getTasksSnapshot, getServerTasksSnapshot);
+  const setTasks: Dispatch<SetStateAction<Task[]>> = useCallback((update) => {
+    const nextTasks = typeof update === "function"
+      ? (update as (current: Task[]) => Task[])(getTasksSnapshot())
+      : update;
+    writeTasks(nextTasks);
+  }, []);
+  return [tasks, setTasks];
+}
+
+export default function Home() {
+  const [tasks, setTasks] = usePersistentTasks();
+  const [query, setQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState<TaskStatus | "active" | "all">("active");
+  const [prefixFilter, setPrefixFilter] = useState<"all" | "P" | "W">("all");
+  const [newTitle, setNewTitle] = useState("");
+  const [newPrefix, setNewPrefix] = useState<"P" | "W">("P");
+  const [activeView, setActiveView] = useState<"tasks" | "stats" | "data">("tasks");
+  const [importMessage, setImportMessage] = useState("");
+  const [authEmail, setAuthEmail] = useState("");
+  const [cloudUser, setCloudUser] = useState<User | null>(null);
+  const [cloudSyncEnabled, setCloudSyncEnabled] = useState(false);
+  const [cloudTaskCount, setCloudTaskCount] = useState<number | null>(null);
+  const [cloudStatus, setCloudStatus] = useState(
+    isSupabaseConfigured ? "בודק חיבור ל-Supabase..." : "Supabase עדיין לא מוגדר. עובדים במצב מקומי."
+  );
+
+  useEffect(() => {
+    if (!supabase) return;
+
+    supabase.auth.getSession().then(({ data }) => {
+      const user = data.session?.user ?? null;
+      setCloudUser(user);
+      setCloudStatus(user ? "טוען משימות מהענן..." : "לא מחובר. הנתונים נשמרים מקומית בדפדפן.");
+    });
+
+    const { data: subscription } = supabase.auth.onAuthStateChange((_event, session) => {
+      const user = session?.user ?? null;
+      setCloudUser(user);
+      setCloudSyncEnabled(false);
+      setCloudTaskCount(null);
+      setCloudStatus(user ? "טוען משימות מהענן..." : "לא מחובר. הנתונים נשמרים מקומית בדפדפן.");
+    });
+
+    return () => subscription.subscription.unsubscribe();
+  }, []);
+
+  useEffect(() => {
+    if (!cloudUser) {
+      return;
+    }
+
+    let cancelled = false;
+    fetchCloudTasks()
+      .then((cloudTasks) => {
+        if (cancelled) return;
+        if (cloudTasks.length > 0) {
+          setTasks(mergeUniqueTasks(cloudTasks));
+          setCloudTaskCount(cloudTasks.length);
+          setCloudSyncEnabled(true);
+          setCloudStatus(`מחובר לענן. נטענו ${cloudTasks.length} משימות.`);
+        } else {
+          setCloudTaskCount(0);
+          setCloudSyncEnabled(false);
+          setCloudStatus("מחובר לענן, אבל עדיין אין משימות בענן. אפשר להעלות את הנתונים המקומיים.");
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setCloudStatus(`לא הצלחתי לטעון את המשימות מהענן: ${errorMessage(error)}`);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [cloudUser, setTasks]);
+
+  useEffect(() => {
+    if (!cloudUser || !cloudSyncEnabled) return;
+
+    saveCloudTasks(tasks, cloudUser)
+      .then(() => {
+        setCloudTaskCount(tasks.length);
+        setCloudStatus("המשימות מסונכרנות לענן.");
+      })
+      .catch((error: unknown) => setCloudStatus(`השמירה לענן נכשלה: ${errorMessage(error)}`));
+  }, [cloudSyncEnabled, cloudUser, tasks]);
+
+  const filteredTasks = useMemo(() => {
+    const normalized = canonicalTaskId(query);
+    return tasks
+      .filter((task) => prefixFilter === "all" || task.prefix === prefixFilter)
+      .filter((task) => {
+        if (statusFilter === "all") return true;
+        if (statusFilter === "active") return !["done", "cancelled"].includes(task.status);
+        return task.status === statusFilter;
+      })
+      .filter((task) => {
+        if (!query.trim()) return true;
+        if (normalized) return task.id === normalized;
+        return `${task.id} ${task.title} ${task.category} ${task.notes ?? ""}`.toLowerCase().includes(query.trim().toLowerCase());
+      })
+      .sort((a, b) => a.prefix.localeCompare(b.prefix) || a.number - b.number);
+  }, [tasks, query, statusFilter, prefixFilter]);
+
+  const counts = useMemo(() => ({
+    active: tasks.filter((t) => !["done", "cancelled"].includes(t.status)).length,
+    waiting: tasks.filter((t) => t.status === "waiting").length,
+    done: tasks.filter((t) => t.status === "done").length,
+  }), [tasks]);
+
+  const statistics = useMemo(() => {
+    const today = todayIso();
+    const weekStart = new Date();
+    weekStart.setDate(weekStart.getDate() - 6);
+    weekStart.setMinutes(weekStart.getMinutes() - weekStart.getTimezoneOffset());
+    const weekStartIso = weekStart.toISOString().slice(0, 10);
+    const monthStartIso = `${today.slice(0, 7)}-01`;
+    const active = tasks.filter((task) => !["done", "cancelled"].includes(task.status));
+    const done = tasks.filter((task) => task.status === "done");
+    const completedWithDate = done.filter((task) => task.completedAt);
+
+    const categories = Array.from(new Set(tasks.map((task) => task.category))).map((category) => ({
+      label: category,
+      value: tasks.filter((task) => task.category === category).length,
+    })).sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
+
+    return {
+      total: tasks.length,
+      active: active.length,
+      done: done.length,
+      overdue: active.filter((task) => Boolean(task.dueDate && task.dueDate < today)).length,
+      withoutDueDate: active.filter((task) => !task.dueDate).length,
+      completedThisWeek: completedWithDate.filter((task) => task.completedAt && task.completedAt >= weekStartIso).length,
+      completedThisMonth: completedWithDate.filter((task) => task.completedAt && task.completedAt >= monthStartIso).length,
+      completedWithoutDate: done.length - completedWithDate.length,
+      byStatus: Object.entries(statusLabels).map(([status, label]) => ({
+        label,
+        value: tasks.filter((task) => task.status === status).length,
+      })),
+      byPrefix: [
+        { label: "אישי", value: tasks.filter((task) => task.prefix === "P").length },
+        { label: "עבודה", value: tasks.filter((task) => task.prefix === "W").length },
+      ],
+      byPriority: Object.entries(priorityLabels).map(([priority, label]) => ({
+        label,
+        value: tasks.filter((task) => task.priority === priority).length,
+      })),
+      byCategory: categories,
+    };
+  }, [tasks]);
+
+  function maxValue(rows: StatRow[]) {
+    return Math.max(1, ...rows.map((row) => row.value));
+  }
+
+  function updateStatus(id: string, status: TaskStatus) {
+    setTasks((current) => current.map((task) => {
+      if (task.id !== id) return task;
+      return {
+        ...task,
+        status,
+        completedAt: status === "done" ? task.completedAt ?? todayIso() : undefined,
+      };
+    }));
+  }
+
+  function updateTask(id: string, updates: Partial<Pick<Task, "title" | "category" | "priority" | "dueDate" | "notes">>) {
+    setTasks((current) => current.map((task) => task.id === id ? { ...task, ...updates } : task));
+  }
+
+  function isOverdue(task: Task) {
+    return Boolean(task.dueDate && !["done", "cancelled"].includes(task.status) && task.dueDate < todayIso());
+  }
+
+  function addTask(event: FormEvent) {
+    event.preventDefault();
+    const title = newTitle.trim();
+    if (!title) return;
+    setTasks((current) => {
+      const nextNumber = Math.max(0, ...current.filter((task) => task.prefix === newPrefix).map((task) => task.number)) + 1;
+      return [...current, {
+        id: `${newPrefix}${nextNumber}`,
+        prefix: newPrefix,
+        number: nextNumber,
+        title,
+        category: newPrefix === "W" ? "עבודה" : "אישי",
+        priority: "normal",
+        status: "open",
+        createdAt: todayIso(),
+      }];
+    });
+    setNewTitle("");
+  }
+
+  function resetData() {
+    if (window.confirm("לאפס את כל השינויים ולחזור לרשימת הבסיס?")) setTasks(initialTasks);
+  }
+
+  function exportData() {
+    const payload = {
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      tasks,
+    };
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `asaf-task-tracker-${todayIso()}.json`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    setImportMessage("קובץ הגיבוי נוצר והורד למחשב.");
+  }
+
+  async function importData(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    try {
+      const parsed = JSON.parse(await file.text()) as unknown;
+      const imported = getImportTasks(parsed).map(normalizeImportedTask);
+      const validTasks = imported.filter((task): task is Task => Boolean(task));
+      const summary: ImportSummary = { added: 0, updated: 0, skipped: imported.length - validTasks.length };
+
+      setTasks((current) => {
+        const merged = new Map(current.map((task) => [task.id, task]));
+        for (const task of validTasks) {
+          if (merged.has(task.id)) summary.updated += 1;
+          else summary.added += 1;
+          merged.set(task.id, task);
+        }
+        return mergeUniqueTasks(Array.from(merged.values()));
+      });
+
+      setImportMessage(`הייבוא הושלם: ${summary.added} נוספו, ${summary.updated} עודכנו, ${summary.skipped} דולגו.`);
+    } catch {
+      setImportMessage("לא הצלחתי לקרוא את הקובץ. יש לבחור קובץ JSON תקין של האפליקציה.");
+    }
+  }
+
+  async function signIn(event: FormEvent) {
+    event.preventDefault();
+    if (!supabase) {
+      setCloudStatus("Supabase עדיין לא מוגדר. יש למלא את .env.local.");
+      return;
+    }
+
+    const email = authEmail.trim();
+    if (!email) return;
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: {
+        emailRedirectTo: window.location.origin,
+      },
+    });
+
+    setCloudStatus(error ? `שליחת קישור ההתחברות נכשלה: ${error.message}` : "נשלח קישור התחברות למייל.");
+  }
+
+  async function signOut() {
+    if (!supabase) return;
+    await supabase.auth.signOut();
+    setCloudUser(null);
+    setCloudSyncEnabled(false);
+    setCloudStatus("התנתקת. הנתונים נשמרים מקומית בדפדפן.");
+  }
+
+  async function uploadLocalToCloud() {
+    if (!cloudUser) {
+      setCloudStatus("צריך להתחבר לפני העלאה לענן.");
+      return;
+    }
+
+    try {
+      await saveCloudTasks(tasks, cloudUser);
+      setCloudSyncEnabled(true);
+      setCloudTaskCount(tasks.length);
+      setCloudStatus(`הועלו ${tasks.length} משימות לענן והסנכרון הופעל.`);
+    } catch (error) {
+      setCloudStatus(`העלאה לענן נכשלה: ${errorMessage(error)}. הנתונים המקומיים לא נמחקו.`);
+    }
+  }
+
+  async function refreshCloudCount() {
+    if (!cloudUser) {
+      setCloudStatus("צריך להתחבר לפני בדיקת המונה בענן.");
+      return;
+    }
+
+    try {
+      const count = await countCloudTasks();
+      setCloudTaskCount(count);
+      setCloudStatus(`מונה הענן עודכן: ${count} משימות.`);
+    } catch (error) {
+      setCloudStatus(`לא הצלחתי לעדכן את מונה הענן: ${errorMessage(error)}`);
+    }
+  }
+
+  return (
+    <main>
+      <header className="hero">
+        <div>
+          <p className="eyebrow">מעקב משימות אישי</p>
+          <h1>המשימות שלי</h1>
+          <p className="subtitle">ניהול פשוט, עקבי ונגיש מכל מכשיר</p>
+        </div>
+        <button className="secondary" onClick={() => setActiveView("data")}>גיבוי ושחזור</button>
+      </header>
+
+      <section className="stats" aria-label="סיכום משימות">
+        <button onClick={() => { setStatusFilter("active"); setActiveView("tasks"); }}><strong>{counts.active}</strong><span>פעילות</span></button>
+        <button onClick={() => { setStatusFilter("waiting"); setActiveView("tasks"); }}><strong>{counts.waiting}</strong><span>ממתינות</span></button>
+        <button onClick={() => { setStatusFilter("done"); setActiveView("tasks"); }}><strong>{counts.done}</strong><span>הושלמו</span></button>
+      </section>
+
+      <nav className="view-tabs" aria-label="מעבר בין תצוגות">
+        <button className={activeView === "tasks" ? "active" : ""} onClick={() => setActiveView("tasks")}>משימות</button>
+        <button className={activeView === "stats" ? "active" : ""} onClick={() => setActiveView("stats")}>סטטיסטיקות</button>
+        <button className={activeView === "data" ? "active" : ""} onClick={() => setActiveView("data")}>גיבוי ושחזור</button>
+      </nav>
+
+      {activeView === "tasks" ? (
+        <>
+          <section className="panel controls">
+            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="חיפוש משימה או מזהה, למשל P19" aria-label="חיפוש" />
+            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)} aria-label="סינון סטטוס">
+              <option value="active">משימות פעילות</option>
+              <option value="open">פתוחות</option>
+              <option value="in_progress">בטיפול</option>
+              <option value="waiting">ממתינות</option>
+              <option value="done">בוצעו</option>
+              <option value="cancelled">בוטלו</option>
+              <option value="all">הכול</option>
+            </select>
+            <select value={prefixFilter} onChange={(e) => setPrefixFilter(e.target.value as typeof prefixFilter)} aria-label="סינון סוג">
+              <option value="all">אישי ועבודה</option>
+              <option value="P">אישי בלבד</option>
+              <option value="W">עבודה בלבד</option>
+            </select>
+          </section>
+
+          <form className="panel add-form" onSubmit={addTask}>
+            <select value={newPrefix} onChange={(e) => setNewPrefix(e.target.value as "P" | "W")} aria-label="סוג משימה">
+              <option value="P">אישי</option>
+              <option value="W">עבודה</option>
+            </select>
+            <input value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder="משימה חדשה…" aria-label="שם משימה חדשה" />
+            <button type="submit">הוספה</button>
+          </form>
+
+          <section className="task-list" aria-live="polite">
+            {filteredTasks.length === 0 && <div className="empty">לא נמצאו משימות מתאימות.</div>}
+            {filteredTasks.map((task) => (
+              <article className={`task-card status-${task.status}${isOverdue(task) ? " is-overdue" : ""}`} key={task.id}>
+                <button className="check" aria-label={`סימון ${task.title} כבוצעה`} onClick={() => updateStatus(task.id, task.status === "done" ? "open" : "done")}>
+                  {task.status === "done" ? "✓" : ""}
+                </button>
+                <div className="task-main">
+                  <div className="task-heading">
+                    <span className="task-id">{task.id}</span>
+                    <h2>{task.title}</h2>
+                  </div>
+                  <div className="meta">
+                    <span>{task.category}</span>
+                    <span>עדיפות {priorityLabels[task.priority]}</span>
+                    {task.dueDate && <span>יעד {formatDate(task.dueDate)}</span>}
+                    {task.completedAt && <span>נסגרה {formatDate(task.completedAt)}</span>}
+                  </div>
+                  {task.notes && <p className="task-notes">{task.notes}</p>}
+                </div>
+                <select value={task.status} onChange={(e) => updateStatus(task.id, e.target.value as TaskStatus)} aria-label={`סטטוס ${task.title}`}>
+                  {Object.entries(statusLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
+                </select>
+                <details className="task-details">
+                  <summary>פרטים ועריכה</summary>
+                  <div className="edit-grid">
+                    <label>
+                      <span>שם משימה</span>
+                      <input value={task.title} onChange={(e) => updateTask(task.id, { title: e.target.value })} />
+                    </label>
+                    <label>
+                      <span>קטגוריה</span>
+                      <input value={task.category} onChange={(e) => updateTask(task.id, { category: e.target.value })} />
+                    </label>
+                    <label>
+                      <span>עדיפות</span>
+                      <select value={task.priority} onChange={(e) => updateTask(task.id, { priority: e.target.value as TaskPriority })}>
+                        {Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
+                      </select>
+                    </label>
+                    <label>
+                      <span>תאריך יעד</span>
+                      <input type="date" value={task.dueDate ?? ""} onChange={(e) => updateTask(task.id, { dueDate: e.target.value || undefined })} />
+                    </label>
+                    <label className="notes-field">
+                      <span>הערות</span>
+                      <textarea value={task.notes ?? ""} onChange={(e) => updateTask(task.id, { notes: e.target.value || undefined })} rows={3} />
+                    </label>
+                  </div>
+                </details>
+              </article>
+            ))}
+          </section>
+        </>
+      ) : activeView === "stats" ? (
+        <section className="stats-view" aria-label="סטטיסטיקות משימות">
+          <div className="metric-grid">
+            <div className="metric"><span>כל המשימות</span><strong>{statistics.total}</strong></div>
+            <div className="metric"><span>פעילות</span><strong>{statistics.active}</strong></div>
+            <div className="metric"><span>באיחור</span><strong>{statistics.overdue}</strong></div>
+            <div className="metric"><span>נסגרו החודש</span><strong>{statistics.completedThisMonth}</strong></div>
+          </div>
+
+          <section className="panel insight-panel">
+            <h2>קצב סגירה</h2>
+            <div className="timeline-stats">
+              <div><strong>{statistics.completedThisWeek}</strong><span>נסגרו ב־7 הימים האחרונים</span></div>
+              <div><strong>{statistics.completedThisMonth}</strong><span>נסגרו מתחילת החודש</span></div>
+              <div><strong>{statistics.completedWithoutDate}</strong><span>הושלמו לפני מעקב תאריכים</span></div>
+            </div>
+          </section>
+
+          <div className="chart-grid">
+            <section className="panel chart-panel">
+              <h2>לפי סטטוס</h2>
+              {statistics.byStatus.map((row) => (
+                <div className="bar-row" key={row.label}>
+                  <span>{row.label}</span>
+                  <div className="bar-track"><div style={{ width: `${(row.value / maxValue(statistics.byStatus)) * 100}%` }} /></div>
+                  <strong>{row.value}</strong>
+                </div>
+              ))}
+            </section>
+
+            <section className="panel chart-panel">
+              <h2>אישי מול עבודה</h2>
+              {statistics.byPrefix.map((row) => (
+                <div className="bar-row" key={row.label}>
+                  <span>{row.label}</span>
+                  <div className="bar-track"><div style={{ width: `${(row.value / maxValue(statistics.byPrefix)) * 100}%` }} /></div>
+                  <strong>{row.value}</strong>
+                </div>
+              ))}
+            </section>
+
+            <section className="panel chart-panel">
+              <h2>לפי עדיפות</h2>
+              {statistics.byPriority.map((row) => (
+                <div className="bar-row" key={row.label}>
+                  <span>{row.label}</span>
+                  <div className="bar-track"><div style={{ width: `${(row.value / maxValue(statistics.byPriority)) * 100}%` }} /></div>
+                  <strong>{row.value}</strong>
+                </div>
+              ))}
+            </section>
+
+            <section className="panel chart-panel">
+              <h2>קטגוריות מובילות</h2>
+              {statistics.byCategory.slice(0, 8).map((row) => (
+                <div className="bar-row" key={row.label}>
+                  <span>{row.label}</span>
+                  <div className="bar-track"><div style={{ width: `${(row.value / maxValue(statistics.byCategory)) * 100}%` }} /></div>
+                  <strong>{row.value}</strong>
+                </div>
+              ))}
+            </section>
+          </div>
+
+          <section className="panel data-note">
+            <strong>{statistics.withoutDueDate}</strong>
+            <span>משימות פעילות עדיין בלי תאריך יעד. ככל שנוסיף תאריכי יעד וסגירה, הסטטיסטיקות יהפכו מדויקות יותר.</span>
+          </section>
+        </section>
+      ) : (
+        <section className="data-view" aria-label="גיבוי ושחזור נתונים">
+          <section className="panel cloud-panel">
+            <div>
+              <h2>חיבור Supabase</h2>
+              <p>{cloudStatus}</p>
+              {cloudUser && <p className="cloud-user">מחובר: {cloudUser.email}</p>}
+              {cloudUser && (
+                <div className="sync-counters" aria-label="מונה סנכרון">
+                  <span>מקומי: <strong>{tasks.length}</strong></span>
+                  <span>ענן: <strong>{cloudTaskCount ?? "לא נבדק"}</strong></span>
+                </div>
+              )}
+            </div>
+            {isSupabaseConfigured ? (
+              cloudUser ? (
+                <div className="cloud-actions">
+                  {!cloudSyncEnabled && <button onClick={uploadLocalToCloud}>העלאת הנתונים המקומיים לענן</button>}
+                  <button onClick={refreshCloudCount}>רענון מונה</button>
+                  <button className="secondary-action" onClick={signOut}>התנתקות</button>
+                </div>
+              ) : (
+                <form className="cloud-login" onSubmit={signIn}>
+                  <input type="email" value={authEmail} onChange={(event) => setAuthEmail(event.target.value)} placeholder="כתובת מייל להתחברות" aria-label="כתובת מייל להתחברות" />
+                  <button type="submit">שליחת קישור</button>
+                </form>
+              )
+            ) : (
+              <code>NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY</code>
+            )}
+          </section>
+
+          <section className="panel data-panel">
+            <div>
+              <h2>גיבוי מקומי</h2>
+              <p>ייצוא כל המשימות לקובץ JSON כולל סטטוסים, תאריכי יעד, הערות ותאריכי סגירה.</p>
+            </div>
+            <button onClick={exportData}>ייצוא קובץ גיבוי</button>
+          </section>
+
+          <section className="panel data-panel">
+            <div>
+              <h2>שחזור במיזוג</h2>
+              <p>ייבוא מקובץ JSON יעדכן משימות לפי מזהה ויוסיף משימות חסרות. הוא לא מוחק משימות שלא קיימות בקובץ.</p>
+            </div>
+            <label className="file-button">
+              בחירת קובץ JSON
+              <input type="file" accept="application/json,.json" onChange={importData} />
+            </label>
+          </section>
+
+          {importMessage && <p className="import-message">{importMessage}</p>}
+
+          <section className="panel danger-panel">
+            <div>
+              <h2>איפוס לרשימת הבסיס</h2>
+              <p>פעולה זו מחזירה את רשימת המשימות ההתחלתית של הפרויקט. כדאי לייצא גיבוי לפני שימוש בה.</p>
+            </div>
+            <button onClick={resetData}>איפוס נתוני ניסיון</button>
+          </section>
+        </section>
+      )}
+    </main>
+  );
+}
