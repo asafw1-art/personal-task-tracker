@@ -5,6 +5,7 @@ import type { ChangeEvent, Dispatch, FormEvent, SetStateAction } from "react";
 import type { User } from "@supabase/supabase-js";
 import { canonicalTaskId, initialTasks, Task, TaskPrefix, TaskPriority, TaskStatus } from "@/lib/tasks";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
+import { fetchUserDevices, registerCurrentDevice, type UserDevice } from "@/lib/supabaseDevices";
 import { countCloudTasks, fetchCloudTasks, saveCloudTasks } from "@/lib/supabaseTasks";
 
 const STORAGE_KEY = "asaf-task-tracker-v1";
@@ -44,6 +45,20 @@ const todayIso = () => {
 function formatDate(value?: string) {
   if (!value) return "";
   return new Intl.DateTimeFormat("he-IL").format(new Date(`${value}T00:00:00`));
+}
+
+function formatDateTime(value: string) {
+  return new Intl.DateTimeFormat("he-IL", {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+
+function deviceTypeLabel(value: UserDevice["deviceType"]) {
+  if (value === "mobile") return "נייד";
+  if (value === "tablet") return "טאבלט";
+  if (value === "desktop") return "מחשב";
+  return "מכשיר";
 }
 
 function appOrigin() {
@@ -187,6 +202,8 @@ export default function Home() {
   const [cloudUser, setCloudUser] = useState<User | null>(null);
   const [cloudSyncEnabled, setCloudSyncEnabled] = useState(false);
   const [cloudTaskCount, setCloudTaskCount] = useState<number | null>(null);
+  const [cloudDevices, setCloudDevices] = useState<UserDevice[]>([]);
+  const [devicesStatus, setDevicesStatus] = useState("");
   const [cloudStatus, setCloudStatus] = useState(
     isSupabaseConfigured ? "בודק חיבור ל-Supabase..." : "Supabase עדיין לא מוגדר. עובדים במצב מקומי."
   );
@@ -205,6 +222,8 @@ export default function Home() {
       setCloudUser(user);
       setCloudSyncEnabled(false);
       setCloudTaskCount(null);
+      setCloudDevices([]);
+      setDevicesStatus("");
       setCloudStatus(user ? "טוען משימות מהענן..." : "לא מחובר. הנתונים נשמרים מקומית בדפדפן.");
     });
 
@@ -239,6 +258,32 @@ export default function Home() {
       cancelled = true;
     };
   }, [cloudUser, setTasks]);
+
+  useEffect(() => {
+    if (!cloudUser) return;
+
+    let cancelled = false;
+
+    async function refreshDevices() {
+      if (!cloudUser) return;
+      try {
+        const currentDeviceId = await registerCurrentDevice(cloudUser);
+        const devices = await fetchUserDevices(currentDeviceId);
+        if (cancelled) return;
+        setCloudDevices(devices);
+        setDevicesStatus(`זוהו ${devices.length} מכשירים מחוברים לחשבון.`);
+      } catch (error) {
+        if (!cancelled) setDevicesStatus(`לא הצלחתי לעדכן את רשימת המכשירים: ${errorMessage(error)}`);
+      }
+    }
+
+    refreshDevices();
+    const intervalId = window.setInterval(refreshDevices, 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [cloudUser]);
 
   useEffect(() => {
     if (!cloudUser || !cloudSyncEnabled) return;
@@ -431,6 +476,8 @@ export default function Home() {
     await supabase.auth.signOut();
     setCloudUser(null);
     setCloudSyncEnabled(false);
+    setCloudDevices([]);
+    setDevicesStatus("");
     setCloudStatus("התנתקת. הנתונים נשמרים מקומית בדפדפן.");
   }
 
@@ -462,6 +509,22 @@ export default function Home() {
       setCloudStatus(`מונה הענן עודכן: ${count} משימות.`);
     } catch (error) {
       setCloudStatus(`לא הצלחתי לעדכן את מונה הענן: ${errorMessage(error)}`);
+    }
+  }
+
+  async function refreshCloudDevices() {
+    if (!cloudUser) {
+      setDevicesStatus("צריך להתחבר לפני בדיקת מכשירים מחוברים.");
+      return;
+    }
+
+    try {
+      const currentDeviceId = await registerCurrentDevice(cloudUser);
+      const devices = await fetchUserDevices(currentDeviceId);
+      setCloudDevices(devices);
+      setDevicesStatus(`רשימת המכשירים עודכנה: ${devices.length} מכשירים.`);
+    } catch (error) {
+      setDevicesStatus(`לא הצלחתי לעדכן את רשימת המכשירים: ${errorMessage(error)}`);
     }
   }
 
@@ -671,6 +734,34 @@ export default function Home() {
               <code>NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY</code>
             )}
           </section>
+
+          {cloudUser && (
+            <section className="panel devices-panel">
+              <div className="devices-header">
+                <div>
+                  <h2>מכשירים מחוברים</h2>
+                  <p>{devicesStatus || "בודק מכשירים שמחוברים לחשבון הזה."}</p>
+                </div>
+                <button onClick={refreshCloudDevices}>רענון מכשירים</button>
+              </div>
+              <div className="devices-list" aria-label="מכשירים מחוברים">
+                {cloudDevices.length === 0 ? (
+                  <p className="devices-empty">עדיין אין נתוני מכשירים להצגה.</p>
+                ) : cloudDevices.map((device) => (
+                  <article className="device-card" key={device.deviceId}>
+                    <div>
+                      <h3>{device.deviceName}</h3>
+                      <p>{deviceTypeLabel(device.deviceType)} · {device.browserName}</p>
+                    </div>
+                    <div className="device-meta">
+                      {device.isCurrent && <span className="current-device">המכשיר הזה</span>}
+                      <span>נראה לאחרונה: {formatDateTime(device.lastSeenAt)}</span>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            </section>
+          )}
 
           <section className="panel data-panel">
             <div>

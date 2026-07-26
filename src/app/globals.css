@@ -87,6 +87,17 @@ textarea { resize: vertical; min-height: 86px; }
 .cloud-user { margin-top: 6px !important; }
 .sync-counters { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .sync-counters span { background: #eef4ff; border-radius: 8px; color: var(--accent-dark); padding: 6px 9px; }
+.devices-panel { display: grid; gap: 14px; padding: 16px; }
+.devices-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.devices-header h2 { margin: 0 0 6px; font-size: 1rem; }
+.devices-header p, .devices-empty, .device-card p, .device-meta { color: var(--muted); margin: 0; }
+.devices-header button { border: 0; border-radius: 10px; background: var(--accent); color: #fff; font-weight: 700; padding: 11px 14px; white-space: nowrap; }
+.devices-header button:hover { background: var(--accent-dark); }
+.devices-list { display: grid; gap: 10px; }
+.device-card { border: 1px solid var(--border); border-radius: 12px; display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px; }
+.device-card h3 { margin: 0 0 4px; font-size: 1rem; }
+.device-meta { display: grid; justify-items: end; gap: 6px; font-size: .9rem; text-align: left; }
+.current-device { background: #dcfce7; border-radius: 999px; color: var(--success); font-weight: 700; padding: 4px 8px; }
 .file-button input { display: none; }
 .import-message { background: #eef7f0; border: 1px solid #c8e6d0; border-radius: 12px; color: var(--success); padding: 12px 14px; }
 .danger-panel { border-color: #fecaca; }
@@ -102,6 +113,9 @@ textarea { resize: vertical; min-height: 86px; }
   .metric-grid, .chart-grid, .timeline-stats { grid-template-columns: 1fr; }
   .data-panel, .danger-panel, .cloud-panel { align-items: stretch; flex-direction: column; }
   .data-panel button, .file-button, .danger-panel button, .cloud-actions button, .cloud-login button { text-align: center; width: 100%; }
+  .devices-header, .device-card { align-items: stretch; flex-direction: column; }
+  .devices-header button { width: 100%; }
+  .device-meta { justify-items: start; text-align: right; }
   .cloud-login, .cloud-actions { display: grid; grid-template-columns: 1fr; }
   .bar-row { grid-template-columns: 82px 1fr 28px; }
   .task-card { grid-template-columns: 40px 1fr; }
