@@ -530,8 +530,16 @@ export default function Home() {
     setNewTitle("");
   }
 
-  function resetData() {
-    if (window.confirm("לאפס את כל השינויים ולחזור לרשימת הבסיס?")) setTasks(initialTasks);
+  function resetDataWithConfirmation() {
+    const approved = window.confirm("איפוס יחזיר את רשימת המשימות המקומית לרשימת הבסיס. מומלץ לייצא גיבוי לפני הפעולה. להמשיך?");
+    if (!approved) return;
+    const typed = window.prompt("כדי לאשר איפוס, הקלד בדיוק: איפוס");
+    if (typed !== "איפוס") {
+      setImportMessage("האיפוס בוטל. לא הוקלדה מילת האישור.");
+      return;
+    }
+    setTasks(initialTasks);
+    setImportMessage("האיפוס המקומי בוצע. אם סנכרון הענן פעיל, מומלץ לבדוק את הנתונים לפני המשך עבודה.");
   }
 
   function exportData() {
@@ -682,7 +690,6 @@ export default function Home() {
           <h1>המשימות שלי</h1>
           <p className="subtitle">ניהול פשוט, עקבי ונגיש מכל מכשיר</p>
         </div>
-        <button className="secondary" onClick={() => setActiveView("data")}>גיבוי ושחזור</button>
       </header>
 
       <section className="stats" aria-label="סיכום משימות">
@@ -1045,7 +1052,7 @@ export default function Home() {
               <h2>איפוס לרשימת הבסיס</h2>
               <p>פעולה זו מחזירה את רשימת המשימות ההתחלתית של הפרויקט. כדאי לייצא גיבוי לפני שימוש בה.</p>
             </div>
-            <button onClick={resetData}>איפוס נתוני ניסיון</button>
+            <button onClick={resetDataWithConfirmation}>איפוס נתוני ניסיון</button>
           </section>
         </section>
       )}
