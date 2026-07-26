@@ -350,6 +350,11 @@ export default function Home() {
     const normalized = canonicalTaskId(query);
     const today = todayIso();
     const weekEnd = addDaysIso(6);
+    if (normalized) {
+      return tasks
+        .filter((task) => task.id === normalized)
+        .sort((a, b) => a.prefix.localeCompare(b.prefix) || a.number - b.number);
+    }
     return tasks
       .filter((task) => prefixFilter === "all" || task.prefix === prefixFilter)
       .filter((task) => {
@@ -364,7 +369,6 @@ export default function Home() {
       })
       .filter((task) => {
         if (!query.trim()) return true;
-        if (normalized) return task.id === normalized;
         return `${task.id} ${task.title} ${task.category} ${task.notes ?? ""}`.toLowerCase().includes(query.trim().toLowerCase());
       })
       .sort((a, b) => a.prefix.localeCompare(b.prefix) || a.number - b.number);
@@ -531,6 +535,10 @@ export default function Home() {
   }
 
   function resetDataWithConfirmation() {
+    if (cloudUser) {
+      setImportMessage("האיפוס נחסם כי החשבון מחובר לענן. כדי להגן על הנתונים, התנתק מ-Supabase לפני איפוס לרשימת הבסיס.");
+      return;
+    }
     const approved = window.confirm("איפוס יחזיר את רשימת המשימות המקומית לרשימת הבסיס. מומלץ לייצא גיבוי לפני הפעולה. להמשיך?");
     if (!approved) return;
     const typed = window.prompt("כדי לאשר איפוס, הקלד בדיוק: איפוס");
