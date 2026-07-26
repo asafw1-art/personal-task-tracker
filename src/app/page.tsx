@@ -129,7 +129,11 @@ function getImportTasks(value: unknown): unknown[] {
 }
 
 function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "שגיאה לא ידועה";
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object" && "message" in error && typeof error.message === "string") {
+    return error.message;
+  }
+  return "שגיאה לא ידועה";
 }
 
 function mergeUniqueTasks(tasks: Task[]) {
