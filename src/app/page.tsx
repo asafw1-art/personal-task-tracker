@@ -46,6 +46,14 @@ function formatDate(value?: string) {
   return new Intl.DateTimeFormat("he-IL").format(new Date(`${value}T00:00:00`));
 }
 
+function appOrigin() {
+  if (typeof window === "undefined") return "http://localhost:3000";
+  if (window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1") {
+    return window.location.origin;
+  }
+  return `${window.location.protocol}//${window.location.host}`;
+}
+
 function isTaskPrefix(value: unknown): value is TaskPrefix {
   return value === "P" || value === "W";
 }
@@ -411,7 +419,7 @@ export default function Home() {
     const { error } = await supabase.auth.signInWithOtp({
       email,
       options: {
-        emailRedirectTo: window.location.origin,
+        emailRedirectTo: appOrigin(),
       },
     });
 
