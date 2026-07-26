@@ -63,6 +63,39 @@ textarea { resize: vertical; min-height: 86px; }
 .metric { padding: 16px; }
 .metric span { color: var(--muted); display: block; font-size: .9rem; }
 .metric strong { display: block; font-size: 2rem; margin-top: 6px; }
+.metric small { color: var(--muted); display: block; margin-top: 4px; }
+.metric-danger strong { color: #dc2626; }
+.metric-good strong { color: var(--success); }
+.metric-warn strong { color: var(--waiting); }
+.analytics-upgraded > .metric-grid:not(.analytics-metrics),
+.analytics-upgraded > .insight-panel,
+.analytics-upgraded > .chart-grid,
+.analytics-upgraded > .data-note { display: none; }
+.analytics-header { align-items: center; display: flex; justify-content: space-between; gap: 16px; }
+.analytics-header h2 { margin: 0 0 6px; font-size: 1.15rem; }
+.analytics-header p, .panel-heading span, .muted-line { color: var(--muted); margin: 0; }
+.range-tabs { display: flex; gap: 4px; background: #e9eef7; border: 1px solid var(--border); border-radius: 12px; padding: 4px; }
+.range-tabs button { border: 0; border-radius: 9px; background: transparent; color: var(--muted); font-weight: 700; padding: 9px 13px; }
+.range-tabs button.active { background: var(--surface); color: var(--accent-dark); box-shadow: 0 4px 12px rgba(23, 32, 51, 0.08); }
+.analytics-metrics { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.analytics-layout { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(300px, .65fr); gap: 14px; }
+.analytics-main { display: grid; gap: 14px; }
+.panel-heading { align-items: baseline; display: flex; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.panel-heading h2 { margin: 0; font-size: 1rem; }
+.week-chart { align-items: end; display: grid; gap: 10px; grid-template-columns: repeat(7, 1fr); min-height: 190px; }
+.day-column { align-items: center; display: grid; gap: 7px; justify-items: center; }
+.vertical-track { align-items: end; background: #e8eef8; border-radius: 999px; display: flex; height: 130px; justify-content: center; overflow: hidden; width: 18px; }
+.vertical-track div { background: linear-gradient(180deg, var(--accent), var(--success)); border-radius: inherit; min-height: 4px; width: 100%; }
+.day-column span { color: var(--muted); font-size: .82rem; }
+.attention-panel { align-self: start; }
+.attention-list { display: grid; gap: 10px; }
+.attention-task { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; color: var(--text); display: grid; gap: 7px; padding: 12px; text-align: right; width: 100%; }
+.attention-task:hover { border-color: #bfdbfe; box-shadow: 0 8px 20px rgba(37, 99, 235, 0.12); }
+.attention-task.overdue { border-right: 5px solid #dc2626; }
+.attention-task strong { line-height: 1.35; }
+.attention-task > span:last-child { color: var(--muted); font-size: .9rem; line-height: 1.4; }
+.attention-top { align-items: center; display: flex; justify-content: space-between; gap: 8px; }
+.attention-tag { background: #eef4ff; border-radius: 999px; color: var(--accent-dark); font-size: .82rem; font-weight: 700; padding: 4px 8px; }
 .chart-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .chart-panel, .insight-panel, .data-note { padding: 16px; }
 .chart-panel h2, .insight-panel h2 { margin: 0 0 14px; font-size: 1rem; }
@@ -118,7 +151,12 @@ textarea { resize: vertical; min-height: 86px; }
   .controls, .add-form { grid-template-columns: 1fr; }
   .stats { gap: 8px; }
   .stats button { padding: 12px; }
-  .metric-grid, .chart-grid, .timeline-stats { grid-template-columns: 1fr; }
+  .metric-grid, .chart-grid, .timeline-stats, .analytics-layout { grid-template-columns: 1fr; }
+  .analytics-header { align-items: stretch; flex-direction: column; }
+  .range-tabs { display: grid; grid-template-columns: repeat(3, 1fr); }
+  .analytics-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .week-chart { gap: 6px; }
+  .vertical-track { width: 14px; }
   .data-panel, .danger-panel, .cloud-panel { align-items: stretch; flex-direction: column; }
   .sync-panel { align-items: stretch; flex-direction: column; }
   .data-panel button, .file-button, .danger-panel button, .cloud-actions button, .cloud-login button, .sync-panel button { text-align: center; width: 100%; }

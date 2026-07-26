@@ -37,6 +37,7 @@ type ImportSummary = {
 };
 
 type TaskFilter = TaskStatus | "active" | "all" | "overdue" | "today" | "week" | "no_due" | "high";
+type AnalyticsRange = "week" | "month" | "all";
 
 const todayIso = () => {
   const now = new Date();
@@ -210,6 +211,7 @@ export default function Home() {
   const [newTitle, setNewTitle] = useState("");
   const [newPrefix, setNewPrefix] = useState<"P" | "W">("P");
   const [activeView, setActiveView] = useState<"tasks" | "stats" | "data">("tasks");
+  const [analyticsRange, setAnalyticsRange] = useState<AnalyticsRange>("week");
   const [importMessage, setImportMessage] = useState("");
   const [authEmail, setAuthEmail] = useState("");
   const [cloudUser, setCloudUser] = useState<User | null>(null);
@@ -415,8 +417,78 @@ export default function Home() {
     };
   }, [tasks]);
 
+  const analytics = useMemo(() => {
+    const today = todayIso();
+    const weekStartIso = addDaysIso(-6);
+    const monthStartIso = `${today.slice(0, 7)}-01`;
+    const rangeStartIso = analyticsRange === "week" ? weekStartIso : analyticsRange === "month" ? monthStartIso : "";
+    const active = tasks.filter((task) => !["done", "cancelled"].includes(task.status));
+    const done = tasks.filter((task) => task.status === "done");
+    const completedWithDate = done.filter((task) => task.completedAt);
+    const completedInRange = completedWithDate.filter((task) => !rangeStartIso || (task.completedAt && task.completedAt >= rangeStartIso));
+    const overdue = active.filter((task) => Boolean(task.dueDate && task.dueDate < today));
+    const waiting = active.filter((task) => task.status === "waiting");
+    const withoutDueDate = active.filter((task) => !task.dueDate);
+    const highPriority = active.filter((task) => task.priority === "high");
+    const attentionMap = new Map<string, Task>();
+    const addAttention = (source: Task[]) => source.forEach((task) => {
+      if (!attentionMap.has(task.id)) attentionMap.set(task.id, task);
+    });
+
+    addAttention([...overdue].sort((a, b) => (a.dueDate ?? "").localeCompare(b.dueDate ?? "") || a.number - b.number));
+    addAttention([...highPriority].sort((a, b) => a.number - b.number));
+    addAttention([...waiting].sort((a, b) => a.number - b.number));
+    addAttention([...withoutDueDate].sort((a, b) => a.number - b.number));
+
+    const activeCategories = Array.from(new Set(active.map((task) => task.category))).map((category) => ({
+      label: category,
+      value: active.filter((task) => task.category === category).length,
+    })).sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
+
+    return {
+      completedInRange: completedInRange.length,
+      completionTrend: Array.from({ length: 7 }, (_, index) => {
+        const date = addDaysIso(index - 6);
+        return {
+          date,
+          label: new Intl.DateTimeFormat("he-IL", { weekday: "short" }).format(new Date(`${date}T00:00:00`)),
+          value: completedWithDate.filter((task) => task.completedAt === date).length,
+        };
+      }),
+      highPriority: highPriority.length,
+      waiting: waiting.length,
+      byCategory: activeCategories,
+      attention: Array.from(attentionMap.values()).slice(0, 8),
+    };
+  }, [analyticsRange, tasks]);
+
   function maxValue(rows: StatRow[]) {
     return Math.max(1, ...rows.map((row) => row.value));
+  }
+
+  function maxTrendValue() {
+    return Math.max(1, ...analytics.completionTrend.map((row) => row.value));
+  }
+
+  function analyticsRangeLabel() {
+    if (analyticsRange === "week") return "7 ימים";
+    if (analyticsRange === "month") return "חודש";
+    return "הכול";
+  }
+
+  function attentionReason(task: Task) {
+    if (isOverdue(task)) return "באיחור";
+    if (task.priority === "high" && !["done", "cancelled"].includes(task.status)) return "גבוהה";
+    if (task.status === "waiting") return "ממתינה";
+    if (!task.dueDate && !["done", "cancelled"].includes(task.status)) return "בלי יעד";
+    return statusLabels[task.status];
+  }
+
+  function focusTask(taskId: string) {
+    setQuery(taskId);
+    setStatusFilter("all");
+    setPrefixFilter("all");
+    setActiveView("tasks");
   }
 
   function updateStatus(id: string, status: TaskStatus) {
@@ -717,7 +789,98 @@ export default function Home() {
           </section>
         </>
       ) : activeView === "stats" ? (
-        <section className="stats-view" aria-label="סטטיסטיקות משימות">
+        <section className="stats-view analytics-upgraded" aria-label="סטטיסטיקות משימות">
+          <div className="analytics-header">
+            <div>
+              <h2>תמונת מצב</h2>
+              <p>מדדים, קצב סגירה ומשימות שדורשות תשומת לב.</p>
+            </div>
+            <div className="range-tabs" aria-label="טווח סטטיסטיקות">
+              <button className={analyticsRange === "week" ? "active" : ""} onClick={() => setAnalyticsRange("week")}>7 ימים</button>
+              <button className={analyticsRange === "month" ? "active" : ""} onClick={() => setAnalyticsRange("month")}>חודש</button>
+              <button className={analyticsRange === "all" ? "active" : ""} onClick={() => setAnalyticsRange("all")}>הכול</button>
+            </div>
+          </div>
+
+          <div className="metric-grid analytics-metrics">
+            <div className="metric"><span>פעילות</span><strong>{statistics.active}</strong><small>פתוחות, בטיפול או ממתינות</small></div>
+            <div className="metric metric-danger"><span>באיחור</span><strong>{statistics.overdue}</strong><small>דורשות החלטה</small></div>
+            <div className="metric metric-warn"><span>ממתינות</span><strong>{analytics.waiting}</strong><small>תקועות על גורם חיצוני</small></div>
+            <div className="metric"><span>בלי תאריך יעד</span><strong>{statistics.withoutDueDate}</strong><small>כדאי למקד</small></div>
+            <div className="metric metric-good"><span>נסגרו בטווח</span><strong>{analytics.completedInRange}</strong><small>{analyticsRangeLabel()}</small></div>
+            <div className="metric"><span>כל המשימות</span><strong>{statistics.total}</strong><small>{statistics.done} הושלמו</small></div>
+          </div>
+
+          <div className="analytics-layout">
+            <div className="analytics-main">
+              <section className="panel chart-panel">
+                <div className="panel-heading">
+                  <h2>קצב סגירה - 7 ימים אחרונים</h2>
+                  <span>משימות שהושלמו לפי יום</span>
+                </div>
+                <div className="week-chart" aria-label="קצב סגירה שבועי">
+                  {analytics.completionTrend.map((row) => (
+                    <div className="day-column" key={row.date}>
+                      <div className="vertical-track"><div style={{ height: `${(row.value / maxTrendValue()) * 100}%` }} /></div>
+                      <strong>{row.value}</strong>
+                      <span>{row.label}</span>
+                    </div>
+                  ))}
+                </div>
+              </section>
+
+              <section className="panel chart-panel">
+                <div className="panel-heading">
+                  <h2>איפה מצטבר עומס</h2>
+                  <span>קטגוריות פעילות</span>
+                </div>
+                {analytics.byCategory.length === 0 ? (
+                  <p className="muted-line">אין כרגע קטגוריות פעילות.</p>
+                ) : analytics.byCategory.slice(0, 8).map((row) => (
+                  <div className="bar-row" key={row.label}>
+                    <span>{row.label}</span>
+                    <div className="bar-track"><div style={{ width: `${(row.value / maxValue(analytics.byCategory)) * 100}%` }} /></div>
+                    <strong>{row.value}</strong>
+                  </div>
+                ))}
+              </section>
+
+              <section className="panel chart-panel">
+                <div className="panel-heading">
+                  <h2>חלוקה לפי סטטוס</h2>
+                  <span>כל המשימות</span>
+                </div>
+                {statistics.byStatus.map((row) => (
+                  <div className="bar-row" key={row.label}>
+                    <span>{row.label}</span>
+                    <div className="bar-track"><div style={{ width: `${(row.value / maxValue(statistics.byStatus)) * 100}%` }} /></div>
+                    <strong>{row.value}</strong>
+                  </div>
+                ))}
+              </section>
+            </div>
+
+            <aside className="panel attention-panel">
+              <div className="panel-heading">
+                <h2>דורש תשומת לב</h2>
+                <span>לחיצה מעבירה למשימה ברשימה</span>
+              </div>
+              <div className="attention-list">
+                {analytics.attention.length === 0 ? (
+                  <p className="muted-line">אין כרגע משימות שדורשות תשומת לב מיוחדת.</p>
+                ) : analytics.attention.map((task) => (
+                  <button className={`attention-task${isOverdue(task) ? " overdue" : ""}`} key={task.id} onClick={() => focusTask(task.id)}>
+                    <span className="attention-top">
+                      <span className="task-id">{task.id}</span>
+                      <span className="attention-tag">{attentionReason(task)}</span>
+                    </span>
+                    <strong>{task.title}</strong>
+                    <span>{task.category} · עדיפות {priorityLabels[task.priority]}{task.dueDate ? ` · יעד ${formatDate(task.dueDate)}` : ""}</span>
+                  </button>
+                ))}
+              </div>
+            </aside>
+          </div>
           <div className="metric-grid">
             <div className="metric"><span>כל המשימות</span><strong>{statistics.total}</strong></div>
             <div className="metric"><span>פעילות</span><strong>{statistics.active}</strong></div>
