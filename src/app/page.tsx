@@ -36,10 +36,19 @@ type ImportSummary = {
   skipped: number;
 };
 
+type TaskFilter = TaskStatus | "active" | "all" | "overdue" | "today" | "week" | "no_due" | "high";
+
 const todayIso = () => {
   const now = new Date();
   now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
   return now.toISOString().slice(0, 10);
+};
+
+const addDaysIso = (days: number) => {
+  const date = new Date();
+  date.setDate(date.getDate() + days);
+  date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
+  return date.toISOString().slice(0, 10);
 };
 
 function formatDate(value?: string) {
@@ -192,7 +201,7 @@ function usePersistentTasks(): [Task[], Dispatch<SetStateAction<Task[]>>] {
 export default function Home() {
   const [tasks, setTasks] = usePersistentTasks();
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<TaskStatus | "active" | "all">("active");
+  const [statusFilter, setStatusFilter] = useState<TaskFilter>("active");
   const [prefixFilter, setPrefixFilter] = useState<"all" | "P" | "W">("all");
   const [newTitle, setNewTitle] = useState("");
   const [newPrefix, setNewPrefix] = useState<"P" | "W">("P");
@@ -202,11 +211,18 @@ export default function Home() {
   const [cloudUser, setCloudUser] = useState<User | null>(null);
   const [cloudSyncEnabled, setCloudSyncEnabled] = useState(false);
   const [cloudTaskCount, setCloudTaskCount] = useState<number | null>(null);
+  const [lastCloudPullAt, setLastCloudPullAt] = useState<string | null>(null);
   const [cloudDevices, setCloudDevices] = useState<UserDevice[]>([]);
   const [devicesStatus, setDevicesStatus] = useState("");
   const [cloudStatus, setCloudStatus] = useState(
     isSupabaseConfigured ? "בודק חיבור ל-Supabase..." : "Supabase עדיין לא מוגדר. עובדים במצב מקומי."
   );
+
+  const mergeCloudTasksIntoLocal = useCallback((cloudTasks: Task[]) => {
+    const current = getTasksSnapshot();
+    const merged = mergeUniqueTasks([...current, ...cloudTasks]);
+    if (JSON.stringify(merged) !== JSON.stringify(current)) setTasks(merged);
+  }, [setTasks]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -222,6 +238,7 @@ export default function Home() {
       setCloudUser(user);
       setCloudSyncEnabled(false);
       setCloudTaskCount(null);
+      setLastCloudPullAt(null);
       setCloudDevices([]);
       setDevicesStatus("");
       setCloudStatus(user ? "טוען משימות מהענן..." : "לא מחובר. הנתונים נשמרים מקומית בדפדפן.");
@@ -243,10 +260,12 @@ export default function Home() {
           setTasks(mergeUniqueTasks(cloudTasks));
           setCloudTaskCount(cloudTasks.length);
           setCloudSyncEnabled(true);
+          setLastCloudPullAt(new Date().toISOString());
           setCloudStatus(`מחובר לענן. נטענו ${cloudTasks.length} משימות.`);
         } else {
           setCloudTaskCount(0);
           setCloudSyncEnabled(false);
+          setLastCloudPullAt(new Date().toISOString());
           setCloudStatus("מחובר לענן, אבל עדיין אין משימות בענן. אפשר להעלות את הנתונים המקומיים.");
         }
       })
@@ -296,13 +315,45 @@ export default function Home() {
       .catch((error: unknown) => setCloudStatus(`השמירה לענן נכשלה: ${errorMessage(error)}`));
   }, [cloudSyncEnabled, cloudUser, tasks]);
 
+  useEffect(() => {
+    if (!cloudUser || !cloudSyncEnabled) return;
+
+    let cancelled = false;
+
+    async function refreshFromCloud() {
+      if (document.visibilityState === "hidden") return;
+      try {
+        const cloudTasks = await fetchCloudTasks();
+        if (cancelled) return;
+        mergeCloudTasksIntoLocal(cloudTasks);
+        setCloudTaskCount(cloudTasks.length);
+        setLastCloudPullAt(new Date().toISOString());
+      } catch (error) {
+        if (!cancelled) setCloudStatus(`רענון אוטומטי מהענן נכשל: ${errorMessage(error)}`);
+      }
+    }
+
+    const intervalId = window.setInterval(refreshFromCloud, 60_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [cloudSyncEnabled, cloudUser, mergeCloudTasksIntoLocal]);
+
   const filteredTasks = useMemo(() => {
     const normalized = canonicalTaskId(query);
+    const today = todayIso();
+    const weekEnd = addDaysIso(6);
     return tasks
       .filter((task) => prefixFilter === "all" || task.prefix === prefixFilter)
       .filter((task) => {
         if (statusFilter === "all") return true;
         if (statusFilter === "active") return !["done", "cancelled"].includes(task.status);
+        if (statusFilter === "overdue") return Boolean(task.dueDate && task.dueDate < today && !["done", "cancelled"].includes(task.status));
+        if (statusFilter === "today") return task.dueDate === today;
+        if (statusFilter === "week") return Boolean(task.dueDate && task.dueDate >= today && task.dueDate <= weekEnd);
+        if (statusFilter === "no_due") return !task.dueDate && !["done", "cancelled"].includes(task.status);
+        if (statusFilter === "high") return task.priority === "high" && !["done", "cancelled"].includes(task.status);
         return task.status === statusFilter;
       })
       .filter((task) => {
@@ -476,6 +527,7 @@ export default function Home() {
     await supabase.auth.signOut();
     setCloudUser(null);
     setCloudSyncEnabled(false);
+    setLastCloudPullAt(null);
     setCloudDevices([]);
     setDevicesStatus("");
     setCloudStatus("התנתקת. הנתונים נשמרים מקומית בדפדפן.");
@@ -494,6 +546,24 @@ export default function Home() {
       setCloudStatus(`הועלו ${tasks.length} משימות לענן והסנכרון הופעל.`);
     } catch (error) {
       setCloudStatus(`העלאה לענן נכשלה: ${errorMessage(error)}. הנתונים המקומיים לא נמחקו.`);
+    }
+  }
+
+  async function pullCloudToLocal() {
+    if (!cloudUser) {
+      setCloudStatus("צריך להתחבר לפני משיכת נתונים מהענן.");
+      return;
+    }
+
+    try {
+      const cloudTasks = await fetchCloudTasks();
+      mergeCloudTasksIntoLocal(cloudTasks);
+      setCloudSyncEnabled(true);
+      setCloudTaskCount(cloudTasks.length);
+      setLastCloudPullAt(new Date().toISOString());
+      setCloudStatus(`נמשכו ${cloudTasks.length} משימות מהענן ומוזגו עם המכשיר הזה.`);
+    } catch (error) {
+      setCloudStatus(`משיכת הנתונים מהענן נכשלה: ${errorMessage(error)}`);
     }
   }
 
@@ -569,6 +639,14 @@ export default function Home() {
               <option value="P">אישי בלבד</option>
               <option value="W">עבודה בלבד</option>
             </select>
+          </section>
+
+          <section className="quick-filters" aria-label="סינון מהיר">
+            <button className={statusFilter === "today" ? "active" : ""} onClick={() => setStatusFilter("today")}>להיום</button>
+            <button className={statusFilter === "week" ? "active" : ""} onClick={() => setStatusFilter("week")}>השבוע</button>
+            <button className={statusFilter === "overdue" ? "active" : ""} onClick={() => setStatusFilter("overdue")}>באיחור</button>
+            <button className={statusFilter === "no_due" ? "active" : ""} onClick={() => setStatusFilter("no_due")}>בלי יעד</button>
+            <button className={statusFilter === "high" ? "active" : ""} onClick={() => setStatusFilter("high")}>גבוהה</button>
           </section>
 
           <form className="panel add-form" onSubmit={addTask}>
@@ -734,6 +812,17 @@ export default function Home() {
               <code>NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY</code>
             )}
           </section>
+
+          {cloudUser && (
+            <section className="panel sync-panel">
+              <div>
+                <h2>סנכרון בין מכשירים</h2>
+                <p>האפליקציה מושכת עדכונים מהענן אוטומטית פעם בדקה כשהמסך פתוח.</p>
+                {lastCloudPullAt && <p>משיכה אחרונה: {formatDateTime(lastCloudPullAt)}</p>}
+              </div>
+              <button onClick={pullCloudToLocal}>משיכת נתונים מהענן</button>
+            </section>
+          )}
 
           {cloudUser && (
             <section className="panel devices-panel">

@@ -30,6 +30,9 @@ h1 { margin: 0; font-size: clamp(2rem, 5vw, 3.3rem); }
 .view-tabs button.active { background: var(--surface); color: var(--accent-dark); box-shadow: 0 4px 12px rgba(23, 32, 51, 0.08); }
 .controls, .add-form { display: grid; grid-template-columns: 1fr 190px 170px; gap: 10px; padding: 12px; margin-bottom: 12px; }
 .add-form { grid-template-columns: 150px 1fr 110px; }
+.quick-filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
+.quick-filters button { border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--muted); font-weight: 700; padding: 8px 12px; }
+.quick-filters button.active { background: #eef4ff; border-color: #bfdbfe; color: var(--accent-dark); }
 input, select, textarea { width: 100%; border: 1px solid var(--border); border-radius: 10px; padding: 11px 12px; background: #fff; color: var(--text); }
 textarea { resize: vertical; min-height: 86px; }
 .add-form button { border: 0; border-radius: 10px; background: var(--accent); color: #fff; font-weight: 700; }
@@ -87,6 +90,11 @@ textarea { resize: vertical; min-height: 86px; }
 .cloud-user { margin-top: 6px !important; }
 .sync-counters { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
 .sync-counters span { background: #eef4ff; border-radius: 8px; color: var(--accent-dark); padding: 6px 9px; }
+.sync-panel { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 16px; }
+.sync-panel h2 { margin: 0 0 6px; font-size: 1rem; }
+.sync-panel p { margin: 0; color: var(--muted); line-height: 1.5; }
+.sync-panel button { border: 0; border-radius: 10px; background: var(--accent); color: #fff; font-weight: 700; padding: 11px 14px; white-space: nowrap; }
+.sync-panel button:hover { background: var(--accent-dark); }
 .devices-panel { display: grid; gap: 14px; padding: 16px; }
 .devices-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .devices-header h2 { margin: 0 0 6px; font-size: 1rem; }
@@ -112,7 +120,8 @@ textarea { resize: vertical; min-height: 86px; }
   .stats button { padding: 12px; }
   .metric-grid, .chart-grid, .timeline-stats { grid-template-columns: 1fr; }
   .data-panel, .danger-panel, .cloud-panel { align-items: stretch; flex-direction: column; }
-  .data-panel button, .file-button, .danger-panel button, .cloud-actions button, .cloud-login button { text-align: center; width: 100%; }
+  .sync-panel { align-items: stretch; flex-direction: column; }
+  .data-panel button, .file-button, .danger-panel button, .cloud-actions button, .cloud-login button, .sync-panel button { text-align: center; width: 100%; }
   .devices-header, .device-card { align-items: stretch; flex-direction: column; }
   .devices-header button { width: 100%; }
   .device-meta { justify-items: start; text-align: right; }
