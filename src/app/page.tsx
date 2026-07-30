@@ -51,6 +51,7 @@ type TaskFilter = TaskStatus | "active" | "all" | "overdue" | "today" | "week" |
 type AnalyticsRange = "week" | "month" | "all";
 type MainView = "tasks" | "stats" | "kanban";
 type TaxonomyMode = "topics" | "actions";
+type SettingsTab = "taxonomy" | "sync";
 
 type TaskTaxonomy = {
   topics: Record<TaskPrefix, string[]>;
@@ -299,6 +300,7 @@ export default function Home() {
   const [activeView, setActiveView] = useState<MainView>("tasks");
   const [analyticsRange, setAnalyticsRange] = useState<AnalyticsRange>("week");
   const [taxonomyMode, setTaxonomyMode] = useState<TaxonomyMode>("topics");
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("sync");
   const [taxonomy, setTaxonomy] = useState<TaskTaxonomy>(defaultTaxonomy);
   const [taxonomyLoaded, setTaxonomyLoaded] = useState(false);
   const [newTopicPrefix, setNewTopicPrefix] = useState<TaskPrefix>("P");
@@ -889,7 +891,7 @@ export default function Home() {
   }
 
   return (
-    <main>
+    <main className={activeView === "kanban" ? "kanban-main" : undefined}>
       <header className="hero">
         <div>
           <p className="eyebrow">מעקב משימות אישי</p>
@@ -1159,12 +1161,22 @@ export default function Home() {
             <div className="drawer-header">
               <div>
                 <p className="eyebrow">הגדרות</p>
-                <h2>חיבור, סנכרון וגיבוי</h2>
+                <h2>{settingsTab === "taxonomy" ? "נושאים ופעולות" : "חיבור, סנכרון וגיבוי"}</h2>
               </div>
               <button className="icon-button" onClick={() => setIsSettingsOpen(false)} aria-label="סגירת הגדרות">×</button>
             </div>
 
+            <div className="settings-tabs" aria-label="אזורי הגדרות">
+              <button className={settingsTab === "taxonomy" ? "active" : ""} onClick={() => setSettingsTab("taxonomy")}>
+                נושאים ופעולות
+              </button>
+              <button className={settingsTab === "sync" ? "active" : ""} onClick={() => setSettingsTab("sync")}>
+                חיבור, סנכרון וגיבוי
+              </button>
+            </div>
+
             <section className="data-view" aria-label="גיבוי ושחזור נתונים">
+              {settingsTab === "taxonomy" ? (
               <section className="panel taxonomy-panel">
                 <div className="panel-heading">
                   <div>
@@ -1220,6 +1232,8 @@ export default function Home() {
                   </div>
                 )}
               </section>
+              ) : (
+              <>
 
               <section className="panel cloud-panel">
                 <div>
@@ -1318,6 +1332,8 @@ export default function Home() {
                 </div>
                 <button onClick={resetDataWithConfirmation}>איפוס נתוני ניסיון</button>
               </section>
+              </>
+              )}
             </section>
           </section>
         </div>
