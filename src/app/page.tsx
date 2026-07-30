@@ -7,6 +7,7 @@ import { canonicalTaskId, initialTasks, Task, TaskPrefix, TaskPriority, TaskStat
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { fetchUserDevices, registerCurrentDevice, type UserDevice } from "@/lib/supabaseDevices";
 import { countCloudTasks, fetchCloudTasks, saveCloudTasks } from "@/lib/supabaseTasks";
+import { fetchCloudTaxonomy, replaceCloudTaxonomy } from "@/lib/supabaseTaxonomy";
 
 const STORAGE_KEY = "asaf-task-tracker-v1";
 const TAXONOMY_STORAGE_KEY = "asaf-task-tracker-taxonomy-v1";
@@ -305,6 +306,16 @@ function parseStoredTaxonomy(raw: string | null): TaskTaxonomy {
   }
 }
 
+function mergeTaxonomies(...taxonomies: TaskTaxonomy[]): TaskTaxonomy {
+  return {
+    topics: {
+      P: uniqueSorted(taxonomies.flatMap((taxonomy) => taxonomy.topics.P)),
+      W: uniqueSorted(taxonomies.flatMap((taxonomy) => taxonomy.topics.W)),
+    },
+    actions: uniqueSorted(taxonomies.flatMap((taxonomy) => taxonomy.actions)),
+  };
+}
+
 export default function Home() {
   const [tasks, setTasks] = usePersistentTasks();
   const [query, setQuery] = useState("");
@@ -319,6 +330,8 @@ export default function Home() {
   const [showClosedKanbanTasks, setShowClosedKanbanTasks] = useState(false);
   const [taxonomy, setTaxonomy] = useState<TaskTaxonomy>(defaultTaxonomy);
   const [taxonomyLoaded, setTaxonomyLoaded] = useState(false);
+  const [taxonomyCloudReady, setTaxonomyCloudReady] = useState(false);
+  const [taxonomyStatus, setTaxonomyStatus] = useState("נושאים ופעולות נשמרים מקומית עד להתחברות לענן.");
   const [newTopicPrefix, setNewTopicPrefix] = useState<TaskPrefix>("P");
   const [newTopicName, setNewTopicName] = useState("");
   const [newActionName, setNewActionName] = useState("");
@@ -377,6 +390,8 @@ export default function Home() {
       setLastCloudPullAt(null);
       setCloudDevices([]);
       setDevicesStatus("");
+      setTaxonomyCloudReady(false);
+      setTaxonomyStatus(user ? "טוען נושאים ופעולות מהענן..." : "נושאים ופעולות נשמרים מקומית עד להתחברות לענן.");
       setIsCloudReady(!user);
       setIsSettingsOpen(false);
       setTaskEditor(null);
@@ -385,6 +400,37 @@ export default function Home() {
 
     return () => subscription.subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (!cloudUser || !taxonomyLoaded) return;
+
+    let cancelled = false;
+
+    fetchCloudTaxonomy()
+      .then((cloudTaxonomy) => {
+        if (cancelled) return;
+        setTaxonomy(mergeTaxonomies(defaultTaxonomy, cloudTaxonomy));
+        setTaxonomyCloudReady(true);
+        setTaxonomyStatus("נושאים ופעולות מסונכרנים לענן.");
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setTaxonomyCloudReady(false);
+        setTaxonomyStatus(`סנכרון נושאים ופעולות לא פעיל: ${errorMessage(error)}`);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [cloudUser, taxonomyLoaded]);
+
+  useEffect(() => {
+    if (!cloudUser || !taxonomyCloudReady || !taxonomyLoaded) return;
+
+    replaceCloudTaxonomy(taxonomy, cloudUser)
+      .then(() => setTaxonomyStatus("נושאים ופעולות מסונכרנים לענן."))
+      .catch((error: unknown) => setTaxonomyStatus(`שמירת נושאים ופעולות לענן נכשלה: ${errorMessage(error)}`));
+  }, [cloudUser, taxonomy, taxonomyCloudReady, taxonomyLoaded]);
 
   useEffect(() => {
     if (!cloudUser) return;
@@ -839,6 +885,8 @@ export default function Home() {
     setLastCloudPullAt(null);
     setCloudDevices([]);
     setDevicesStatus("");
+    setTaxonomyCloudReady(false);
+    setTaxonomyStatus("נושאים ופעולות נשמרים מקומית עד להתחברות לענן.");
     setIsCloudReady(true);
     setIsSettingsOpen(false);
     setTaskEditor(null);
@@ -1222,6 +1270,7 @@ export default function Home() {
                     <button className={taxonomyMode === "actions" ? "active" : ""} onClick={() => setTaxonomyMode("actions")}>פעולות</button>
                   </div>
                 </div>
+                <p className="taxonomy-status">{taxonomyStatus}</p>
 
                 {taxonomyMode === "topics" ? (
                   <div className="taxonomy-manager">
