@@ -22,7 +22,7 @@ create table public.tasks (
 alter table public.tasks enable row level security;
 create policy "Users can read own tasks" on public.tasks for select using (auth.uid() = user_id);
 create policy "Users can create own tasks" on public.tasks for insert with check (auth.uid() = user_id);
-create policy "Users can update own tasks" on public.tasks for update using (auth.uid() = user_id);
+create policy "Users can update own tasks" on public.tasks for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
 create policy "Users can delete own tasks" on public.tasks for delete using (auth.uid() = user_id);
 
 create table public.user_devices (
@@ -41,5 +41,5 @@ create table public.user_devices (
 alter table public.user_devices enable row level security;
 create policy "Users can read own devices" on public.user_devices for select using (auth.uid() = user_id);
 create policy "Users can create own devices" on public.user_devices for insert with check (auth.uid() = user_id);
-create policy "Users can update own devices" on public.user_devices for update using (auth.uid() = user_id);
+create policy "Users can update own devices" on public.user_devices for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
 create policy "Users can delete own devices" on public.user_devices for delete using (auth.uid() = user_id);

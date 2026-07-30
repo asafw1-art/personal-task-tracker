@@ -211,27 +211,32 @@ function nextTaskNumber(tasks: Task[], prefix: TaskPrefix) {
 
 let cachedTasksRaw: string | null | undefined;
 let cachedTasks = initialTasks;
+let activeTaskStorageKey = STORAGE_KEY;
 const taskStoreListeners = new Set<() => void>();
 
-function parseStoredTasks(raw: string | null) {
-  if (!raw) return initialTasks;
+function userTaskStorageKey(userId: string) {
+  return `${STORAGE_KEY}:${userId}`;
+}
+
+function parseStoredTasks(raw: string | null, fallbackTasks: Task[]) {
+  if (!raw) return fallbackTasks;
   try {
     const parsed = JSON.parse(raw) as unknown;
     const imported = getImportTasks(parsed).map(normalizeImportedTask);
     if (imported.length === 0 && Array.isArray(parsed)) return [];
-    if (imported.some((task) => !task)) return initialTasks;
+    if (imported.some((task) => !task)) return fallbackTasks;
     return mergeUniqueTasks(imported as Task[]);
   } catch {
-    return initialTasks;
+    return fallbackTasks;
   }
 }
 
 function getTasksSnapshot() {
   if (typeof window === "undefined") return initialTasks;
-  const raw = window.localStorage.getItem(STORAGE_KEY);
+  const raw = window.localStorage.getItem(activeTaskStorageKey);
   if (raw === cachedTasksRaw) return cachedTasks;
   cachedTasksRaw = raw;
-  cachedTasks = parseStoredTasks(raw);
+  cachedTasks = parseStoredTasks(raw, activeTaskStorageKey === STORAGE_KEY ? initialTasks : []);
   return cachedTasks;
 }
 
@@ -242,7 +247,7 @@ function getServerTasksSnapshot() {
 function subscribeTasks(listener: () => void) {
   taskStoreListeners.add(listener);
   const handleStorage = (event: StorageEvent) => {
-    if (event.key === STORAGE_KEY) listener();
+    if (event.key === activeTaskStorageKey) listener();
   };
   window.addEventListener("storage", handleStorage);
   return () => {
@@ -255,7 +260,16 @@ function writeTasks(nextTasks: Task[]) {
   const raw = JSON.stringify(nextTasks);
   cachedTasksRaw = raw;
   cachedTasks = nextTasks;
-  window.localStorage.setItem(STORAGE_KEY, raw);
+  window.localStorage.setItem(activeTaskStorageKey, raw);
+  taskStoreListeners.forEach((listener) => listener());
+}
+
+function setTaskStorageUser(userId: string | null) {
+  const nextKey = userId ? userTaskStorageKey(userId) : STORAGE_KEY;
+  if (nextKey === activeTaskStorageKey) return;
+  activeTaskStorageKey = nextKey;
+  cachedTasksRaw = undefined;
+  cachedTasks = userId ? [] : initialTasks;
   taskStoreListeners.forEach((listener) => listener());
 }
 
@@ -348,6 +362,7 @@ export default function Home() {
 
     supabase.auth.getSession().then(({ data }) => {
       const user = data.session?.user ?? null;
+      setTaskStorageUser(user?.id ?? null);
       setCloudUser(user);
       setIsCloudReady(!user);
       setCloudStatus(user ? "טוען משימות מהענן..." : "לא מחובר. יש להתחבר כדי לראות את המשימות.");
@@ -355,6 +370,7 @@ export default function Home() {
 
     const { data: subscription } = supabase.auth.onAuthStateChange((_event, session) => {
       const user = session?.user ?? null;
+      setTaskStorageUser(user?.id ?? null);
       setCloudUser(user);
       setCloudSyncEnabled(false);
       setCloudTaskCount(null);
@@ -384,6 +400,7 @@ export default function Home() {
           setLastCloudPullAt(new Date().toISOString());
           setCloudStatus(`מחובר לענן. נטענו ${cloudTasks.length} משימות.`);
         } else {
+          setTasks([]);
           setCloudTaskCount(0);
           setCloudSyncEnabled(false);
           setLastCloudPullAt(new Date().toISOString());
@@ -816,6 +833,7 @@ export default function Home() {
   async function signOut() {
     if (!supabase) return;
     await supabase.auth.signOut();
+    setTaskStorageUser(null);
     setCloudUser(null);
     setCloudSyncEnabled(false);
     setLastCloudPullAt(null);
