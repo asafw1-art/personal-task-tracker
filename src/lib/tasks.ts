@@ -8,6 +8,7 @@ export type Task = {
   number: number;
   title: string;
   category: string;
+  actionType?: string;
   priority: TaskPriority;
   status: TaskStatus;
   dueDate?: string;

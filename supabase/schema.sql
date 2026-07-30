@@ -8,6 +8,7 @@ create table public.tasks (
   task_number integer not null check (task_number > 0),
   title text not null,
   category text not null default 'אישי',
+  action_type text,
   priority public.task_priority not null default 'normal',
   status public.task_status not null default 'open',
   notes text,

@@ -9,6 +9,7 @@ import { fetchUserDevices, registerCurrentDevice, type UserDevice } from "@/lib/
 import { countCloudTasks, fetchCloudTasks, saveCloudTasks } from "@/lib/supabaseTasks";
 
 const STORAGE_KEY = "asaf-task-tracker-v1";
+const TAXONOMY_STORAGE_KEY = "asaf-task-tracker-taxonomy-v1";
 
 const statusLabels: Record<TaskStatus, string> = {
   open: "פתוחה",
@@ -25,6 +26,16 @@ const priorityLabels: Record<TaskPriority, string> = {
   low: "נמוכה",
 };
 
+const defaultTaxonomy: TaskTaxonomy = {
+  topics: {
+    P: ["אישי", "פרישה", "בריאות", "בית", "כספים", "משפחה", "סידורים"],
+    W: ["עבודה", "פרויקטים", "פגישות", "דיווחים", "מעקב", "Galaxy"],
+  },
+  actions: ["טלפון", "פגישה", "מסמך", "תשלום", "מעקב", "קנייה", "בדיקה", "אחר"],
+};
+
+const kanbanStatuses: TaskStatus[] = ["open", "in_progress", "waiting", "done", "cancelled"];
+
 type StatRow = {
   label: string;
   value: number;
@@ -38,12 +49,19 @@ type ImportSummary = {
 
 type TaskFilter = TaskStatus | "active" | "all" | "overdue" | "today" | "week" | "no_due" | "high";
 type AnalyticsRange = "week" | "month" | "all";
-type MainView = "tasks" | "stats";
+type MainView = "tasks" | "stats" | "kanban";
+type TaxonomyMode = "topics" | "actions";
+
+type TaskTaxonomy = {
+  topics: Record<TaskPrefix, string[]>;
+  actions: string[];
+};
 
 type TaskDraft = {
   prefix: TaskPrefix;
   title: string;
   category: string;
+  actionType: string;
   priority: TaskPriority;
   status: TaskStatus;
   dueDate: string;
@@ -128,6 +146,7 @@ function normalizeImportedTask(value: unknown): Task | null {
     number,
     title: task.title.trim(),
     category: task.category.trim(),
+    actionType: optionalString(task.actionType),
     priority: task.priority,
     status: task.status,
     dueDate: optionalString(task.dueDate),
@@ -163,6 +182,7 @@ function defaultTaskDraft(prefix: TaskPrefix = "P"): TaskDraft {
     prefix,
     title: "",
     category: prefix === "W" ? "עבודה" : "אישי",
+    actionType: "",
     priority: "normal",
     status: "open",
     dueDate: "",
@@ -175,6 +195,7 @@ function taskToDraft(task: Task): TaskDraft {
     prefix: task.prefix,
     title: task.title,
     category: task.category,
+    actionType: task.actionType ?? "",
     priority: task.priority,
     status: task.status,
     dueDate: task.dueDate ?? "",
@@ -247,13 +268,42 @@ function usePersistentTasks(): [Task[], Dispatch<SetStateAction<Task[]>>] {
   return [tasks, setTasks];
 }
 
+function uniqueSorted(values: string[]) {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)))
+    .sort((a, b) => a.localeCompare(b, "he"));
+}
+
+function parseStoredTaxonomy(raw: string | null): TaskTaxonomy {
+  if (!raw) return defaultTaxonomy;
+  try {
+    const parsed = JSON.parse(raw) as Partial<TaskTaxonomy>;
+    return {
+      topics: {
+        P: uniqueSorted([...(defaultTaxonomy.topics.P), ...(parsed.topics?.P ?? [])]),
+        W: uniqueSorted([...(defaultTaxonomy.topics.W), ...(parsed.topics?.W ?? [])]),
+      },
+      actions: uniqueSorted([...(defaultTaxonomy.actions), ...(parsed.actions ?? [])]),
+    };
+  } catch {
+    return defaultTaxonomy;
+  }
+}
+
 export default function Home() {
   const [tasks, setTasks] = usePersistentTasks();
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<TaskFilter>("active");
   const [prefixFilter, setPrefixFilter] = useState<"all" | "P" | "W">("all");
+  const [topicFilter, setTopicFilter] = useState("all");
+  const [actionFilter, setActionFilter] = useState("all");
   const [activeView, setActiveView] = useState<MainView>("tasks");
   const [analyticsRange, setAnalyticsRange] = useState<AnalyticsRange>("week");
+  const [taxonomyMode, setTaxonomyMode] = useState<TaxonomyMode>("topics");
+  const [taxonomy, setTaxonomy] = useState<TaskTaxonomy>(defaultTaxonomy);
+  const [taxonomyLoaded, setTaxonomyLoaded] = useState(false);
+  const [newTopicPrefix, setNewTopicPrefix] = useState<TaskPrefix>("P");
+  const [newTopicName, setNewTopicName] = useState("");
+  const [newActionName, setNewActionName] = useState("");
   const [importMessage, setImportMessage] = useState("");
   const [authEmail, setAuthEmail] = useState("");
   const [cloudUser, setCloudUser] = useState<User | null>(null);
@@ -275,6 +325,19 @@ export default function Home() {
     const merged = mergeUniqueTasks([...current, ...cloudTasks]);
     if (JSON.stringify(merged) !== JSON.stringify(current)) setTasks(merged);
   }, [setTasks]);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setTaxonomy(parseStoredTaxonomy(window.localStorage.getItem(TAXONOMY_STORAGE_KEY)));
+      setTaxonomyLoaded(true);
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
+  }, []);
+
+  useEffect(() => {
+    if (!taxonomyLoaded) return;
+    window.localStorage.setItem(TAXONOMY_STORAGE_KEY, JSON.stringify(taxonomy));
+  }, [taxonomy, taxonomyLoaded]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -397,6 +460,15 @@ export default function Home() {
     };
   }, [cloudSyncEnabled, cloudUser, mergeCloudTasksIntoLocal]);
 
+  const topicOptions = useMemo(() => ({
+    P: uniqueSorted([...taxonomy.topics.P, ...tasks.filter((task) => task.prefix === "P").map((task) => task.category)]),
+    W: uniqueSorted([...taxonomy.topics.W, ...tasks.filter((task) => task.prefix === "W").map((task) => task.category)]),
+  }), [tasks, taxonomy]);
+
+  const actionOptions = useMemo(() => (
+    uniqueSorted([...taxonomy.actions, ...tasks.map((task) => task.actionType ?? "")])
+  ), [tasks, taxonomy]);
+
   const filteredTasks = useMemo(() => {
     const normalized = canonicalTaskId(query);
     const today = todayIso();
@@ -408,6 +480,8 @@ export default function Home() {
     }
     return tasks
       .filter((task) => prefixFilter === "all" || task.prefix === prefixFilter)
+      .filter((task) => topicFilter === "all" || task.category === topicFilter)
+      .filter((task) => actionFilter === "all" || (task.actionType ?? "") === actionFilter)
       .filter((task) => {
         if (statusFilter === "all") return true;
         if (statusFilter === "active") return !["done", "cancelled"].includes(task.status);
@@ -420,10 +494,10 @@ export default function Home() {
       })
       .filter((task) => {
         if (!query.trim()) return true;
-        return `${task.id} ${task.title} ${task.category} ${task.notes ?? ""}`.toLowerCase().includes(query.trim().toLowerCase());
+        return `${task.id} ${task.title} ${task.category} ${task.actionType ?? ""} ${task.notes ?? ""}`.toLowerCase().includes(query.trim().toLowerCase());
       })
       .sort((a, b) => a.prefix.localeCompare(b.prefix) || a.number - b.number);
-  }, [tasks, query, statusFilter, prefixFilter]);
+  }, [tasks, query, statusFilter, prefixFilter, topicFilter, actionFilter]);
 
   const counts = useMemo(() => ({
     active: tasks.filter((t) => !["done", "cancelled"].includes(t.status)).length,
@@ -584,6 +658,7 @@ export default function Home() {
           number: nextNumber,
           title,
           category,
+          actionType: draft.actionType.trim() || undefined,
           priority: draft.priority,
           status: draft.status,
           dueDate: draft.dueDate || undefined,
@@ -599,6 +674,7 @@ export default function Home() {
           ...task,
           title,
           category,
+          actionType: draft.actionType.trim() || undefined,
           priority: draft.priority,
           status: draft.status,
           dueDate: draft.dueDate || undefined,
@@ -609,6 +685,48 @@ export default function Home() {
     });
 
     closeTaskEditor();
+  }
+
+  function addTopic(event: FormEvent) {
+    event.preventDefault();
+    const name = newTopicName.trim();
+    if (!name) return;
+    setTaxonomy((current) => ({
+      ...current,
+      topics: {
+        ...current.topics,
+        [newTopicPrefix]: uniqueSorted([...current.topics[newTopicPrefix], name]),
+      },
+    }));
+    setNewTopicName("");
+  }
+
+  function removeTopic(prefix: TaskPrefix, topic: string) {
+    setTaxonomy((current) => ({
+      ...current,
+      topics: {
+        ...current.topics,
+        [prefix]: current.topics[prefix].filter((value) => value !== topic),
+      },
+    }));
+  }
+
+  function addAction(event: FormEvent) {
+    event.preventDefault();
+    const name = newActionName.trim();
+    if (!name) return;
+    setTaxonomy((current) => ({
+      ...current,
+      actions: uniqueSorted([...current.actions, name]),
+    }));
+    setNewActionName("");
+  }
+
+  function removeAction(action: string) {
+    setTaxonomy((current) => ({
+      ...current,
+      actions: current.actions.filter((value) => value !== action),
+    }));
   }
 
   function resetDataWithConfirmation() {
@@ -823,6 +941,7 @@ export default function Home() {
 
           <nav className="view-tabs" aria-label="מעבר בין תצוגות">
             <button className={activeView === "tasks" ? "active" : ""} onClick={() => setActiveView("tasks")}>משימות</button>
+            <button className={activeView === "kanban" ? "active" : ""} onClick={() => setActiveView("kanban")}>לוח Kanban</button>
             <button className={activeView === "stats" ? "active" : ""} onClick={() => setActiveView("stats")}>סטטיסטיקות</button>
           </nav>
 
@@ -843,6 +962,14 @@ export default function Home() {
                   <option value="all">אישי ועבודה</option>
                   <option value="P">אישי בלבד</option>
                   <option value="W">עבודה בלבד</option>
+                </select>
+                <select value={topicFilter} onChange={(e) => setTopicFilter(e.target.value)} aria-label="סינון נושא">
+                  <option value="all">כל הנושאים</option>
+                  {uniqueSorted([...topicOptions.P, ...topicOptions.W]).map((topic) => <option value={topic} key={topic}>{topic}</option>)}
+                </select>
+                <select value={actionFilter} onChange={(e) => setActionFilter(e.target.value)} aria-label="סינון פעולה">
+                  <option value="all">כל הפעולות</option>
+                  {actionOptions.map((action) => <option value={action} key={action}>{action}</option>)}
                 </select>
               </section>
 
@@ -867,7 +994,8 @@ export default function Home() {
                         <h2>{task.title}</h2>
                       </div>
                       <div className="meta">
-                        <span>{task.category}</span>
+                        <span>נושא {task.category}</span>
+                        {task.actionType && <span>פעולה {task.actionType}</span>}
                         <span>עדיפות {priorityLabels[task.priority]}</span>
                         {task.dueDate && <span>יעד {formatDate(task.dueDate)}</span>}
                         {task.completedAt && <span>נסגרה {formatDate(task.completedAt)}</span>}
@@ -884,6 +1012,47 @@ export default function Home() {
                 ))}
               </section>
 
+              <button className="floating-add" onClick={openCreateTask} aria-label="הוספת משימה חדשה">+</button>
+            </>
+          ) : activeView === "kanban" ? (
+            <>
+              <section className="kanban-board" aria-label="לוח Kanban">
+                {kanbanStatuses.map((status) => {
+                  const columnTasks = filteredTasks.filter((task) => task.status === status);
+                  return (
+                    <section className="kanban-column" key={status}>
+                      <div className="kanban-column-header">
+                        <h2>{statusLabels[status]}</h2>
+                        <span>{columnTasks.length}</span>
+                      </div>
+                      <div className="kanban-list">
+                        {columnTasks.length === 0 ? (
+                          <p className="kanban-empty">אין משימות</p>
+                        ) : columnTasks.map((task) => (
+                          <article className={`kanban-card status-${task.status}${isOverdue(task) ? " is-overdue" : ""}`} key={task.id}>
+                            <div className="task-heading">
+                              <span className="task-id">{task.id}</span>
+                              <h3>{task.title}</h3>
+                            </div>
+                            <div className="meta">
+                              <span>נושא {task.category}</span>
+                              {task.actionType && <span>פעולה {task.actionType}</span>}
+                              <span>עדיפות {priorityLabels[task.priority]}</span>
+                              {task.dueDate && <span>יעד {formatDate(task.dueDate)}</span>}
+                            </div>
+                            <div className="kanban-actions">
+                              <select value={task.status} onChange={(event) => updateStatus(task.id, event.target.value as TaskStatus)} aria-label={`סטטוס ${task.title}`}>
+                                {Object.entries(statusLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
+                              </select>
+                              <button onClick={() => openEditTask(task)}>עריכה</button>
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    </section>
+                  );
+                })}
+              </section>
               <button className="floating-add" onClick={openCreateTask} aria-label="הוספת משימה חדשה">+</button>
             </>
           ) : (
@@ -930,10 +1099,10 @@ export default function Home() {
                   <section className="panel chart-panel">
                     <div className="panel-heading">
                       <h2>איפה מצטבר עומס</h2>
-                      <span>קטגוריות פעילות</span>
+                      <span>נושאים פעילים</span>
                     </div>
                     {analytics.byCategory.length === 0 ? (
-                      <p className="muted-line">אין כרגע קטגוריות פעילות.</p>
+                      <p className="muted-line">אין כרגע נושאים פעילים.</p>
                     ) : analytics.byCategory.slice(0, 8).map((row) => (
                       <div className="bar-row" key={row.label}>
                         <span>{row.label}</span>
@@ -973,7 +1142,7 @@ export default function Home() {
                           <span className="attention-tag">{attentionReason(task)}</span>
                         </span>
                         <strong>{task.title}</strong>
-                        <span>{task.category} · עדיפות {priorityLabels[task.priority]}{task.dueDate ? ` · יעד ${formatDate(task.dueDate)}` : ""}</span>
+                        <span>{task.category}{task.actionType ? ` · ${task.actionType}` : ""} · עדיפות {priorityLabels[task.priority]}{task.dueDate ? ` · יעד ${formatDate(task.dueDate)}` : ""}</span>
                       </button>
                     ))}
                   </div>
@@ -996,6 +1165,62 @@ export default function Home() {
             </div>
 
             <section className="data-view" aria-label="גיבוי ושחזור נתונים">
+              <section className="panel taxonomy-panel">
+                <div className="panel-heading">
+                  <div>
+                    <h2>נושאים ופעולות</h2>
+                    <span>ניהול שיוכים פנימיים בלי לשנות את מזהי P/W.</span>
+                  </div>
+                  <div className="range-tabs">
+                    <button className={taxonomyMode === "topics" ? "active" : ""} onClick={() => setTaxonomyMode("topics")}>נושאים</button>
+                    <button className={taxonomyMode === "actions" ? "active" : ""} onClick={() => setTaxonomyMode("actions")}>פעולות</button>
+                  </div>
+                </div>
+
+                {taxonomyMode === "topics" ? (
+                  <div className="taxonomy-manager">
+                    <form className="taxonomy-form" onSubmit={addTopic}>
+                      <select value={newTopicPrefix} onChange={(event) => setNewTopicPrefix(event.target.value as TaskPrefix)} aria-label="סוג נושא">
+                        <option value="P">אישי</option>
+                        <option value="W">עבודה</option>
+                      </select>
+                      <input value={newTopicName} onChange={(event) => setNewTopicName(event.target.value)} placeholder="שם נושא חדש" aria-label="שם נושא חדש" />
+                      <button type="submit">הוספת נושא</button>
+                    </form>
+                    <div className="taxonomy-grid">
+                      {(["P", "W"] as TaskPrefix[]).map((prefix) => (
+                        <section className="taxonomy-group" key={prefix}>
+                          <h3>{prefix === "P" ? "אישי" : "עבודה"}</h3>
+                          <div className="taxonomy-chips">
+                            {topicOptions[prefix].map((topic) => (
+                              <span className="taxonomy-chip" key={topic}>
+                                {topic}
+                                <button onClick={() => removeTopic(prefix, topic)} aria-label={`מחיקת נושא ${topic}`}>×</button>
+                              </span>
+                            ))}
+                          </div>
+                        </section>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="taxonomy-manager">
+                    <form className="taxonomy-form" onSubmit={addAction}>
+                      <input value={newActionName} onChange={(event) => setNewActionName(event.target.value)} placeholder="שם פעולה חדשה" aria-label="שם פעולה חדשה" />
+                      <button type="submit">הוספת פעולה</button>
+                    </form>
+                    <div className="taxonomy-chips">
+                      {actionOptions.map((action) => (
+                        <span className="taxonomy-chip" key={action}>
+                          {action}
+                          <button onClick={() => removeAction(action)} aria-label={`מחיקת פעולה ${action}`}>×</button>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </section>
+
               <section className="panel cloud-panel">
                 <div>
                   <h2>חיבור Supabase</h2>
@@ -1112,7 +1337,10 @@ export default function Home() {
             <form className="task-editor-form" onSubmit={saveTaskEditor}>
               <label>
                 <span>סוג</span>
-                <select value={taskEditor.draft.prefix} onChange={(event) => updateTaskDraft({ prefix: event.target.value as TaskPrefix, category: event.target.value === "W" ? "עבודה" : "אישי" })} disabled={taskEditor.mode === "edit"} aria-label="סוג משימה">
+                <select value={taskEditor.draft.prefix} onChange={(event) => {
+                  const nextPrefix = event.target.value as TaskPrefix;
+                  updateTaskDraft({ prefix: nextPrefix, category: topicOptions[nextPrefix][0] ?? (nextPrefix === "W" ? "עבודה" : "אישי") });
+                }} disabled={taskEditor.mode === "edit"} aria-label="סוג משימה">
                   <option value="P">אישי</option>
                   <option value="W">עבודה</option>
                 </select>
@@ -1122,8 +1350,17 @@ export default function Home() {
                 <input value={taskEditor.draft.title} onChange={(event) => updateTaskDraft({ title: event.target.value })} placeholder="מה צריך לעשות?" autoFocus />
               </label>
               <label>
-                <span>קטגוריה</span>
-                <input value={taskEditor.draft.category} onChange={(event) => updateTaskDraft({ category: event.target.value })} />
+                <span>נושא</span>
+                <select value={taskEditor.draft.category} onChange={(event) => updateTaskDraft({ category: event.target.value })}>
+                  {topicOptions[taskEditor.draft.prefix].map((topic) => <option value={topic} key={topic}>{topic}</option>)}
+                </select>
+              </label>
+              <label>
+                <span>פעולה</span>
+                <select value={taskEditor.draft.actionType} onChange={(event) => updateTaskDraft({ actionType: event.target.value })}>
+                  <option value="">ללא פעולה</option>
+                  {actionOptions.map((action) => <option value={action} key={action}>{action}</option>)}
+                </select>
               </label>
               <label>
                 <span>סטטוס</span>
