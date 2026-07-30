@@ -79,7 +79,7 @@ textarea { resize: vertical; min-height: 86px; }
 .icon-button { align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; color: var(--muted); display: flex; font-size: 1.35rem; font-weight: 700; height: 40px; justify-content: center; line-height: 1; width: 40px; }
 .icon-button:hover { background: #f8fafc; color: var(--text); }
 .settings-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; background: #e9eef7; border: 1px solid var(--border); border-radius: 12px; margin-bottom: 14px; padding: 4px; }
-.settings-tabs button { background: transparent; border: 0; border-radius: 9px; color: var(--muted); font-weight: 800; padding: 11px 12px; }
+.settings-tabs button { background: transparent; border: 0; border-radius: 9px; color: var(--muted); font-weight: 700; padding: 10px 16px; }
 .settings-tabs button.active { background: var(--surface); box-shadow: 0 4px 12px rgba(23, 32, 51, 0.08); color: var(--accent-dark); }
 .task-editor-form { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 16px; }
 .drawer-actions { display: flex; gap: 10px; justify-content: flex-start; }
