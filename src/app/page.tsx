@@ -35,6 +35,7 @@ const defaultTaxonomy: TaskTaxonomy = {
 };
 
 const kanbanStatuses: TaskStatus[] = ["open", "in_progress", "waiting", "done", "cancelled"];
+const activeKanbanStatuses: TaskStatus[] = ["open", "in_progress", "waiting"];
 
 type StatRow = {
   label: string;
@@ -301,6 +302,7 @@ export default function Home() {
   const [analyticsRange, setAnalyticsRange] = useState<AnalyticsRange>("week");
   const [taxonomyMode, setTaxonomyMode] = useState<TaxonomyMode>("topics");
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("sync");
+  const [showClosedKanbanTasks, setShowClosedKanbanTasks] = useState(false);
   const [taxonomy, setTaxonomy] = useState<TaskTaxonomy>(defaultTaxonomy);
   const [taxonomyLoaded, setTaxonomyLoaded] = useState(false);
   const [newTopicPrefix, setNewTopicPrefix] = useState<TaskPrefix>("P");
@@ -1018,8 +1020,22 @@ export default function Home() {
             </>
           ) : activeView === "kanban" ? (
             <>
+              <div className="kanban-toolbar">
+                <div>
+                  <h2>לוח עבודה פעיל</h2>
+                  <p>כברירת מחדל מוצגות רק משימות פתוחות, בטיפול או בהמתנה.</p>
+                </div>
+                <label className="toggle-control">
+                  <input
+                    type="checkbox"
+                    checked={showClosedKanbanTasks}
+                    onChange={(event) => setShowClosedKanbanTasks(event.target.checked)}
+                  />
+                  <span>הצג משימות סגורות</span>
+                </label>
+              </div>
               <section className="kanban-board" aria-label="לוח Kanban">
-                {kanbanStatuses.map((status) => {
+                {(showClosedKanbanTasks ? kanbanStatuses : activeKanbanStatuses).map((status) => {
                   const columnTasks = filteredTasks.filter((task) => task.status === status);
                   return (
                     <section className="kanban-column" key={status}>
