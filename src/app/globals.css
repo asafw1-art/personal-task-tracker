@@ -25,20 +25,17 @@ h1 { margin: 0; font-size: clamp(2rem, 5vw, 3.3rem); }
 .stats button { padding: 16px; text-align: right; }
 .stats strong { display: block; font-size: 1.8rem; }
 .stats span { color: var(--muted); }
-.view-tabs { display: inline-grid; grid-template-columns: repeat(3, minmax(120px, 1fr)); gap: 4px; background: #e9eef7; border: 1px solid var(--border); border-radius: 12px; padding: 4px; margin-bottom: 14px; }
+.view-tabs { display: inline-grid; grid-template-columns: repeat(2, minmax(120px, 1fr)); gap: 4px; background: #e9eef7; border: 1px solid var(--border); border-radius: 12px; padding: 4px; margin-bottom: 14px; }
 .view-tabs button { border: 0; border-radius: 9px; background: transparent; color: var(--muted); padding: 10px 16px; font-weight: 700; }
 .view-tabs button.active { background: var(--surface); color: var(--accent-dark); box-shadow: 0 4px 12px rgba(23, 32, 51, 0.08); }
-.controls, .add-form { display: grid; grid-template-columns: 1fr 190px 170px; gap: 10px; padding: 12px; margin-bottom: 12px; }
-.add-form { grid-template-columns: 150px 1fr 110px; }
+.controls { display: grid; grid-template-columns: 1fr 190px 170px; gap: 10px; padding: 12px; margin-bottom: 12px; }
 .quick-filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
 .quick-filters button { border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--muted); font-weight: 700; padding: 8px 12px; }
 .quick-filters button.active { background: #eef4ff; border-color: #bfdbfe; color: var(--accent-dark); }
 input, select, textarea { width: 100%; border: 1px solid var(--border); border-radius: 10px; padding: 11px 12px; background: #fff; color: var(--text); }
 textarea { resize: vertical; min-height: 86px; }
-.add-form button { border: 0; border-radius: 10px; background: var(--accent); color: #fff; font-weight: 700; }
-.add-form button:hover { background: var(--accent-dark); }
 .task-list { display: grid; gap: 10px; margin-top: 16px; }
-.task-card { display: grid; grid-template-columns: 44px 1fr 140px; align-items: center; gap: 12px; padding: 14px; }
+.task-card { display: grid; grid-template-columns: 44px 1fr 170px; align-items: center; gap: 12px; padding: 14px; }
 .check { width: 34px; height: 34px; border: 2px solid var(--border); border-radius: 10px; background: #fff; color: #fff; font-weight: 800; }
 .status-done .check { background: var(--success); border-color: var(--success); }
 .status-done h2 { text-decoration: line-through; color: var(--muted); }
@@ -51,13 +48,39 @@ textarea { resize: vertical; min-height: 86px; }
 .meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 7px; color: var(--muted); font-size: .86rem; }
 .meta span + span::before { content: "•"; margin-left: 8px; }
 .task-notes { margin: 10px 0 0; color: var(--muted); font-size: .92rem; line-height: 1.5; }
-.task-details { grid-column: 2 / -1; width: 100%; border-top: 1px solid var(--border); padding-top: 10px; }
-.task-details summary { color: var(--accent-dark); cursor: pointer; font-weight: 700; }
+.task-actions { display: grid; gap: 8px; }
+.task-actions button, .settings-button, .auth-form button, .drawer-actions button { border: 0; border-radius: 10px; background: var(--accent); color: #fff; font-weight: 700; padding: 11px 14px; }
+.task-actions button:hover, .settings-button:hover, .auth-form button:hover, .drawer-actions button:hover { background: var(--accent-dark); }
 .edit-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 12px; }
 .edit-grid label { display: grid; gap: 6px; color: var(--muted); font-size: .86rem; }
 .edit-grid label > span { font-weight: 700; }
 .notes-field { grid-column: 1 / -1; }
 .empty { padding: 30px; text-align: center; color: var(--muted); }
+.settings-button { align-items: center; display: inline-flex; gap: 8px; white-space: nowrap; }
+.settings-button span { font-size: 1.1rem; line-height: 1; }
+.auth-gate { display: grid; min-height: 54vh; place-items: center; }
+.auth-panel { display: grid; gap: 18px; max-width: 520px; padding: 24px; width: 100%; }
+.auth-panel h2, .loading-panel h2 { margin: 0 0 8px; }
+.auth-panel p, .loading-panel p, .auth-status, .editor-help { color: var(--muted); line-height: 1.55; margin: 0; }
+.auth-form, .task-editor-form { display: grid; gap: 12px; }
+.auth-form label, .task-editor-form label { color: var(--muted); display: grid; font-size: .9rem; gap: 6px; }
+.auth-form label > span, .task-editor-form label > span { font-weight: 700; }
+.auth-status { background: #eef4ff; border-radius: 12px; padding: 12px; }
+.loading-panel { padding: 24px; }
+.floating-add { align-items: center; background: var(--accent); border: 0; border-radius: 999px; bottom: 24px; box-shadow: 0 14px 34px rgba(37, 99, 235, 0.28); color: #fff; display: flex; font-size: 2rem; font-weight: 800; height: 58px; justify-content: center; left: 24px; line-height: 1; position: fixed; width: 58px; z-index: 20; }
+.floating-add:hover { background: var(--accent-dark); }
+.modal-backdrop { background: rgba(15, 23, 42, .34); bottom: 0; display: flex; justify-content: flex-start; left: 0; padding: 18px; position: fixed; right: 0; top: 0; z-index: 40; }
+.settings-drawer, .task-drawer { background: var(--bg); border: 1px solid var(--border); border-radius: 16px; box-shadow: 0 24px 70px rgba(15, 23, 42, .28); max-height: calc(100vh - 36px); overflow: auto; padding: 18px; width: min(620px, 100%); }
+.task-drawer { width: min(520px, 100%); }
+.drawer-header { align-items: flex-start; display: flex; gap: 14px; justify-content: space-between; margin-bottom: 16px; }
+.drawer-header h2 { margin: 0; }
+.icon-button { align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; color: var(--muted); display: flex; font-size: 1.35rem; font-weight: 700; height: 40px; justify-content: center; line-height: 1; width: 40px; }
+.icon-button:hover { background: #f8fafc; color: var(--text); }
+.task-editor-form { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 16px; }
+.drawer-actions { display: flex; gap: 10px; justify-content: flex-start; }
+.drawer-actions .secondary-action { background: #fff; border: 1px solid var(--border); color: var(--muted); }
+.drawer-actions .secondary-action:hover { background: #f8fafc; color: var(--text); }
+.editor-error { background: #fef2f2; border: 1px solid #fecaca; border-radius: 12px; color: #b91c1c; margin: 0; padding: 10px 12px; }
 .stats-view, .data-view { display: grid; gap: 14px; }
 .metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
 .metric { padding: 16px; }
@@ -144,13 +167,15 @@ textarea { resize: vertical; min-height: 86px; }
 .danger-panel { border-color: #fecaca; }
 .danger-panel button { border: 1px solid #fecaca; border-radius: 10px; background: #fff; color: #b91c1c; font-weight: 700; padding: 11px 14px; white-space: nowrap; }
 @media (max-width: 700px) {
-  main { width: min(100% - 20px, 980px); padding-top: 18px; }
+  main { width: min(100% - 20px, 980px); padding: 18px 0 86px; }
   .hero { align-items: stretch; flex-direction: column; }
   .hero .secondary { align-self: flex-start; }
-  .view-tabs { display: grid; grid-template-columns: 1fr; }
-  .controls, .add-form { grid-template-columns: 1fr; }
+  .settings-button { align-self: flex-start; }
+  .view-tabs { display: grid; grid-template-columns: 1fr; width: 100%; }
+  .controls { grid-template-columns: 1fr; }
   .stats { gap: 8px; }
   .stats button { padding: 12px; }
+  .stats strong { font-size: 1.45rem; }
   .metric-grid, .chart-grid, .timeline-stats, .analytics-layout { grid-template-columns: 1fr; }
   .analytics-header { align-items: stretch; flex-direction: column; }
   .range-tabs { display: grid; grid-template-columns: repeat(3, 1fr); }
@@ -166,8 +191,12 @@ textarea { resize: vertical; min-height: 86px; }
   .cloud-login, .cloud-actions { display: grid; grid-template-columns: 1fr; }
   .bar-row { grid-template-columns: 82px 1fr 28px; }
   .task-card { grid-template-columns: 40px 1fr; }
-  .task-card > select { grid-column: 2; }
-  .task-details { grid-column: 1 / -1; }
+  .task-actions { grid-column: 1 / -1; }
   .edit-grid { grid-template-columns: 1fr; }
   .task-heading { align-items: flex-start; flex-direction: column; gap: 6px; }
+  .modal-backdrop { padding: 0; }
+  .settings-drawer, .task-drawer { border-radius: 0; max-height: 100vh; min-height: 100vh; width: 100%; }
+  .drawer-actions { display: grid; }
+  .drawer-actions button { width: 100%; }
+  .floating-add { bottom: 18px; height: 54px; left: 18px; width: 54px; }
 }

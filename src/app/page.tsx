@@ -38,6 +38,22 @@ type ImportSummary = {
 
 type TaskFilter = TaskStatus | "active" | "all" | "overdue" | "today" | "week" | "no_due" | "high";
 type AnalyticsRange = "week" | "month" | "all";
+type MainView = "tasks" | "stats";
+
+type TaskDraft = {
+  prefix: TaskPrefix;
+  title: string;
+  category: string;
+  priority: TaskPriority;
+  status: TaskStatus;
+  dueDate: string;
+  notes: string;
+};
+
+type TaskEditorState =
+  | { mode: "create"; draft: TaskDraft }
+  | { mode: "edit"; taskId: string; draft: TaskDraft }
+  | null;
 
 const todayIso = () => {
   const now = new Date();
@@ -142,6 +158,34 @@ function mergeUniqueTasks(tasks: Task[]) {
     .sort((a, b) => a.prefix.localeCompare(b.prefix) || a.number - b.number);
 }
 
+function defaultTaskDraft(prefix: TaskPrefix = "P"): TaskDraft {
+  return {
+    prefix,
+    title: "",
+    category: prefix === "W" ? "עבודה" : "אישי",
+    priority: "normal",
+    status: "open",
+    dueDate: "",
+    notes: "",
+  };
+}
+
+function taskToDraft(task: Task): TaskDraft {
+  return {
+    prefix: task.prefix,
+    title: task.title,
+    category: task.category,
+    priority: task.priority,
+    status: task.status,
+    dueDate: task.dueDate ?? "",
+    notes: task.notes ?? "",
+  };
+}
+
+function nextTaskNumber(tasks: Task[], prefix: TaskPrefix) {
+  return Math.max(0, ...tasks.filter((task) => task.prefix === prefix).map((task) => task.number)) + 1;
+}
+
 let cachedTasksRaw: string | null | undefined;
 let cachedTasks = initialTasks;
 const taskStoreListeners = new Set<() => void>();
@@ -208,9 +252,7 @@ export default function Home() {
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<TaskFilter>("active");
   const [prefixFilter, setPrefixFilter] = useState<"all" | "P" | "W">("all");
-  const [newTitle, setNewTitle] = useState("");
-  const [newPrefix, setNewPrefix] = useState<"P" | "W">("P");
-  const [activeView, setActiveView] = useState<"tasks" | "stats" | "data">("tasks");
+  const [activeView, setActiveView] = useState<MainView>("tasks");
   const [analyticsRange, setAnalyticsRange] = useState<AnalyticsRange>("week");
   const [importMessage, setImportMessage] = useState("");
   const [authEmail, setAuthEmail] = useState("");
@@ -220,6 +262,10 @@ export default function Home() {
   const [lastCloudPullAt, setLastCloudPullAt] = useState<string | null>(null);
   const [cloudDevices, setCloudDevices] = useState<UserDevice[]>([]);
   const [devicesStatus, setDevicesStatus] = useState("");
+  const [isCloudReady, setIsCloudReady] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [taskEditor, setTaskEditor] = useState<TaskEditorState>(null);
+  const [taskEditorError, setTaskEditorError] = useState("");
   const [cloudStatus, setCloudStatus] = useState(
     isSupabaseConfigured ? "בודק חיבור ל-Supabase..." : "Supabase עדיין לא מוגדר. עובדים במצב מקומי."
   );
@@ -236,7 +282,8 @@ export default function Home() {
     supabase.auth.getSession().then(({ data }) => {
       const user = data.session?.user ?? null;
       setCloudUser(user);
-      setCloudStatus(user ? "טוען משימות מהענן..." : "לא מחובר. הנתונים נשמרים מקומית בדפדפן.");
+      setIsCloudReady(!user);
+      setCloudStatus(user ? "טוען משימות מהענן..." : "לא מחובר. יש להתחבר כדי לראות את המשימות.");
     });
 
     const { data: subscription } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -247,16 +294,17 @@ export default function Home() {
       setLastCloudPullAt(null);
       setCloudDevices([]);
       setDevicesStatus("");
-      setCloudStatus(user ? "טוען משימות מהענן..." : "לא מחובר. הנתונים נשמרים מקומית בדפדפן.");
+      setIsCloudReady(!user);
+      setIsSettingsOpen(false);
+      setTaskEditor(null);
+      setCloudStatus(user ? "טוען משימות מהענן..." : "לא מחובר. יש להתחבר כדי לראות את המשימות.");
     });
 
     return () => subscription.subscription.unsubscribe();
   }, []);
 
   useEffect(() => {
-    if (!cloudUser) {
-      return;
-    }
+    if (!cloudUser) return;
 
     let cancelled = false;
     fetchCloudTasks()
@@ -272,11 +320,14 @@ export default function Home() {
           setCloudTaskCount(0);
           setCloudSyncEnabled(false);
           setLastCloudPullAt(new Date().toISOString());
-          setCloudStatus("מחובר לענן, אבל עדיין אין משימות בענן. אפשר להעלות את הנתונים המקומיים.");
+          setCloudStatus("מחובר לענן, אבל עדיין אין משימות בענן. אפשר להעלות נתונים מקומיים מההגדרות.");
         }
+        setIsCloudReady(true);
       })
       .catch((error: unknown) => {
-        if (!cancelled) setCloudStatus(`לא הצלחתי לטעון את המשימות מהענן: ${errorMessage(error)}`);
+        if (cancelled) return;
+        setIsCloudReady(true);
+        setCloudStatus(`לא הצלחתי לטעון את המשימות מהענן: ${errorMessage(error)}`);
       });
 
     return () => {
@@ -311,7 +362,7 @@ export default function Home() {
   }, [cloudUser]);
 
   useEffect(() => {
-    if (!cloudUser || !cloudSyncEnabled) return;
+    if (!cloudUser || !cloudSyncEnabled || !isCloudReady) return;
 
     saveCloudTasks(tasks, cloudUser)
       .then(() => {
@@ -319,7 +370,7 @@ export default function Home() {
         setCloudStatus("המשימות מסונכרנות לענן.");
       })
       .catch((error: unknown) => setCloudStatus(`השמירה לענן נכשלה: ${errorMessage(error)}`));
-  }, [cloudSyncEnabled, cloudUser, tasks]);
+  }, [cloudSyncEnabled, cloudUser, isCloudReady, tasks]);
 
   useEffect(() => {
     if (!cloudUser || !cloudSyncEnabled) return;
@@ -382,19 +433,10 @@ export default function Home() {
 
   const statistics = useMemo(() => {
     const today = todayIso();
-    const weekStart = new Date();
-    weekStart.setDate(weekStart.getDate() - 6);
-    weekStart.setMinutes(weekStart.getMinutes() - weekStart.getTimezoneOffset());
-    const weekStartIso = weekStart.toISOString().slice(0, 10);
     const monthStartIso = `${today.slice(0, 7)}-01`;
     const active = tasks.filter((task) => !["done", "cancelled"].includes(task.status));
     const done = tasks.filter((task) => task.status === "done");
     const completedWithDate = done.filter((task) => task.completedAt);
-
-    const categories = Array.from(new Set(tasks.map((task) => task.category))).map((category) => ({
-      label: category,
-      value: tasks.filter((task) => task.category === category).length,
-    })).sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
 
     return {
       total: tasks.length,
@@ -402,22 +444,11 @@ export default function Home() {
       done: done.length,
       overdue: active.filter((task) => Boolean(task.dueDate && task.dueDate < today)).length,
       withoutDueDate: active.filter((task) => !task.dueDate).length,
-      completedThisWeek: completedWithDate.filter((task) => task.completedAt && task.completedAt >= weekStartIso).length,
       completedThisMonth: completedWithDate.filter((task) => task.completedAt && task.completedAt >= monthStartIso).length,
-      completedWithoutDate: done.length - completedWithDate.length,
       byStatus: Object.entries(statusLabels).map(([status, label]) => ({
         label,
         value: tasks.filter((task) => task.status === status).length,
       })),
-      byPrefix: [
-        { label: "אישי", value: tasks.filter((task) => task.prefix === "P").length },
-        { label: "עבודה", value: tasks.filter((task) => task.prefix === "W").length },
-      ],
-      byPriority: Object.entries(priorityLabels).map(([priority, label]) => ({
-        label,
-        value: tasks.filter((task) => task.priority === priority).length,
-      })),
-      byCategory: categories,
     };
   }, [tasks]);
 
@@ -459,7 +490,6 @@ export default function Home() {
           value: completedWithDate.filter((task) => task.completedAt === date).length,
         };
       }),
-      highPriority: highPriority.length,
       waiting: waiting.length,
       byCategory: activeCategories,
       attention: Array.from(attentionMap.values()).slice(0, 8),
@@ -506,32 +536,79 @@ export default function Home() {
     }));
   }
 
-  function updateTask(id: string, updates: Partial<Pick<Task, "title" | "category" | "priority" | "dueDate" | "notes">>) {
-    setTasks((current) => current.map((task) => task.id === id ? { ...task, ...updates } : task));
-  }
-
   function isOverdue(task: Task) {
     return Boolean(task.dueDate && !["done", "cancelled"].includes(task.status) && task.dueDate < todayIso());
   }
 
-  function addTask(event: FormEvent) {
+  function openCreateTask() {
+    setTaskEditorError("");
+    setTaskEditor({ mode: "create", draft: defaultTaskDraft(prefixFilter === "W" ? "W" : "P") });
+  }
+
+  function openEditTask(task: Task) {
+    setTaskEditorError("");
+    setTaskEditor({ mode: "edit", taskId: task.id, draft: taskToDraft(task) });
+  }
+
+  function updateTaskDraft(updates: Partial<TaskDraft>) {
+    setTaskEditor((current) => current ? { ...current, draft: { ...current.draft, ...updates } } : current);
+  }
+
+  function closeTaskEditor() {
+    setTaskEditor(null);
+    setTaskEditorError("");
+  }
+
+  function saveTaskEditor(event: FormEvent) {
     event.preventDefault();
-    const title = newTitle.trim();
-    if (!title) return;
+    if (!taskEditor) return;
+
+    const draft = taskEditor.draft;
+    const title = draft.title.trim();
+    const category = draft.category.trim();
+    if (!title) {
+      setTaskEditorError("יש למלא שם משימה.");
+      return;
+    }
+    if (!category) {
+      setTaskEditorError("יש למלא קטגוריה.");
+      return;
+    }
+
     setTasks((current) => {
-      const nextNumber = Math.max(0, ...current.filter((task) => task.prefix === newPrefix).map((task) => task.number)) + 1;
-      return [...current, {
-        id: `${newPrefix}${nextNumber}`,
-        prefix: newPrefix,
-        number: nextNumber,
-        title,
-        category: newPrefix === "W" ? "עבודה" : "אישי",
-        priority: "normal",
-        status: "open",
-        createdAt: todayIso(),
-      }];
+      if (taskEditor.mode === "create") {
+        const nextNumber = nextTaskNumber(current, draft.prefix);
+        return mergeUniqueTasks([...current, {
+          id: `${draft.prefix}${nextNumber}`,
+          prefix: draft.prefix,
+          number: nextNumber,
+          title,
+          category,
+          priority: draft.priority,
+          status: draft.status,
+          dueDate: draft.dueDate || undefined,
+          notes: draft.notes.trim() || undefined,
+          createdAt: todayIso(),
+          completedAt: draft.status === "done" ? todayIso() : undefined,
+        }]);
+      }
+
+      return current.map((task) => {
+        if (task.id !== taskEditor.taskId) return task;
+        return {
+          ...task,
+          title,
+          category,
+          priority: draft.priority,
+          status: draft.status,
+          dueDate: draft.dueDate || undefined,
+          notes: draft.notes.trim() || undefined,
+          completedAt: draft.status === "done" ? task.completedAt ?? todayIso() : undefined,
+        };
+      });
     });
-    setNewTitle("");
+
+    closeTaskEditor();
   }
 
   function resetDataWithConfirmation() {
@@ -547,7 +624,7 @@ export default function Home() {
       return;
     }
     setTasks(initialTasks);
-    setImportMessage("האיפוס המקומי בוצע. אם סנכרון הענן פעיל, מומלץ לבדוק את הנתונים לפני המשך עבודה.");
+    setImportMessage("האיפוס המקומי בוצע.");
   }
 
   function exportData() {
@@ -622,7 +699,10 @@ export default function Home() {
     setLastCloudPullAt(null);
     setCloudDevices([]);
     setDevicesStatus("");
-    setCloudStatus("התנתקת. הנתונים נשמרים מקומית בדפדפן.");
+    setIsCloudReady(true);
+    setIsSettingsOpen(false);
+    setTaskEditor(null);
+    setCloudStatus("התנתקת. יש להתחבר כדי לראות את המשימות.");
   }
 
   async function uploadLocalToCloud() {
@@ -698,371 +778,384 @@ export default function Home() {
           <h1>המשימות שלי</h1>
           <p className="subtitle">ניהול פשוט, עקבי ונגיש מכל מכשיר</p>
         </div>
+        {cloudUser && (
+          <button className="settings-button" onClick={() => setIsSettingsOpen(true)} aria-label="פתיחת הגדרות">
+            <span aria-hidden="true">⚙</span>
+            הגדרות
+          </button>
+        )}
       </header>
 
-      <section className="stats" aria-label="סיכום משימות">
-        <button onClick={() => { setStatusFilter("active"); setActiveView("tasks"); }}><strong>{counts.active}</strong><span>פעילות</span></button>
-        <button onClick={() => { setStatusFilter("waiting"); setActiveView("tasks"); }}><strong>{counts.waiting}</strong><span>ממתינות</span></button>
-        <button onClick={() => { setStatusFilter("done"); setActiveView("tasks"); }}><strong>{counts.done}</strong><span>הושלמו</span></button>
-      </section>
-
-      <nav className="view-tabs" aria-label="מעבר בין תצוגות">
-        <button className={activeView === "tasks" ? "active" : ""} onClick={() => setActiveView("tasks")}>משימות</button>
-        <button className={activeView === "stats" ? "active" : ""} onClick={() => setActiveView("stats")}>סטטיסטיקות</button>
-        <button className={activeView === "data" ? "active" : ""} onClick={() => setActiveView("data")}>גיבוי ושחזור</button>
-      </nav>
-
-      {activeView === "tasks" ? (
-        <>
-          <section className="panel controls">
-            <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="חיפוש משימה או מזהה, למשל P19" aria-label="חיפוש" />
-            <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)} aria-label="סינון סטטוס">
-              <option value="active">משימות פעילות</option>
-              <option value="open">פתוחות</option>
-              <option value="in_progress">בטיפול</option>
-              <option value="waiting">ממתינות</option>
-              <option value="done">בוצעו</option>
-              <option value="cancelled">בוטלו</option>
-              <option value="all">הכול</option>
-            </select>
-            <select value={prefixFilter} onChange={(e) => setPrefixFilter(e.target.value as typeof prefixFilter)} aria-label="סינון סוג">
-              <option value="all">אישי ועבודה</option>
-              <option value="P">אישי בלבד</option>
-              <option value="W">עבודה בלבד</option>
-            </select>
-          </section>
-
-          <section className="quick-filters" aria-label="סינון מהיר">
-            <button className={statusFilter === "today" ? "active" : ""} onClick={() => setStatusFilter("today")}>להיום</button>
-            <button className={statusFilter === "week" ? "active" : ""} onClick={() => setStatusFilter("week")}>השבוע</button>
-            <button className={statusFilter === "overdue" ? "active" : ""} onClick={() => setStatusFilter("overdue")}>באיחור</button>
-            <button className={statusFilter === "no_due" ? "active" : ""} onClick={() => setStatusFilter("no_due")}>בלי יעד</button>
-            <button className={statusFilter === "high" ? "active" : ""} onClick={() => setStatusFilter("high")}>גבוהה</button>
-          </section>
-
-          <form className="panel add-form" onSubmit={addTask}>
-            <select value={newPrefix} onChange={(e) => setNewPrefix(e.target.value as "P" | "W")} aria-label="סוג משימה">
-              <option value="P">אישי</option>
-              <option value="W">עבודה</option>
-            </select>
-            <input value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder="משימה חדשה…" aria-label="שם משימה חדשה" />
-            <button type="submit">הוספה</button>
-          </form>
-
-          <section className="task-list" aria-live="polite">
-            {filteredTasks.length === 0 && <div className="empty">לא נמצאו משימות מתאימות.</div>}
-            {filteredTasks.map((task) => (
-              <article className={`task-card status-${task.status}${isOverdue(task) ? " is-overdue" : ""}`} key={task.id}>
-                <button className="check" aria-label={`סימון ${task.title} כבוצעה`} onClick={() => updateStatus(task.id, task.status === "done" ? "open" : "done")}>
-                  {task.status === "done" ? "✓" : ""}
-                </button>
-                <div className="task-main">
-                  <div className="task-heading">
-                    <span className="task-id">{task.id}</span>
-                    <h2>{task.title}</h2>
-                  </div>
-                  <div className="meta">
-                    <span>{task.category}</span>
-                    <span>עדיפות {priorityLabels[task.priority]}</span>
-                    {task.dueDate && <span>יעד {formatDate(task.dueDate)}</span>}
-                    {task.completedAt && <span>נסגרה {formatDate(task.completedAt)}</span>}
-                  </div>
-                  {task.notes && <p className="task-notes">{task.notes}</p>}
-                </div>
-                <select value={task.status} onChange={(e) => updateStatus(task.id, e.target.value as TaskStatus)} aria-label={`סטטוס ${task.title}`}>
-                  {Object.entries(statusLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
-                </select>
-                <details className="task-details">
-                  <summary>פרטים ועריכה</summary>
-                  <div className="edit-grid">
-                    <label>
-                      <span>שם משימה</span>
-                      <input value={task.title} onChange={(e) => updateTask(task.id, { title: e.target.value })} />
-                    </label>
-                    <label>
-                      <span>קטגוריה</span>
-                      <input value={task.category} onChange={(e) => updateTask(task.id, { category: e.target.value })} />
-                    </label>
-                    <label>
-                      <span>עדיפות</span>
-                      <select value={task.priority} onChange={(e) => updateTask(task.id, { priority: e.target.value as TaskPriority })}>
-                        {Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
-                      </select>
-                    </label>
-                    <label>
-                      <span>תאריך יעד</span>
-                      <input type="date" value={task.dueDate ?? ""} onChange={(e) => updateTask(task.id, { dueDate: e.target.value || undefined })} />
-                    </label>
-                    <label className="notes-field">
-                      <span>הערות</span>
-                      <textarea value={task.notes ?? ""} onChange={(e) => updateTask(task.id, { notes: e.target.value || undefined })} rows={3} />
-                    </label>
-                  </div>
-                </details>
-              </article>
-            ))}
-          </section>
-        </>
-      ) : activeView === "stats" ? (
-        <section className="stats-view analytics-upgraded" aria-label="סטטיסטיקות משימות">
-          <div className="analytics-header">
+      {!cloudUser ? (
+        <section className="auth-gate" aria-label="התחברות">
+          <div className="panel auth-panel">
             <div>
-              <h2>תמונת מצב</h2>
-              <p>מדדים, קצב סגירה ומשימות שדורשות תשומת לב.</p>
-            </div>
-            <div className="range-tabs" aria-label="טווח סטטיסטיקות">
-              <button className={analyticsRange === "week" ? "active" : ""} onClick={() => setAnalyticsRange("week")}>7 ימים</button>
-              <button className={analyticsRange === "month" ? "active" : ""} onClick={() => setAnalyticsRange("month")}>חודש</button>
-              <button className={analyticsRange === "all" ? "active" : ""} onClick={() => setAnalyticsRange("all")}>הכול</button>
-            </div>
-          </div>
-
-          <div className="metric-grid analytics-metrics">
-            <div className="metric"><span>פעילות</span><strong>{statistics.active}</strong><small>פתוחות, בטיפול או ממתינות</small></div>
-            <div className="metric metric-danger"><span>באיחור</span><strong>{statistics.overdue}</strong><small>דורשות החלטה</small></div>
-            <div className="metric metric-warn"><span>ממתינות</span><strong>{analytics.waiting}</strong><small>תקועות על גורם חיצוני</small></div>
-            <div className="metric"><span>בלי תאריך יעד</span><strong>{statistics.withoutDueDate}</strong><small>כדאי למקד</small></div>
-            <div className="metric metric-good"><span>נסגרו בטווח</span><strong>{analytics.completedInRange}</strong><small>{analyticsRangeLabel()}</small></div>
-            <div className="metric"><span>כל המשימות</span><strong>{statistics.total}</strong><small>{statistics.done} הושלמו</small></div>
-          </div>
-
-          <div className="analytics-layout">
-            <div className="analytics-main">
-              <section className="panel chart-panel">
-                <div className="panel-heading">
-                  <h2>קצב סגירה - 7 ימים אחרונים</h2>
-                  <span>משימות שהושלמו לפי יום</span>
-                </div>
-                <div className="week-chart" aria-label="קצב סגירה שבועי">
-                  {analytics.completionTrend.map((row) => (
-                    <div className="day-column" key={row.date}>
-                      <div className="vertical-track"><div style={{ height: `${(row.value / maxTrendValue()) * 100}%` }} /></div>
-                      <strong>{row.value}</strong>
-                      <span>{row.label}</span>
-                    </div>
-                  ))}
-                </div>
-              </section>
-
-              <section className="panel chart-panel">
-                <div className="panel-heading">
-                  <h2>איפה מצטבר עומס</h2>
-                  <span>קטגוריות פעילות</span>
-                </div>
-                {analytics.byCategory.length === 0 ? (
-                  <p className="muted-line">אין כרגע קטגוריות פעילות.</p>
-                ) : analytics.byCategory.slice(0, 8).map((row) => (
-                  <div className="bar-row" key={row.label}>
-                    <span>{row.label}</span>
-                    <div className="bar-track"><div style={{ width: `${(row.value / maxValue(analytics.byCategory)) * 100}%` }} /></div>
-                    <strong>{row.value}</strong>
-                  </div>
-                ))}
-              </section>
-
-              <section className="panel chart-panel">
-                <div className="panel-heading">
-                  <h2>חלוקה לפי סטטוס</h2>
-                  <span>כל המשימות</span>
-                </div>
-                {statistics.byStatus.map((row) => (
-                  <div className="bar-row" key={row.label}>
-                    <span>{row.label}</span>
-                    <div className="bar-track"><div style={{ width: `${(row.value / maxValue(statistics.byStatus)) * 100}%` }} /></div>
-                    <strong>{row.value}</strong>
-                  </div>
-                ))}
-              </section>
-            </div>
-
-            <aside className="panel attention-panel">
-              <div className="panel-heading">
-                <h2>דורש תשומת לב</h2>
-                <span>לחיצה מעבירה למשימה ברשימה</span>
-              </div>
-              <div className="attention-list">
-                {analytics.attention.length === 0 ? (
-                  <p className="muted-line">אין כרגע משימות שדורשות תשומת לב מיוחדת.</p>
-                ) : analytics.attention.map((task) => (
-                  <button className={`attention-task${isOverdue(task) ? " overdue" : ""}`} key={task.id} onClick={() => focusTask(task.id)}>
-                    <span className="attention-top">
-                      <span className="task-id">{task.id}</span>
-                      <span className="attention-tag">{attentionReason(task)}</span>
-                    </span>
-                    <strong>{task.title}</strong>
-                    <span>{task.category} · עדיפות {priorityLabels[task.priority]}{task.dueDate ? ` · יעד ${formatDate(task.dueDate)}` : ""}</span>
-                  </button>
-                ))}
-              </div>
-            </aside>
-          </div>
-          <div className="metric-grid">
-            <div className="metric"><span>כל המשימות</span><strong>{statistics.total}</strong></div>
-            <div className="metric"><span>פעילות</span><strong>{statistics.active}</strong></div>
-            <div className="metric"><span>באיחור</span><strong>{statistics.overdue}</strong></div>
-            <div className="metric"><span>נסגרו החודש</span><strong>{statistics.completedThisMonth}</strong></div>
-          </div>
-
-          <section className="panel insight-panel">
-            <h2>קצב סגירה</h2>
-            <div className="timeline-stats">
-              <div><strong>{statistics.completedThisWeek}</strong><span>נסגרו ב־7 הימים האחרונים</span></div>
-              <div><strong>{statistics.completedThisMonth}</strong><span>נסגרו מתחילת החודש</span></div>
-              <div><strong>{statistics.completedWithoutDate}</strong><span>הושלמו לפני מעקב תאריכים</span></div>
-            </div>
-          </section>
-
-          <div className="chart-grid">
-            <section className="panel chart-panel">
-              <h2>לפי סטטוס</h2>
-              {statistics.byStatus.map((row) => (
-                <div className="bar-row" key={row.label}>
-                  <span>{row.label}</span>
-                  <div className="bar-track"><div style={{ width: `${(row.value / maxValue(statistics.byStatus)) * 100}%` }} /></div>
-                  <strong>{row.value}</strong>
-                </div>
-              ))}
-            </section>
-
-            <section className="panel chart-panel">
-              <h2>אישי מול עבודה</h2>
-              {statistics.byPrefix.map((row) => (
-                <div className="bar-row" key={row.label}>
-                  <span>{row.label}</span>
-                  <div className="bar-track"><div style={{ width: `${(row.value / maxValue(statistics.byPrefix)) * 100}%` }} /></div>
-                  <strong>{row.value}</strong>
-                </div>
-              ))}
-            </section>
-
-            <section className="panel chart-panel">
-              <h2>לפי עדיפות</h2>
-              {statistics.byPriority.map((row) => (
-                <div className="bar-row" key={row.label}>
-                  <span>{row.label}</span>
-                  <div className="bar-track"><div style={{ width: `${(row.value / maxValue(statistics.byPriority)) * 100}%` }} /></div>
-                  <strong>{row.value}</strong>
-                </div>
-              ))}
-            </section>
-
-            <section className="panel chart-panel">
-              <h2>קטגוריות מובילות</h2>
-              {statistics.byCategory.slice(0, 8).map((row) => (
-                <div className="bar-row" key={row.label}>
-                  <span>{row.label}</span>
-                  <div className="bar-track"><div style={{ width: `${(row.value / maxValue(statistics.byCategory)) * 100}%` }} /></div>
-                  <strong>{row.value}</strong>
-                </div>
-              ))}
-            </section>
-          </div>
-
-          <section className="panel data-note">
-            <strong>{statistics.withoutDueDate}</strong>
-            <span>משימות פעילות עדיין בלי תאריך יעד. ככל שנוסיף תאריכי יעד וסגירה, הסטטיסטיקות יהפכו מדויקות יותר.</span>
-          </section>
-        </section>
-      ) : (
-        <section className="data-view" aria-label="גיבוי ושחזור נתונים">
-          <section className="panel cloud-panel">
-            <div>
-              <h2>חיבור Supabase</h2>
-              <p>{cloudStatus}</p>
-              {cloudUser && <p className="cloud-user">מחובר: {cloudUser.email}</p>}
-              {cloudUser && (
-                <div className="sync-counters" aria-label="מונה סנכרון">
-                  <span>מקומי: <strong>{tasks.length}</strong></span>
-                  <span>ענן: <strong>{cloudTaskCount ?? "לא נבדק"}</strong></span>
-                </div>
-              )}
+              <p className="eyebrow">אזור פרטי</p>
+              <h2>התחברות למעקב המשימות</h2>
+              <p>כדי לשמור על פרטיות, המשימות מוצגות רק אחרי התחברות לחשבון שלך.</p>
             </div>
             {isSupabaseConfigured ? (
-              cloudUser ? (
-                <div className="cloud-actions">
-                  {!cloudSyncEnabled && <button onClick={uploadLocalToCloud}>העלאת הנתונים המקומיים לענן</button>}
-                  <button onClick={refreshCloudCount}>רענון מונה</button>
-                  <button className="secondary-action" onClick={signOut}>התנתקות</button>
-                </div>
-              ) : (
-                <form className="cloud-login" onSubmit={signIn}>
-                  <input type="email" value={authEmail} onChange={(event) => setAuthEmail(event.target.value)} placeholder="כתובת מייל להתחברות" aria-label="כתובת מייל להתחברות" />
-                  <button type="submit">שליחת קישור</button>
-                </form>
-              )
+              <form className="auth-form" onSubmit={signIn}>
+                <label>
+                  <span>כתובת מייל</span>
+                  <input type="email" value={authEmail} onChange={(event) => setAuthEmail(event.target.value)} placeholder="name@example.com" aria-label="כתובת מייל להתחברות" />
+                </label>
+                <button type="submit">שליחת קישור התחברות</button>
+              </form>
             ) : (
               <code>NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY</code>
             )}
+            <p className="auth-status">{cloudStatus}</p>
+          </div>
+        </section>
+      ) : !isCloudReady ? (
+        <section className="panel loading-panel" aria-live="polite">
+          <h2>טוען את המשימות שלך</h2>
+          <p>{cloudStatus}</p>
+        </section>
+      ) : (
+        <>
+          <section className="stats" aria-label="סיכום משימות">
+            <button onClick={() => { setStatusFilter("active"); setActiveView("tasks"); }}><strong>{counts.active}</strong><span>פעילות</span></button>
+            <button onClick={() => { setStatusFilter("waiting"); setActiveView("tasks"); }}><strong>{counts.waiting}</strong><span>ממתינות</span></button>
+            <button onClick={() => { setStatusFilter("done"); setActiveView("tasks"); }}><strong>{counts.done}</strong><span>הושלמו</span></button>
           </section>
 
-          {cloudUser && (
-            <section className="panel sync-panel">
-              <div>
-                <h2>סנכרון בין מכשירים</h2>
-                <p>האפליקציה מושכת עדכונים מהענן אוטומטית פעם בדקה כשהמסך פתוח.</p>
-                {lastCloudPullAt && <p>משיכה אחרונה: {formatDateTime(lastCloudPullAt)}</p>}
-              </div>
-              <button onClick={pullCloudToLocal}>משיכת נתונים מהענן</button>
-            </section>
-          )}
+          <nav className="view-tabs" aria-label="מעבר בין תצוגות">
+            <button className={activeView === "tasks" ? "active" : ""} onClick={() => setActiveView("tasks")}>משימות</button>
+            <button className={activeView === "stats" ? "active" : ""} onClick={() => setActiveView("stats")}>סטטיסטיקות</button>
+          </nav>
 
-          {cloudUser && (
-            <section className="panel devices-panel">
-              <div className="devices-header">
-                <div>
-                  <h2>מכשירים מחוברים</h2>
-                  <p>{devicesStatus || "בודק מכשירים שמחוברים לחשבון הזה."}</p>
-                </div>
-                <button onClick={refreshCloudDevices}>רענון מכשירים</button>
-              </div>
-              <div className="devices-list" aria-label="מכשירים מחוברים">
-                {cloudDevices.length === 0 ? (
-                  <p className="devices-empty">עדיין אין נתוני מכשירים להצגה.</p>
-                ) : cloudDevices.map((device) => (
-                  <article className="device-card" key={device.deviceId}>
-                    <div>
-                      <h3>{device.deviceName}</h3>
-                      <p>{deviceTypeLabel(device.deviceType)} · {device.browserName}</p>
+          {activeView === "tasks" ? (
+            <>
+              <section className="panel controls">
+                <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="חיפוש משימה או מזהה, למשל P19" aria-label="חיפוש" />
+                <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)} aria-label="סינון סטטוס">
+                  <option value="active">משימות פעילות</option>
+                  <option value="open">פתוחות</option>
+                  <option value="in_progress">בטיפול</option>
+                  <option value="waiting">ממתינות</option>
+                  <option value="done">בוצעו</option>
+                  <option value="cancelled">בוטלו</option>
+                  <option value="all">הכול</option>
+                </select>
+                <select value={prefixFilter} onChange={(e) => setPrefixFilter(e.target.value as typeof prefixFilter)} aria-label="סינון סוג">
+                  <option value="all">אישי ועבודה</option>
+                  <option value="P">אישי בלבד</option>
+                  <option value="W">עבודה בלבד</option>
+                </select>
+              </section>
+
+              <section className="quick-filters" aria-label="סינון מהיר">
+                <button className={statusFilter === "today" ? "active" : ""} onClick={() => setStatusFilter("today")}>להיום</button>
+                <button className={statusFilter === "week" ? "active" : ""} onClick={() => setStatusFilter("week")}>השבוע</button>
+                <button className={statusFilter === "overdue" ? "active" : ""} onClick={() => setStatusFilter("overdue")}>באיחור</button>
+                <button className={statusFilter === "no_due" ? "active" : ""} onClick={() => setStatusFilter("no_due")}>בלי יעד</button>
+                <button className={statusFilter === "high" ? "active" : ""} onClick={() => setStatusFilter("high")}>גבוהה</button>
+              </section>
+
+              <section className="task-list" aria-live="polite">
+                {filteredTasks.length === 0 && <div className="empty">לא נמצאו משימות מתאימות.</div>}
+                {filteredTasks.map((task) => (
+                  <article className={`task-card status-${task.status}${isOverdue(task) ? " is-overdue" : ""}`} key={task.id}>
+                    <button className="check" aria-label={`סימון ${task.title} כבוצעה`} onClick={() => updateStatus(task.id, task.status === "done" ? "open" : "done")}>
+                      {task.status === "done" ? "✓" : ""}
+                    </button>
+                    <div className="task-main">
+                      <div className="task-heading">
+                        <span className="task-id">{task.id}</span>
+                        <h2>{task.title}</h2>
+                      </div>
+                      <div className="meta">
+                        <span>{task.category}</span>
+                        <span>עדיפות {priorityLabels[task.priority]}</span>
+                        {task.dueDate && <span>יעד {formatDate(task.dueDate)}</span>}
+                        {task.completedAt && <span>נסגרה {formatDate(task.completedAt)}</span>}
+                      </div>
+                      {task.notes && <p className="task-notes">{task.notes}</p>}
                     </div>
-                    <div className="device-meta">
-                      {device.isCurrent && <span className="current-device">המכשיר הזה</span>}
-                      <span>נראה לאחרונה: {formatDateTime(device.lastSeenAt)}</span>
+                    <div className="task-actions">
+                      <select value={task.status} onChange={(e) => updateStatus(task.id, e.target.value as TaskStatus)} aria-label={`סטטוס ${task.title}`}>
+                        {Object.entries(statusLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
+                      </select>
+                      <button onClick={() => openEditTask(task)}>עריכה</button>
                     </div>
                   </article>
                 ))}
+              </section>
+
+              <button className="floating-add" onClick={openCreateTask} aria-label="הוספת משימה חדשה">+</button>
+            </>
+          ) : (
+            <section className="stats-view analytics-upgraded" aria-label="סטטיסטיקות משימות">
+              <div className="analytics-header">
+                <div>
+                  <h2>תמונת מצב</h2>
+                  <p>מדדים, קצב סגירה ומשימות שדורשות תשומת לב.</p>
+                </div>
+                <div className="range-tabs" aria-label="טווח סטטיסטיקות">
+                  <button className={analyticsRange === "week" ? "active" : ""} onClick={() => setAnalyticsRange("week")}>7 ימים</button>
+                  <button className={analyticsRange === "month" ? "active" : ""} onClick={() => setAnalyticsRange("month")}>חודש</button>
+                  <button className={analyticsRange === "all" ? "active" : ""} onClick={() => setAnalyticsRange("all")}>הכול</button>
+                </div>
+              </div>
+
+              <div className="metric-grid analytics-metrics">
+                <div className="metric"><span>פעילות</span><strong>{statistics.active}</strong><small>פתוחות, בטיפול או ממתינות</small></div>
+                <div className="metric metric-danger"><span>באיחור</span><strong>{statistics.overdue}</strong><small>דורשות החלטה</small></div>
+                <div className="metric metric-warn"><span>ממתינות</span><strong>{analytics.waiting}</strong><small>תקועות על גורם חיצוני</small></div>
+                <div className="metric"><span>בלי תאריך יעד</span><strong>{statistics.withoutDueDate}</strong><small>כדאי למקד</small></div>
+                <div className="metric metric-good"><span>נסגרו בטווח</span><strong>{analytics.completedInRange}</strong><small>{analyticsRangeLabel()}</small></div>
+                <div className="metric"><span>כל המשימות</span><strong>{statistics.total}</strong><small>{statistics.done} הושלמו</small></div>
+              </div>
+
+              <div className="analytics-layout">
+                <div className="analytics-main">
+                  <section className="panel chart-panel">
+                    <div className="panel-heading">
+                      <h2>קצב סגירה - 7 ימים אחרונים</h2>
+                      <span>משימות שהושלמו לפי יום</span>
+                    </div>
+                    <div className="week-chart" aria-label="קצב סגירה שבועי">
+                      {analytics.completionTrend.map((row) => (
+                        <div className="day-column" key={row.date}>
+                          <div className="vertical-track"><div style={{ height: `${(row.value / maxTrendValue()) * 100}%` }} /></div>
+                          <strong>{row.value}</strong>
+                          <span>{row.label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+
+                  <section className="panel chart-panel">
+                    <div className="panel-heading">
+                      <h2>איפה מצטבר עומס</h2>
+                      <span>קטגוריות פעילות</span>
+                    </div>
+                    {analytics.byCategory.length === 0 ? (
+                      <p className="muted-line">אין כרגע קטגוריות פעילות.</p>
+                    ) : analytics.byCategory.slice(0, 8).map((row) => (
+                      <div className="bar-row" key={row.label}>
+                        <span>{row.label}</span>
+                        <div className="bar-track"><div style={{ width: `${(row.value / maxValue(analytics.byCategory)) * 100}%` }} /></div>
+                        <strong>{row.value}</strong>
+                      </div>
+                    ))}
+                  </section>
+
+                  <section className="panel chart-panel">
+                    <div className="panel-heading">
+                      <h2>חלוקה לפי סטטוס</h2>
+                      <span>כל המשימות</span>
+                    </div>
+                    {statistics.byStatus.map((row) => (
+                      <div className="bar-row" key={row.label}>
+                        <span>{row.label}</span>
+                        <div className="bar-track"><div style={{ width: `${(row.value / maxValue(statistics.byStatus)) * 100}%` }} /></div>
+                        <strong>{row.value}</strong>
+                      </div>
+                    ))}
+                  </section>
+                </div>
+
+                <aside className="panel attention-panel">
+                  <div className="panel-heading">
+                    <h2>דורש תשומת לב</h2>
+                    <span>לחיצה מעבירה למשימה ברשימה</span>
+                  </div>
+                  <div className="attention-list">
+                    {analytics.attention.length === 0 ? (
+                      <p className="muted-line">אין כרגע משימות שדורשות תשומת לב מיוחדת.</p>
+                    ) : analytics.attention.map((task) => (
+                      <button className={`attention-task${isOverdue(task) ? " overdue" : ""}`} key={task.id} onClick={() => focusTask(task.id)}>
+                        <span className="attention-top">
+                          <span className="task-id">{task.id}</span>
+                          <span className="attention-tag">{attentionReason(task)}</span>
+                        </span>
+                        <strong>{task.title}</strong>
+                        <span>{task.category} · עדיפות {priorityLabels[task.priority]}{task.dueDate ? ` · יעד ${formatDate(task.dueDate)}` : ""}</span>
+                      </button>
+                    ))}
+                  </div>
+                </aside>
               </div>
             </section>
           )}
+        </>
+      )}
 
-          <section className="panel data-panel">
-            <div>
-              <h2>גיבוי מקומי</h2>
-              <p>ייצוא כל המשימות לקובץ JSON כולל סטטוסים, תאריכי יעד, הערות ותאריכי סגירה.</p>
+      {isSettingsOpen && (
+        <div className="modal-backdrop" role="presentation">
+          <section className="settings-drawer" role="dialog" aria-modal="true" aria-label="הגדרות">
+            <div className="drawer-header">
+              <div>
+                <p className="eyebrow">הגדרות</p>
+                <h2>חיבור, סנכרון וגיבוי</h2>
+              </div>
+              <button className="icon-button" onClick={() => setIsSettingsOpen(false)} aria-label="סגירת הגדרות">×</button>
             </div>
-            <button onClick={exportData}>ייצוא קובץ גיבוי</button>
-          </section>
 
-          <section className="panel data-panel">
-            <div>
-              <h2>שחזור במיזוג</h2>
-              <p>ייבוא מקובץ JSON יעדכן משימות לפי מזהה ויוסיף משימות חסרות. הוא לא מוחק משימות שלא קיימות בקובץ.</p>
+            <section className="data-view" aria-label="גיבוי ושחזור נתונים">
+              <section className="panel cloud-panel">
+                <div>
+                  <h2>חיבור Supabase</h2>
+                  <p>{cloudStatus}</p>
+                  {cloudUser && <p className="cloud-user">מחובר: {cloudUser.email}</p>}
+                  {cloudUser && (
+                    <div className="sync-counters" aria-label="מונה סנכרון">
+                      <span>מקומי: <strong>{tasks.length}</strong></span>
+                      <span>ענן: <strong>{cloudTaskCount ?? "לא נבדק"}</strong></span>
+                    </div>
+                  )}
+                </div>
+                {isSupabaseConfigured ? (
+                  cloudUser ? (
+                    <div className="cloud-actions">
+                      {!cloudSyncEnabled && <button onClick={uploadLocalToCloud}>העלאת הנתונים המקומיים לענן</button>}
+                      <button onClick={refreshCloudCount}>רענון מונה</button>
+                      <button className="secondary-action" onClick={signOut}>התנתקות</button>
+                    </div>
+                  ) : (
+                    <form className="cloud-login" onSubmit={signIn}>
+                      <input type="email" value={authEmail} onChange={(event) => setAuthEmail(event.target.value)} placeholder="כתובת מייל להתחברות" aria-label="כתובת מייל להתחברות" />
+                      <button type="submit">שליחת קישור</button>
+                    </form>
+                  )
+                ) : (
+                  <code>NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY</code>
+                )}
+              </section>
+
+              {cloudUser && (
+                <section className="panel sync-panel">
+                  <div>
+                    <h2>סנכרון בין מכשירים</h2>
+                    <p>האפליקציה מושכת עדכונים מהענן אוטומטית פעם בדקה כשהמסך פתוח.</p>
+                    {lastCloudPullAt && <p>משיכה אחרונה: {formatDateTime(lastCloudPullAt)}</p>}
+                  </div>
+                  <button onClick={pullCloudToLocal}>משיכת נתונים מהענן</button>
+                </section>
+              )}
+
+              {cloudUser && (
+                <section className="panel devices-panel">
+                  <div className="devices-header">
+                    <div>
+                      <h2>מכשירים מחוברים</h2>
+                      <p>{devicesStatus || "בודק מכשירים שמחוברים לחשבון הזה."}</p>
+                    </div>
+                    <button onClick={refreshCloudDevices}>רענון מכשירים</button>
+                  </div>
+                  <div className="devices-list" aria-label="מכשירים מחוברים">
+                    {cloudDevices.length === 0 ? (
+                      <p className="devices-empty">עדיין אין נתוני מכשירים להצגה.</p>
+                    ) : cloudDevices.map((device) => (
+                      <article className="device-card" key={device.deviceId}>
+                        <div>
+                          <h3>{device.deviceName}</h3>
+                          <p>{deviceTypeLabel(device.deviceType)} · {device.browserName}</p>
+                        </div>
+                        <div className="device-meta">
+                          {device.isCurrent && <span className="current-device">המכשיר הזה</span>}
+                          <span>נראה לאחרונה: {formatDateTime(device.lastSeenAt)}</span>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                </section>
+              )}
+
+              <section className="panel data-panel">
+                <div>
+                  <h2>גיבוי מקומי</h2>
+                  <p>ייצוא כל המשימות לקובץ JSON כולל סטטוסים, תאריכי יעד, הערות ותאריכי סגירה.</p>
+                </div>
+                <button onClick={exportData}>ייצוא קובץ גיבוי</button>
+              </section>
+
+              <section className="panel data-panel">
+                <div>
+                  <h2>שחזור במיזוג</h2>
+                  <p>ייבוא מקובץ JSON יעדכן משימות לפי מזהה ויוסיף משימות חסרות. הוא לא מוחק משימות שלא קיימות בקובץ.</p>
+                </div>
+                <label className="file-button">
+                  בחירת קובץ JSON
+                  <input type="file" accept="application/json,.json" onChange={importData} />
+                </label>
+              </section>
+
+              {importMessage && <p className="import-message">{importMessage}</p>}
+
+              <section className="panel danger-panel">
+                <div>
+                  <h2>איפוס לרשימת הבסיס</h2>
+                  <p>פעולה זו מחזירה את רשימת המשימות ההתחלתית של הפרויקט. כדאי לייצא גיבוי לפני שימוש בה.</p>
+                </div>
+                <button onClick={resetDataWithConfirmation}>איפוס נתוני ניסיון</button>
+              </section>
+            </section>
+          </section>
+        </div>
+      )}
+
+      {taskEditor && (
+        <div className="modal-backdrop" role="presentation">
+          <section className="task-drawer" role="dialog" aria-modal="true" aria-label={taskEditor.mode === "create" ? "משימה חדשה" : "עריכת משימה"}>
+            <div className="drawer-header">
+              <div>
+                <p className="eyebrow">{taskEditor.mode === "create" ? "משימה חדשה" : "עריכת משימה"}</p>
+                <h2>{taskEditor.mode === "create" ? "פרטי המשימה" : taskEditor.taskId}</h2>
+              </div>
+              <button className="icon-button" onClick={closeTaskEditor} aria-label="סגירת חלונית משימה">×</button>
             </div>
-            <label className="file-button">
-              בחירת קובץ JSON
-              <input type="file" accept="application/json,.json" onChange={importData} />
-            </label>
-          </section>
 
-          {importMessage && <p className="import-message">{importMessage}</p>}
-
-          <section className="panel danger-panel">
-            <div>
-              <h2>איפוס לרשימת הבסיס</h2>
-              <p>פעולה זו מחזירה את רשימת המשימות ההתחלתית של הפרויקט. כדאי לייצא גיבוי לפני שימוש בה.</p>
-            </div>
-            <button onClick={resetDataWithConfirmation}>איפוס נתוני ניסיון</button>
+            <form className="task-editor-form" onSubmit={saveTaskEditor}>
+              <label>
+                <span>סוג</span>
+                <select value={taskEditor.draft.prefix} onChange={(event) => updateTaskDraft({ prefix: event.target.value as TaskPrefix, category: event.target.value === "W" ? "עבודה" : "אישי" })} disabled={taskEditor.mode === "edit"} aria-label="סוג משימה">
+                  <option value="P">אישי</option>
+                  <option value="W">עבודה</option>
+                </select>
+              </label>
+              <label>
+                <span>שם משימה</span>
+                <input value={taskEditor.draft.title} onChange={(event) => updateTaskDraft({ title: event.target.value })} placeholder="מה צריך לעשות?" autoFocus />
+              </label>
+              <label>
+                <span>קטגוריה</span>
+                <input value={taskEditor.draft.category} onChange={(event) => updateTaskDraft({ category: event.target.value })} />
+              </label>
+              <label>
+                <span>סטטוס</span>
+                <select value={taskEditor.draft.status} onChange={(event) => updateTaskDraft({ status: event.target.value as TaskStatus })}>
+                  {Object.entries(statusLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
+                </select>
+              </label>
+              <label>
+                <span>עדיפות</span>
+                <select value={taskEditor.draft.priority} onChange={(event) => updateTaskDraft({ priority: event.target.value as TaskPriority })}>
+                  {Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
+                </select>
+              </label>
+              <label>
+                <span>תאריך יעד</span>
+                <input type="date" value={taskEditor.draft.dueDate} onChange={(event) => updateTaskDraft({ dueDate: event.target.value })} />
+              </label>
+              <label className="notes-field">
+                <span>הערות</span>
+                <textarea value={taskEditor.draft.notes} onChange={(event) => updateTaskDraft({ notes: event.target.value })} rows={5} />
+              </label>
+              {taskEditor.mode === "create" && (
+                <p className="editor-help">המספר ייווצר אוטומטית לפי הרצף הקיים ולא ניתן לבחור אותו ידנית.</p>
+              )}
+              {taskEditorError && <p className="editor-error">{taskEditorError}</p>}
+              <div className="drawer-actions">
+                <button type="submit">{taskEditor.mode === "create" ? "יצירת משימה" : "שמירת שינויים"}</button>
+                <button type="button" className="secondary-action" onClick={closeTaskEditor}>ביטול</button>
+              </div>
+            </form>
           </section>
-        </section>
+        </div>
       )}
     </main>
   );
