@@ -160,6 +160,9 @@ textarea { resize: vertical; min-height: 86px; }
 .vertical-track { align-items: end; background: #e8eef8; border-radius: 999px; display: flex; height: 130px; justify-content: center; overflow: hidden; width: 18px; }
 .vertical-track div { background: linear-gradient(180deg, var(--accent), var(--success)); border-radius: inherit; min-height: 4px; width: 100%; }
 .day-column span { color: var(--muted); font-size: .82rem; }
+.chart-empty-state { align-content: center; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 12px; display: grid; min-height: 190px; padding: 18px; text-align: center; }
+.chart-empty-state strong { font-size: 1rem; }
+.chart-empty-state p { color: var(--muted); line-height: 1.5; margin: 8px auto 0; max-width: 460px; }
 .attention-panel { align-self: start; }
 .attention-list { display: grid; gap: 10px; }
 .attention-task { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; color: var(--text); display: grid; gap: 7px; padding: 12px; text-align: right; width: 100%; }

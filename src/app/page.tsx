@@ -718,6 +718,8 @@ export default function Home() {
 
     return {
       completedInRange: completedInRange.length,
+      hasDatedCompletions: completedWithDate.length > 0,
+      undatedCompleted: done.length - completedWithDate.length,
       completionTrend: Array.from({ length: 7 }, (_, index) => {
         const date = addDaysIso(index - 6);
         return {
@@ -1297,15 +1299,25 @@ export default function Home() {
                       <h2>קצב סגירה - 7 ימים אחרונים</h2>
                       <span>משימות שהושלמו לפי יום</span>
                     </div>
-                    <div className="week-chart" aria-label="קצב סגירה שבועי">
-                      {analytics.completionTrend.map((row) => (
-                        <div className="day-column" key={row.date}>
-                          <div className="vertical-track"><div style={{ height: `${(row.value / maxTrendValue()) * 100}%` }} /></div>
-                          <strong>{row.value}</strong>
-                          <span>{row.label}</span>
-                        </div>
-                      ))}
-                    </div>
+                    {analytics.hasDatedCompletions ? (
+                      <div className="week-chart" aria-label="קצב סגירה שבועי">
+                        {analytics.completionTrend.map((row) => (
+                          <div className="day-column" key={row.date}>
+                            <div className="vertical-track"><div style={{ height: `${(row.value / maxTrendValue()) * 100}%` }} /></div>
+                            <strong>{row.value}</strong>
+                            <span>{row.label}</span>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="chart-empty-state">
+                        <strong>עדיין אין נתוני סגירה מתוארכים</strong>
+                        <p>
+                          קיימות {analytics.undatedCompleted} משימות שבוצעו ללא תאריך סגירה היסטורי.
+                          משימות שתסמן כבוצעו מעכשיו יופיעו כאן לפי יום.
+                        </p>
+                      </div>
+                    )}
                   </section>
 
                   <section className="panel chart-panel">
