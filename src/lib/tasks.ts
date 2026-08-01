@@ -14,6 +14,7 @@ export type Task = {
   dueDate?: string;
   createdAt?: string;
   completedAt?: string;
+  statusChangedAt?: string;
   notes?: string;
 };
 

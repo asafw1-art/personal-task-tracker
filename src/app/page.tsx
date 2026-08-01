@@ -96,6 +96,8 @@ const todayIso = () => {
   return now.toISOString().slice(0, 10);
 };
 
+const nowIso = () => new Date().toISOString();
+
 const addDaysIso = (days: number) => {
   const date = new Date();
   date.setDate(date.getDate() + days);
@@ -131,6 +133,17 @@ function formatDateTime(value: string) {
     dateStyle: "short",
     timeStyle: "short",
   }).format(new Date(value));
+}
+
+function formatStatusTimestamp(value?: string) {
+  if (!value) return "";
+  return new Intl.DateTimeFormat("he-IL", {
+    day: "numeric",
+    month: "numeric",
+    year: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(new Date(value.includes("T") ? value : `${value}T00:00:00`));
 }
 
 function deviceTypeLabel(value: UserDevice["deviceType"]) {
@@ -187,6 +200,7 @@ function normalizeImportedTask(value: unknown): Task | null {
     dueDate: optionalString(task.dueDate),
     createdAt: optionalString(task.createdAt),
     completedAt: optionalString(task.completedAt),
+    statusChangedAt: optionalString(task.statusChangedAt),
     notes: optionalString(task.notes),
   };
 }
@@ -236,6 +250,19 @@ function taskToDraft(task: Task): TaskDraft {
     dueDate: task.dueDate ?? "",
     notes: task.notes ?? "",
   };
+}
+
+function taskClosureDate(task: Task) {
+  return task.statusChangedAt?.slice(0, 10) ?? task.completedAt;
+}
+
+function taskStatusTimestamp(task: Task) {
+  return task.statusChangedAt ?? (task.status === "done" ? task.completedAt : undefined) ?? task.createdAt;
+}
+
+function taskStatusTimestampLabel(task: Task) {
+  const timestamp = taskStatusTimestamp(task);
+  return timestamp ? `סטטוס ${statusLabels[task.status]} ${formatStatusTimestamp(timestamp)}` : "";
 }
 
 function nextTaskNumber(tasks: Task[], prefix: TaskPrefix) {
@@ -609,7 +636,7 @@ export default function Home() {
     const monthStartIso = `${today.slice(0, 7)}-01`;
     const active = tasks.filter((task) => !["done", "cancelled"].includes(task.status));
     const done = tasks.filter((task) => task.status === "done");
-    const completedWithDate = done.filter((task) => task.completedAt);
+    const completedWithDate = done.filter((task) => taskClosureDate(task));
 
     return {
       total: tasks.length,
@@ -617,7 +644,10 @@ export default function Home() {
       done: done.length,
       overdue: active.filter((task) => Boolean(task.dueDate && task.dueDate < today)).length,
       withoutDueDate: active.filter((task) => !task.dueDate).length,
-      completedThisMonth: completedWithDate.filter((task) => task.completedAt && task.completedAt >= monthStartIso).length,
+      completedThisMonth: completedWithDate.filter((task) => {
+        const closureDate = taskClosureDate(task);
+        return closureDate && closureDate >= monthStartIso;
+      }).length,
       byStatus: Object.entries(statusLabels).map(([status, label]) => ({
         label,
         value: tasks.filter((task) => task.status === status).length,
@@ -632,11 +662,20 @@ export default function Home() {
     const rangeStartIso = analyticsRange === "week" ? weekStartIso : analyticsRange === "month" ? last30StartIso : "";
     const active = tasks.filter((task) => !["done", "cancelled"].includes(task.status));
     const done = tasks.filter((task) => task.status === "done");
-    const completedWithDate = done.filter((task) => task.completedAt);
-    const completedInRange = completedWithDate.filter((task) => !rangeStartIso || (task.completedAt && task.completedAt >= rangeStartIso));
+    const completedWithDate = done.filter((task) => taskClosureDate(task));
+    const completedInRange = completedWithDate.filter((task) => {
+      const closureDate = taskClosureDate(task);
+      return !rangeStartIso || Boolean(closureDate && closureDate >= rangeStartIso);
+    });
     const completedInRangeCount = analyticsRange === "all" ? done.length : completedInRange.length;
-    const completedLast7 = completedWithDate.filter((task) => task.completedAt && task.completedAt >= weekStartIso).length;
-    const completedLast30 = completedWithDate.filter((task) => task.completedAt && task.completedAt >= addDaysIso(-29)).length;
+    const completedLast7 = completedWithDate.filter((task) => {
+      const closureDate = taskClosureDate(task);
+      return closureDate && closureDate >= weekStartIso;
+    }).length;
+    const completedLast30 = completedWithDate.filter((task) => {
+      const closureDate = taskClosureDate(task);
+      return closureDate && closureDate >= addDaysIso(-29);
+    }).length;
     const overdue = active.filter((task) => Boolean(task.dueDate && task.dueDate < today));
     const waiting = active.filter((task) => task.status === "waiting");
     const withoutDueDate = active.filter((task) => !task.dueDate);
@@ -747,7 +786,7 @@ export default function Home() {
           return {
             key: date,
             label: new Intl.DateTimeFormat("he-IL", { weekday: "short", day: "numeric", month: "numeric" }).format(dateFromIso(date)),
-            value: completedWithDate.filter((task) => task.completedAt === date).length,
+            value: completedWithDate.filter((task) => taskClosureDate(task) === date).length,
           };
         });
       }
@@ -762,7 +801,7 @@ export default function Home() {
             key: weekStart,
             label: `${formatShortDate(weekStart)}-${formatShortDate(weekEnd)}`,
             value: completedWithDate.filter((task) => (
-              Boolean(task.completedAt && task.completedAt >= weekStart && task.completedAt <= weekEnd)
+              Boolean(taskClosureDate(task) && taskClosureDate(task)! >= weekStart && taskClosureDate(task)! <= weekEnd)
             )).length,
           });
           weekStart = addDaysToIso(weekEnd, 1);
@@ -772,7 +811,7 @@ export default function Home() {
       }
 
       const datedMonths = completedWithDate
-        .map((task) => task.completedAt?.slice(0, 7))
+        .map((task) => taskClosureDate(task)?.slice(0, 7))
         .filter((value): value is string => Boolean(value))
         .sort();
       const firstMonth = datedMonths[0] ?? today.slice(0, 7);
@@ -786,7 +825,7 @@ export default function Home() {
         rows.push({
           key: monthKey,
           label: new Intl.DateTimeFormat("he-IL", { month: "short", year: "2-digit" }).format(dateFromIso(monthCursor)),
-          value: completedWithDate.filter((task) => task.completedAt?.startsWith(monthKey)).length,
+          value: completedWithDate.filter((task) => taskClosureDate(task)?.startsWith(monthKey)).length,
         });
 
         const nextMonth = dateFromIso(monthCursor);
@@ -889,10 +928,12 @@ export default function Home() {
   function updateStatus(id: string, status: TaskStatus) {
     setTasks((current) => current.map((task) => {
       if (task.id !== id) return task;
+      const statusChangedAt = task.status === status ? task.statusChangedAt : nowIso();
       return {
         ...task,
         status,
         completedAt: status === "done" ? (task.status === "done" ? task.completedAt ?? todayIso() : todayIso()) : undefined,
+        statusChangedAt,
       };
     }));
   }
@@ -939,6 +980,8 @@ export default function Home() {
     setTasks((current) => {
       if (taskEditor.mode === "create") {
         const nextNumber = nextTaskNumber(current, draft.prefix);
+        const createdAt = todayIso();
+        const statusChangedAt = nowIso();
         return mergeUniqueTasks([...current, {
           id: `${draft.prefix}${nextNumber}`,
           prefix: draft.prefix,
@@ -950,13 +993,15 @@ export default function Home() {
           status: draft.status,
           dueDate: draft.dueDate || undefined,
           notes: draft.notes.trim() || undefined,
-          createdAt: todayIso(),
-          completedAt: draft.status === "done" ? todayIso() : undefined,
+          createdAt,
+          completedAt: draft.status === "done" ? createdAt : undefined,
+          statusChangedAt,
         }]);
       }
 
       return current.map((task) => {
         if (task.id !== taskEditor.taskId) return task;
+        const statusChangedAt = task.status === draft.status ? task.statusChangedAt : nowIso();
         return {
           ...task,
           title,
@@ -967,6 +1012,7 @@ export default function Home() {
           dueDate: draft.dueDate || undefined,
           notes: draft.notes.trim() || undefined,
           completedAt: draft.status === "done" ? (task.status === "done" ? task.completedAt ?? todayIso() : todayIso()) : undefined,
+          statusChangedAt,
         };
       });
     });
@@ -1288,7 +1334,7 @@ export default function Home() {
                         {task.actionType && <span>פעולה {task.actionType}</span>}
                         <span>עדיפות {priorityLabels[task.priority]}</span>
                         {task.dueDate && <span>יעד {formatDate(task.dueDate)}</span>}
-                        {task.completedAt && <span>נסגרה {formatDate(task.completedAt)}</span>}
+                        {taskStatusTimestampLabel(task) && <span className="status-timestamp">{taskStatusTimestampLabel(task)}</span>}
                       </div>
                       {task.notes && <p className="task-notes">{task.notes}</p>}
                     </div>
@@ -1343,6 +1389,7 @@ export default function Home() {
                               {task.actionType && <span>פעולה {task.actionType}</span>}
                               <span>עדיפות {priorityLabels[task.priority]}</span>
                               {task.dueDate && <span>יעד {formatDate(task.dueDate)}</span>}
+                              {taskStatusTimestampLabel(task) && <span className="status-timestamp">{taskStatusTimestampLabel(task)}</span>}
                             </div>
                             <div className="kanban-actions">
                               <select value={task.status} onChange={(event) => updateStatus(task.id, event.target.value as TaskStatus)} aria-label={`סטטוס ${task.title}`}>

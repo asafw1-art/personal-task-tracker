@@ -47,6 +47,7 @@ textarea { resize: vertical; min-height: 86px; }
 .task-heading h2 { margin: 0; font-size: 1rem; }
 .task-id { direction: ltr; display: inline-block; background: #eef4ff; color: var(--accent-dark); border-radius: 8px; padding: 3px 8px; font-weight: 800; }
 .meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 7px; color: var(--muted); font-size: .86rem; }
+.status-timestamp { color: #64748b; }
 .meta span + span::before { content: "•"; margin-left: 8px; }
 .task-notes { margin: 10px 0 0; color: var(--muted); font-size: .92rem; line-height: 1.5; }
 .task-actions { display: grid; gap: 8px; }

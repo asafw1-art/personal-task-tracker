@@ -14,6 +14,7 @@ create table public.tasks (
   notes text,
   due_at timestamptz,
   completed_at timestamptz,
+  status_changed_at timestamptz not null default now(),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (user_id, prefix, task_number)
