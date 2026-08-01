@@ -829,9 +829,9 @@ export default function Home() {
   }
 
   function completionChartSubtitle() {
-    if (analyticsRange === "week") return "משימות שהושלמו לפי יום";
-    if (analyticsRange === "month") return "משימות שהושלמו לפי שבוע";
-    return "משימות שהושלמו לפי חודש";
+    if (analyticsRange === "week") return "משימות שנסגרו לפי יום";
+    if (analyticsRange === "month") return "משימות שנסגרו לפי שבוע";
+    return "משימות שנסגרו לפי חודש";
   }
 
   function completionChartEmptyTitle() {
@@ -890,7 +890,7 @@ export default function Home() {
       return {
         ...task,
         status,
-        completedAt: status === "done" ? task.completedAt ?? todayIso() : undefined,
+        completedAt: status === "done" ? (task.status === "done" ? task.completedAt ?? todayIso() : todayIso()) : undefined,
       };
     }));
   }
@@ -964,7 +964,7 @@ export default function Home() {
           status: draft.status,
           dueDate: draft.dueDate || undefined,
           notes: draft.notes.trim() || undefined,
-          completedAt: draft.status === "done" ? task.completedAt ?? todayIso() : undefined,
+          completedAt: draft.status === "done" ? (task.status === "done" ? task.completedAt ?? todayIso() : todayIso()) : undefined,
         };
       });
     });
@@ -1409,6 +1409,7 @@ export default function Home() {
                       <h2>{completionChartTitle()}</h2>
                       <span>{completionChartSubtitle()}</span>
                     </div>
+                    <p className="chart-context">המדד מבוסס על מועד הסגירה בפועל, כלומר הרגע שבו המשימה עברה לסטטוס בוצעה. הוא לא משתמש בתאריך היעד או בתאריך יצירת המשימה.</p>
                     {analytics.hasRecentCompletions ? (
                       <div className="week-chart" aria-label={completionChartTitle()}>
                         {analytics.completionTrend.map((row) => (

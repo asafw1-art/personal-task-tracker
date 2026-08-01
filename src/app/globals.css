@@ -155,6 +155,7 @@ textarea { resize: vertical; min-height: 86px; }
 .analytics-main { display: grid; gap: 14px; }
 .panel-heading { align-items: baseline; display: flex; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .panel-heading h2 { margin: 0; font-size: 1rem; }
+.chart-context { color: var(--muted); font-size: .9rem; line-height: 1.5; margin: -4px 0 14px; }
 .week-chart { align-items: end; display: grid; gap: 10px; grid-auto-columns: minmax(58px, 1fr); grid-auto-flow: column; min-height: 190px; overflow-x: auto; padding-bottom: 4px; }
 .day-column { align-items: center; display: grid; gap: 7px; justify-items: center; }
 .vertical-track { align-items: end; background: #e8eef8; border-radius: 999px; display: flex; height: 130px; justify-content: center; overflow: hidden; width: 18px; }
