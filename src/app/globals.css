@@ -155,7 +155,7 @@ textarea { resize: vertical; min-height: 86px; }
 .analytics-main { display: grid; gap: 14px; }
 .panel-heading { align-items: baseline; display: flex; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
 .panel-heading h2 { margin: 0; font-size: 1rem; }
-.week-chart { align-items: end; display: grid; gap: 10px; grid-template-columns: repeat(7, 1fr); min-height: 190px; }
+.week-chart { align-items: end; display: grid; gap: 10px; grid-auto-columns: minmax(58px, 1fr); grid-auto-flow: column; min-height: 190px; overflow-x: auto; padding-bottom: 4px; }
 .day-column { align-items: center; display: grid; gap: 7px; justify-items: center; }
 .vertical-track { align-items: end; background: #e8eef8; border-radius: 999px; display: flex; height: 130px; justify-content: center; overflow: hidden; width: 18px; }
 .vertical-track div { background: linear-gradient(180deg, var(--accent), var(--success)); border-radius: inherit; min-height: 4px; width: 100%; }

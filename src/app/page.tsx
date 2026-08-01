@@ -39,6 +39,7 @@ const kanbanStatuses: TaskStatus[] = ["open", "in_progress", "waiting", "done", 
 const activeKanbanStatuses: TaskStatus[] = ["open", "in_progress", "waiting"];
 
 type StatRow = {
+  key?: string;
   label: string;
   value: number;
 };
@@ -100,6 +101,20 @@ const addDaysIso = (days: number) => {
   date.setDate(date.getDate() + days);
   date.setMinutes(date.getMinutes() - date.getTimezoneOffset());
   return date.toISOString().slice(0, 10);
+};
+
+const dateFromIso = (value: string) => new Date(`${value}T00:00:00`);
+
+const toLocalIso = (date: Date) => {
+  const localDate = new Date(date);
+  localDate.setMinutes(localDate.getMinutes() - localDate.getTimezoneOffset());
+  return localDate.toISOString().slice(0, 10);
+};
+
+const addDaysToIso = (value: string, days: number) => {
+  const date = dateFromIso(value);
+  date.setDate(date.getDate() + days);
+  return toLocalIso(date);
 };
 
 function formatDate(value?: string) {
@@ -721,14 +736,64 @@ export default function Home() {
       });
     }
 
-    const completionTrend = Array.from({ length: 7 }, (_, index) => {
-      const date = addDaysIso(index - 6);
-      return {
-        date,
-        label: new Intl.DateTimeFormat("he-IL", { weekday: "short" }).format(new Date(`${date}T00:00:00`)),
-        value: completedWithDate.filter((task) => task.completedAt === date).length,
-      };
-    });
+    const completionTrend = (() => {
+      if (analyticsRange === "week") {
+        return Array.from({ length: 7 }, (_, index) => {
+          const date = addDaysIso(index - 6);
+          return {
+            key: date,
+            label: new Intl.DateTimeFormat("he-IL", { weekday: "short" }).format(dateFromIso(date)),
+            value: completedWithDate.filter((task) => task.completedAt === date).length,
+          };
+        });
+      }
+
+      if (analyticsRange === "month") {
+        const rows: StatRow[] = [];
+        let weekStart = monthStartIso;
+        let weekNumber = 1;
+
+        while (weekStart <= today) {
+          const weekEnd = addDaysToIso(weekStart, 6) > today ? today : addDaysToIso(weekStart, 6);
+          rows.push({
+            key: weekStart,
+            label: `שבוע ${weekNumber}`,
+            value: completedWithDate.filter((task) => (
+              Boolean(task.completedAt && task.completedAt >= weekStart && task.completedAt <= weekEnd)
+            )).length,
+          });
+          weekStart = addDaysToIso(weekEnd, 1);
+          weekNumber += 1;
+        }
+
+        return rows;
+      }
+
+      const datedMonths = completedWithDate
+        .map((task) => task.completedAt?.slice(0, 7))
+        .filter((value): value is string => Boolean(value))
+        .sort();
+      const firstMonth = datedMonths[0] ?? today.slice(0, 7);
+      const lastMonth = today.slice(0, 7);
+      const rows: StatRow[] = [];
+      let monthCursor = `${firstMonth}-01`;
+      const lastMonthIso = `${lastMonth}-01`;
+
+      while (monthCursor <= lastMonthIso) {
+        const monthKey = monthCursor.slice(0, 7);
+        rows.push({
+          key: monthKey,
+          label: new Intl.DateTimeFormat("he-IL", { month: "short", year: "2-digit" }).format(dateFromIso(monthCursor)),
+          value: completedWithDate.filter((task) => task.completedAt?.startsWith(monthKey)).length,
+        });
+
+        const nextMonth = dateFromIso(monthCursor);
+        nextMonth.setMonth(nextMonth.getMonth() + 1);
+        monthCursor = toLocalIso(nextMonth);
+      }
+
+      return rows;
+    })();
 
     return {
       completedInRange: completedInRangeCount,
@@ -757,6 +822,18 @@ export default function Home() {
     return "הכול כולל היסטוריה";
   }
 
+  function completionChartTitle() {
+    if (analyticsRange === "week") return "קצב סגירה - 7 ימים אחרונים";
+    if (analyticsRange === "month") return "קצב סגירה - החודש לפי שבועות";
+    return "קצב סגירה - הכול לפי חודשים";
+  }
+
+  function completionChartSubtitle() {
+    if (analyticsRange === "week") return "משימות שהושלמו לפי יום";
+    if (analyticsRange === "month") return "משימות שהושלמו לפי שבוע";
+    return "משימות שהושלמו לפי חודש";
+  }
+
   function completionChartEmptyTitle() {
     if (analyticsRange === "all" && analytics.completedInRange > 0) {
       return `יש ${analytics.completedInRange} משימות שהושלמו בהיסטוריה`;
@@ -764,20 +841,22 @@ export default function Home() {
     if (analyticsRange === "month" && analytics.completedInRange > 0) {
       return `יש ${analytics.completedInRange} סגירות מתוארכות החודש`;
     }
+    if (analyticsRange === "all") return "אין סגירות מתוארכות להצגה";
+    if (analyticsRange === "month") return "אין סגירות החודש";
     return "אין סגירות ב-7 הימים האחרונים";
   }
 
   function completionChartEmptyBody() {
     if (analyticsRange === "all" && analytics.completedInRange > 0) {
-      return "חלק מהמשימות ההיסטוריות הושלמו לפני שהתחלנו לשמור תאריך סגירה, ולכן אי אפשר להציג אותן בגרף לפי יום. סגירות חדשות יופיעו כאן לפי היום שבו נסגרו.";
+      return "חלק מהמשימות ההיסטוריות הושלמו לפני שהתחלנו לשמור תאריך סגירה, ולכן אי אפשר לשייך אותן לחודש מסוים. סגירות חדשות יופיעו כאן לפי חודש הסגירה.";
     }
     if (analyticsRange === "month" && analytics.completedInRange > 0) {
-      return "יש סגירות מתוארכות החודש, אבל לא ב-7 הימים האחרונים שמוצגים בגרף היומי.";
+      return "יש סגירות מתוארכות החודש, אבל הן לא משויכות לשבוע שמוצג כרגע. סגירות חדשות יופיעו כאן לפי שבוע.";
     }
     if (!analytics.hasDatedCompletions && analytics.undatedCompleted > 0) {
-      return `קיימות ${analytics.undatedCompleted} משימות שבוצעו ללא תאריך סגירה היסטורי. משימות שתסמן כבוצעו מעכשיו יופיעו כאן לפי יום.`;
+      return `קיימות ${analytics.undatedCompleted} משימות שבוצעו ללא תאריך סגירה היסטורי. משימות שתסמן כבוצעו מעכשיו יופיעו כאן לפי הטווח שבחרת.`;
     }
-    return "יש משימות שבוצעו בעבר, אבל אף משימה לא נסגרה בשבוע האחרון. משימה שתסומן כבוצעה תופיע כאן מיד לפי יום.";
+    return "יש משימות שבוצעו בעבר, אבל אין סגירות מתוארכות בטווח הנבחר. משימה שתסומן כבוצעה תופיע כאן מיד בגרף.";
   }
 
   function attentionReason(task: Task) {
@@ -1327,13 +1406,13 @@ export default function Home() {
                 <div className="analytics-main">
                   <section className="panel chart-panel">
                     <div className="panel-heading">
-                      <h2>קצב סגירה - 7 ימים אחרונים</h2>
-                      <span>משימות שהושלמו לפי יום</span>
+                      <h2>{completionChartTitle()}</h2>
+                      <span>{completionChartSubtitle()}</span>
                     </div>
                     {analytics.hasRecentCompletions ? (
-                      <div className="week-chart" aria-label="קצב סגירה שבועי">
+                      <div className="week-chart" aria-label={completionChartTitle()}>
                         {analytics.completionTrend.map((row) => (
-                          <div className="day-column" key={row.date}>
+                          <div className="day-column" key={row.key ?? row.label}>
                             <div className="vertical-track"><div style={{ height: `${(row.value / maxTrendValue()) * 100}%` }} /></div>
                             <strong>{row.value}</strong>
                             <span>{row.label}</span>
