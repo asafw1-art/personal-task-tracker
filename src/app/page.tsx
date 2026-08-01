@@ -624,8 +624,8 @@ export default function Home() {
   const analytics = useMemo(() => {
     const today = todayIso();
     const weekStartIso = addDaysIso(-6);
-    const monthStartIso = `${today.slice(0, 7)}-01`;
-    const rangeStartIso = analyticsRange === "week" ? weekStartIso : analyticsRange === "month" ? monthStartIso : "";
+    const last30StartIso = addDaysIso(-29);
+    const rangeStartIso = analyticsRange === "week" ? weekStartIso : analyticsRange === "month" ? last30StartIso : "";
     const active = tasks.filter((task) => !["done", "cancelled"].includes(task.status));
     const done = tasks.filter((task) => task.status === "done");
     const completedWithDate = done.filter((task) => task.completedAt);
@@ -750,7 +750,7 @@ export default function Home() {
 
       if (analyticsRange === "month") {
         const rows: StatRow[] = [];
-        let weekStart = monthStartIso;
+        let weekStart = last30StartIso;
         let weekNumber = 1;
 
         while (weekStart <= today) {
@@ -818,13 +818,13 @@ export default function Home() {
 
   function analyticsRangeLabel() {
     if (analyticsRange === "week") return "7 ימים";
-    if (analyticsRange === "month") return "חודש";
+    if (analyticsRange === "month") return "30 ימים";
     return "הכול כולל היסטוריה";
   }
 
   function completionChartTitle() {
     if (analyticsRange === "week") return "קצב סגירה - 7 ימים אחרונים";
-    if (analyticsRange === "month") return "קצב סגירה - החודש לפי שבועות";
+    if (analyticsRange === "month") return "קצב סגירה - 30 ימים לפי שבועות";
     return "קצב סגירה - הכול לפי חודשים";
   }
 
@@ -839,10 +839,10 @@ export default function Home() {
       return `יש ${analytics.completedInRange} משימות שהושלמו בהיסטוריה`;
     }
     if (analyticsRange === "month" && analytics.completedInRange > 0) {
-      return `יש ${analytics.completedInRange} סגירות מתוארכות החודש`;
+      return `יש ${analytics.completedInRange} סגירות מתוארכות ב-30 הימים האחרונים`;
     }
     if (analyticsRange === "all") return "אין סגירות מתוארכות להצגה";
-    if (analyticsRange === "month") return "אין סגירות החודש";
+    if (analyticsRange === "month") return "אין סגירות ב-30 הימים האחרונים";
     return "אין סגירות ב-7 הימים האחרונים";
   }
 
@@ -851,7 +851,7 @@ export default function Home() {
       return "חלק מהמשימות ההיסטוריות הושלמו לפני שהתחלנו לשמור תאריך סגירה, ולכן אי אפשר לשייך אותן לחודש מסוים. סגירות חדשות יופיעו כאן לפי חודש הסגירה.";
     }
     if (analyticsRange === "month" && analytics.completedInRange > 0) {
-      return "יש סגירות מתוארכות החודש, אבל הן לא משויכות לשבוע שמוצג כרגע. סגירות חדשות יופיעו כאן לפי שבוע.";
+      return "יש סגירות מתוארכות ב-30 הימים האחרונים, אבל הן לא משויכות לשבוע שמוצג כרגע. סגירות חדשות יופיעו כאן לפי שבוע.";
     }
     if (!analytics.hasDatedCompletions && analytics.undatedCompleted > 0) {
       return `קיימות ${analytics.undatedCompleted} משימות שבוצעו ללא תאריך סגירה היסטורי. משימות שתסמן כבוצעו מעכשיו יופיעו כאן לפי הטווח שבחרת.`;
