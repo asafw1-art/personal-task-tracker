@@ -355,26 +355,25 @@ function parseStoredTaxonomy(raw: string | null): TaskTaxonomy {
   if (!raw) return defaultTaxonomy;
   try {
     const parsed = JSON.parse(raw) as Partial<TaskTaxonomy>;
-    return {
+    const storedTaxonomy = {
       topics: {
-        P: uniqueSorted([...(defaultTaxonomy.topics.P), ...(parsed.topics?.P ?? [])]),
-        W: uniqueSorted([...(defaultTaxonomy.topics.W), ...(parsed.topics?.W ?? [])]),
+        P: uniqueSorted(parsed.topics?.P ?? []),
+        W: uniqueSorted(parsed.topics?.W ?? []),
       },
-      actions: uniqueSorted([...(defaultTaxonomy.actions), ...(parsed.actions ?? [])]),
+      actions: uniqueSorted(parsed.actions ?? []),
     };
+    return isEmptyTaxonomy(storedTaxonomy) ? defaultTaxonomy : storedTaxonomy;
   } catch {
     return defaultTaxonomy;
   }
 }
 
-function mergeTaxonomies(...taxonomies: TaskTaxonomy[]): TaskTaxonomy {
-  return {
-    topics: {
-      P: uniqueSorted(taxonomies.flatMap((taxonomy) => taxonomy.topics.P)),
-      W: uniqueSorted(taxonomies.flatMap((taxonomy) => taxonomy.topics.W)),
-    },
-    actions: uniqueSorted(taxonomies.flatMap((taxonomy) => taxonomy.actions)),
-  };
+function replaceValue(values: string[], oldValue: string, newValue: string) {
+  return uniqueSorted(values.map((value) => value === oldValue ? newValue : value));
+}
+
+function isEmptyTaxonomy(taxonomy: TaskTaxonomy) {
+  return taxonomy.topics.P.length === 0 && taxonomy.topics.W.length === 0 && taxonomy.actions.length === 0;
 }
 
 export default function Home() {
@@ -470,7 +469,7 @@ export default function Home() {
     fetchCloudTaxonomy()
       .then((cloudTaxonomy) => {
         if (cancelled) return;
-        setTaxonomy(mergeTaxonomies(defaultTaxonomy, cloudTaxonomy));
+        setTaxonomy(isEmptyTaxonomy(cloudTaxonomy) ? defaultTaxonomy : cloudTaxonomy);
         setTaxonomyCloudReady(true);
         setTaxonomyStatus("נושאים ופעולות מסונכרנים לענן.");
       })
@@ -1138,6 +1137,22 @@ export default function Home() {
     }));
   }
 
+  function renameTopic(prefix: TaskPrefix, topic: string) {
+    const nextName = window.prompt(`שם חדש לנושא ${topic}`, topic)?.trim();
+    if (!nextName || nextName === topic) return;
+    setTaxonomy((current) => ({
+      ...current,
+      topics: {
+        ...current.topics,
+        [prefix]: replaceValue(current.topics[prefix], topic, nextName),
+      },
+    }));
+    setTasks((current) => current.map((task) => (
+      task.prefix === prefix && task.category === topic ? { ...task, category: nextName } : task
+    )));
+    setTopicFilter((current) => current === topic ? nextName : current);
+  }
+
   function addAction(event: FormEvent) {
     event.preventDefault();
     const name = newActionName.trim();
@@ -1154,6 +1169,19 @@ export default function Home() {
       ...current,
       actions: current.actions.filter((value) => value !== action),
     }));
+  }
+
+  function renameAction(action: string) {
+    const nextName = window.prompt(`שם חדש לפעולה ${action}`, action)?.trim();
+    if (!nextName || nextName === action) return;
+    setTaxonomy((current) => ({
+      ...current,
+      actions: replaceValue(current.actions, action, nextName),
+    }));
+    setTasks((current) => current.map((task) => (
+      task.actionType === action ? { ...task, actionType: nextName } : task
+    )));
+    setActionFilter((current) => current === action ? nextName : current);
   }
 
   function resetDataWithConfirmation() {
@@ -1681,6 +1709,7 @@ export default function Home() {
                             {topicOptions[prefix].map((topic) => (
                               <span className="taxonomy-chip" key={topic}>
                                 {topic}
+                                <button onClick={() => renameTopic(prefix, topic)} aria-label={`עריכת נושא ${topic}`}>✎</button>
                                 <button onClick={() => removeTopic(prefix, topic)} aria-label={`מחיקת נושא ${topic}`}>×</button>
                               </span>
                             ))}
@@ -1699,6 +1728,7 @@ export default function Home() {
                       {actionOptions.map((action) => (
                         <span className="taxonomy-chip" key={action}>
                           {action}
+                          <button onClick={() => renameAction(action)} aria-label={`עריכת פעולה ${action}`}>✎</button>
                           <button onClick={() => removeAction(action)} aria-label={`מחיקת פעולה ${action}`}>×</button>
                         </span>
                       ))}
