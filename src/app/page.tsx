@@ -697,13 +697,17 @@ export default function Home() {
 
     insights.push({
       id: "completion-rate",
-      title: `${completedLast7} נסגרו השבוע, ${completedLast30} ב-30 יום`,
+      title: done.length > completedLast30
+        ? `${completedLast7} השבוע, ${completedLast30} ב-30 יום, ${done.length} היסטוריות`
+        : `${completedLast7} נסגרו השבוע, ${completedLast30} ב-30 יום`,
       body: completedLast7 > 0
         ? "יש תנועה קדימה. המדד הזה יעזור לזהות בהמשך אם הקצב יורד או עולה."
-        : "השבוע עוד לא נסגרו משימות. אפשר לבחור משימה קטנה אחת ולייצר התקדמות מהירה.",
+        : done.length > 0
+          ? "יש משימות שהושלמו בעבר, אבל השבוע לא נסגרה משימה מתוארכת. סגירות חדשות יופיעו במדד השבועי."
+          : "השבוע עוד לא נסגרו משימות. אפשר לבחור משימה קטנה אחת ולייצר התקדמות מהירה.",
       tone: completedLast7 > 0 ? "good" : "neutral",
-      actionLabel: completedLast7 > 0 ? "הצג הושלמו" : "הצג פעילות",
-      action: { statusFilter: completedLast7 > 0 ? "done" : "active" },
+      actionLabel: done.length > 0 ? "הצג הושלמו" : "הצג פעילות",
+      action: { statusFilter: done.length > 0 ? "done" : "active" },
     });
 
     if (stuckTasks.length > 0) {
@@ -751,6 +755,29 @@ export default function Home() {
     if (analyticsRange === "week") return "7 ימים";
     if (analyticsRange === "month") return "חודש";
     return "הכול כולל היסטוריה";
+  }
+
+  function completionChartEmptyTitle() {
+    if (analyticsRange === "all" && analytics.completedInRange > 0) {
+      return `יש ${analytics.completedInRange} משימות שהושלמו בהיסטוריה`;
+    }
+    if (analyticsRange === "month" && analytics.completedInRange > 0) {
+      return `יש ${analytics.completedInRange} סגירות מתוארכות החודש`;
+    }
+    return "אין סגירות ב-7 הימים האחרונים";
+  }
+
+  function completionChartEmptyBody() {
+    if (analyticsRange === "all" && analytics.completedInRange > 0) {
+      return "חלק מהמשימות ההיסטוריות הושלמו לפני שהתחלנו לשמור תאריך סגירה, ולכן אי אפשר להציג אותן בגרף לפי יום. סגירות חדשות יופיעו כאן לפי היום שבו נסגרו.";
+    }
+    if (analyticsRange === "month" && analytics.completedInRange > 0) {
+      return "יש סגירות מתוארכות החודש, אבל לא ב-7 הימים האחרונים שמוצגים בגרף היומי.";
+    }
+    if (!analytics.hasDatedCompletions && analytics.undatedCompleted > 0) {
+      return `קיימות ${analytics.undatedCompleted} משימות שבוצעו ללא תאריך סגירה היסטורי. משימות שתסמן כבוצעו מעכשיו יופיעו כאן לפי יום.`;
+    }
+    return "יש משימות שבוצעו בעבר, אבל אף משימה לא נסגרה בשבוע האחרון. משימה שתסומן כבוצעה תופיע כאן מיד לפי יום.";
   }
 
   function attentionReason(task: Task) {
@@ -1315,15 +1342,8 @@ export default function Home() {
                       </div>
                     ) : (
                       <div className="chart-empty-state">
-                        <strong>{analytics.hasDatedCompletions ? "אין סגירות ב-7 הימים האחרונים" : "עדיין אין נתוני סגירה מתוארכים"}</strong>
-                        {analytics.hasDatedCompletions ? (
-                          <p>יש משימות שבוצעו בעבר, אבל אף משימה לא נסגרה בשבוע האחרון. משימה שתסומן כבוצעה תופיע כאן מיד לפי יום.</p>
-                        ) : (
-                          <p>
-                            קיימות {analytics.undatedCompleted} משימות שבוצעו ללא תאריך סגירה היסטורי.
-                            משימות שתסמן כבוצעו מעכשיו יופיעו כאן לפי יום.
-                          </p>
-                        )}
+                        <strong>{completionChartEmptyTitle()}</strong>
+                        <p>{completionChartEmptyBody()}</p>
                       </div>
                     )}
                   </section>
