@@ -43,6 +43,19 @@ type StatRow = {
   value: number;
 };
 
+type AnalyticsInsight = {
+  id: string;
+  title: string;
+  body: string;
+  tone: "danger" | "warn" | "good" | "neutral";
+  actionLabel?: string;
+  action?: {
+    statusFilter?: TaskFilter;
+    topicFilter?: string;
+    query?: string;
+  };
+};
+
 type ImportSummary = {
   added: number;
   updated: number;
@@ -602,6 +615,8 @@ export default function Home() {
     const done = tasks.filter((task) => task.status === "done");
     const completedWithDate = done.filter((task) => task.completedAt);
     const completedInRange = completedWithDate.filter((task) => !rangeStartIso || (task.completedAt && task.completedAt >= rangeStartIso));
+    const completedLast7 = completedWithDate.filter((task) => task.completedAt && task.completedAt >= weekStartIso).length;
+    const completedLast30 = completedWithDate.filter((task) => task.completedAt && task.completedAt >= addDaysIso(-29)).length;
     const overdue = active.filter((task) => Boolean(task.dueDate && task.dueDate < today));
     const waiting = active.filter((task) => task.status === "waiting");
     const withoutDueDate = active.filter((task) => !task.dueDate);
@@ -620,6 +635,86 @@ export default function Home() {
       label: category,
       value: active.filter((task) => task.category === category).length,
     })).sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
+    const topCategory = activeCategories[0];
+    const stuckTasks = active
+      .filter((task) => task.status === "waiting" || Boolean(task.dueDate && task.dueDate < addDaysIso(-7)))
+      .sort((a, b) => (a.dueDate ?? "9999-12-31").localeCompare(b.dueDate ?? "9999-12-31") || a.number - b.number);
+    const insights: AnalyticsInsight[] = [];
+
+    if (overdue.length > 0) {
+      insights.push({
+        id: "overdue",
+        title: `${overdue.length} משימות באיחור`,
+        body: "כדאי להתחיל מהן לפני הוספת משימות חדשות, כדי להוריד עומס פתוח.",
+        tone: "danger",
+        actionLabel: "הצג באיחור",
+        action: { statusFilter: "overdue" },
+      });
+    } else if (active.length > 0) {
+      insights.push({
+        id: "no-overdue",
+        title: "אין משימות באיחור",
+        body: "מצב טוב. אפשר להתמקד במשימות בעדיפות גבוהה או בממתינות.",
+        tone: "good",
+        actionLabel: highPriority.length > 0 ? "הצג גבוהה" : "הצג פעילות",
+        action: { statusFilter: highPriority.length > 0 ? "high" : "active" },
+      });
+    }
+
+    if (topCategory && topCategory.value >= 3) {
+      insights.push({
+        id: "top-category",
+        title: `עומס מרכזי בנושא ${topCategory.label}`,
+        body: `${topCategory.value} משימות פעילות מרוכזות שם. זה כנראה המקום שבו מיקוד קצר ייתן הכי הרבה ערך.`,
+        tone: "warn",
+        actionLabel: "פתח נושא",
+        action: { statusFilter: "active", topicFilter: topCategory.label },
+      });
+    }
+
+    if (withoutDueDate.length > 0) {
+      insights.push({
+        id: "without-due-date",
+        title: `${withoutDueDate.length} משימות בלי תאריך יעד`,
+        body: "לא חייבים לתארך הכול, אבל כדאי לתת יעד למשימות שצריכות לזוז השבוע.",
+        tone: "neutral",
+        actionLabel: "הצג בלי יעד",
+        action: { statusFilter: "no_due" },
+      });
+    }
+
+    if (waiting.length > 0) {
+      insights.push({
+        id: "waiting",
+        title: `${waiting.length} משימות ממתינות`,
+        body: "שווה לבדוק מי הגורם החוסם ולסגור לולאה קצרה במקום לתת לזה להישאר פתוח.",
+        tone: "warn",
+        actionLabel: "הצג ממתינות",
+        action: { statusFilter: "waiting" },
+      });
+    }
+
+    insights.push({
+      id: "completion-rate",
+      title: `${completedLast7} נסגרו השבוע, ${completedLast30} ב-30 יום`,
+      body: completedLast7 > 0
+        ? "יש תנועה קדימה. המדד הזה יעזור לזהות בהמשך אם הקצב יורד או עולה."
+        : "השבוע עוד לא נסגרו משימות. אפשר לבחור משימה קטנה אחת ולייצר התקדמות מהירה.",
+      tone: completedLast7 > 0 ? "good" : "neutral",
+      actionLabel: completedLast7 > 0 ? "הצג הושלמו" : "הצג פעילות",
+      action: { statusFilter: completedLast7 > 0 ? "done" : "active" },
+    });
+
+    if (stuckTasks.length > 0) {
+      insights.push({
+        id: "stuck",
+        title: "יש משימות שנראות תקועות",
+        body: `${stuckTasks.length} משימות ממתינות או עם יעד ישן. כדאי לבחור אחת ולהחליט: לקדם, לעדכן יעד או לסגור.`,
+        tone: "danger",
+        actionLabel: "פתח ראשונה",
+        action: { query: stuckTasks[0].id, statusFilter: "all" },
+      });
+    }
 
     return {
       completedInRange: completedInRange.length,
@@ -634,6 +729,7 @@ export default function Home() {
       waiting: waiting.length,
       byCategory: activeCategories,
       attention: Array.from(attentionMap.values()).slice(0, 8),
+      insights: insights.slice(0, 5),
     };
   }, [analyticsRange, tasks]);
 
@@ -663,6 +759,16 @@ export default function Home() {
     setQuery(taskId);
     setStatusFilter("all");
     setPrefixFilter("all");
+    setActiveView("tasks");
+  }
+
+  function applyInsightAction(insight: AnalyticsInsight) {
+    if (!insight.action) return;
+    setQuery(insight.action.query ?? "");
+    setStatusFilter(insight.action.statusFilter ?? "active");
+    setPrefixFilter("all");
+    setActionFilter("all");
+    setTopicFilter(insight.action.topicFilter ?? "all");
     setActiveView("tasks");
   }
 
@@ -1152,6 +1258,28 @@ export default function Home() {
                   <button className={analyticsRange === "all" ? "active" : ""} onClick={() => setAnalyticsRange("all")}>הכול</button>
                 </div>
               </div>
+
+              <section className="panel insights-panel" aria-label="תובנות מרכזיות">
+                <div className="panel-heading">
+                  <div>
+                    <h2>תובנות מרכזיות</h2>
+                    <span>מיידי, שבועי וכללי לפי מצב המשימות הנוכחי</span>
+                  </div>
+                </div>
+                <div className="insights-grid">
+                  {analytics.insights.map((insight) => (
+                    <article className={`insight-card insight-${insight.tone}`} key={insight.id}>
+                      <div>
+                        <h3>{insight.title}</h3>
+                        <p>{insight.body}</p>
+                      </div>
+                      {insight.action && insight.actionLabel && (
+                        <button onClick={() => applyInsightAction(insight)}>{insight.actionLabel}</button>
+                      )}
+                    </article>
+                  ))}
+                </div>
+              </section>
 
               <div className="metric-grid analytics-metrics">
                 <div className="metric"><span>פעילות</span><strong>{statistics.active}</strong><small>פתוחות, בטיפול או ממתינות</small></div>
