@@ -615,6 +615,7 @@ export default function Home() {
     const done = tasks.filter((task) => task.status === "done");
     const completedWithDate = done.filter((task) => task.completedAt);
     const completedInRange = completedWithDate.filter((task) => !rangeStartIso || (task.completedAt && task.completedAt >= rangeStartIso));
+    const completedInRangeCount = analyticsRange === "all" ? done.length : completedInRange.length;
     const completedLast7 = completedWithDate.filter((task) => task.completedAt && task.completedAt >= weekStartIso).length;
     const completedLast30 = completedWithDate.filter((task) => task.completedAt && task.completedAt >= addDaysIso(-29)).length;
     const overdue = active.filter((task) => Boolean(task.dueDate && task.dueDate < today));
@@ -726,7 +727,7 @@ export default function Home() {
     });
 
     return {
-      completedInRange: completedInRange.length,
+      completedInRange: completedInRangeCount,
       hasDatedCompletions: completedWithDate.length > 0,
       hasRecentCompletions: completionTrend.some((row) => row.value > 0),
       undatedCompleted: done.length - completedWithDate.length,
@@ -749,7 +750,7 @@ export default function Home() {
   function analyticsRangeLabel() {
     if (analyticsRange === "week") return "7 ימים";
     if (analyticsRange === "month") return "חודש";
-    return "הכול";
+    return "הכול כולל היסטוריה";
   }
 
   function attentionReason(task: Task) {
