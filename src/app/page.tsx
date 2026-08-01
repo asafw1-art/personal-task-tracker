@@ -122,6 +122,10 @@ function formatDate(value?: string) {
   return new Intl.DateTimeFormat("he-IL").format(new Date(`${value}T00:00:00`));
 }
 
+function formatShortDate(value: string) {
+  return new Intl.DateTimeFormat("he-IL", { day: "numeric", month: "numeric" }).format(dateFromIso(value));
+}
+
 function formatDateTime(value: string) {
   return new Intl.DateTimeFormat("he-IL", {
     dateStyle: "short",
@@ -751,19 +755,17 @@ export default function Home() {
       if (analyticsRange === "month") {
         const rows: StatRow[] = [];
         let weekStart = last30StartIso;
-        let weekNumber = 1;
 
         while (weekStart <= today) {
           const weekEnd = addDaysToIso(weekStart, 6) > today ? today : addDaysToIso(weekStart, 6);
           rows.push({
             key: weekStart,
-            label: `שבוע ${weekNumber}`,
+            label: `${formatShortDate(weekStart)}-${formatShortDate(weekEnd)}`,
             value: completedWithDate.filter((task) => (
               Boolean(task.completedAt && task.completedAt >= weekStart && task.completedAt <= weekEnd)
             )).length,
           });
           weekStart = addDaysToIso(weekEnd, 1);
-          weekNumber += 1;
         }
 
         return rows;
