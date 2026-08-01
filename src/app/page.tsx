@@ -742,7 +742,7 @@ export default function Home() {
           const date = addDaysIso(index - 6);
           return {
             key: date,
-            label: new Intl.DateTimeFormat("he-IL", { weekday: "short" }).format(dateFromIso(date)),
+            label: new Intl.DateTimeFormat("he-IL", { weekday: "short", day: "numeric", month: "numeric" }).format(dateFromIso(date)),
             value: completedWithDate.filter((task) => task.completedAt === date).length,
           };
         });
