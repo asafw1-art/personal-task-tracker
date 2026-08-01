@@ -49,9 +49,11 @@ type AnalyticsInsight = {
   title: string;
   body: string;
   tone: "danger" | "warn" | "good" | "neutral";
+  priority?: number;
   actionLabel?: string;
   action?: {
     statusFilter?: TaskFilter;
+    prefixFilter?: TaskPrefix | "all";
     topicFilter?: string;
     query?: string;
   };
@@ -658,6 +660,9 @@ export default function Home() {
   const analytics = useMemo(() => {
     const today = todayIso();
     const weekStartIso = addDaysIso(-6);
+    const previousWeekStartIso = addDaysIso(-13);
+    const tomorrowIso = addDaysIso(1);
+    const nextWeekIso = addDaysIso(7);
     const last30StartIso = addDaysIso(-29);
     const rangeStartIso = analyticsRange === "week" ? weekStartIso : analyticsRange === "month" ? last30StartIso : "";
     const active = tasks.filter((task) => !["done", "cancelled"].includes(task.status));
@@ -672,14 +677,27 @@ export default function Home() {
       const closureDate = taskClosureDate(task);
       return closureDate && closureDate >= weekStartIso;
     }).length;
+    const completedPrevious7 = completedWithDate.filter((task) => {
+      const closureDate = taskClosureDate(task);
+      return closureDate && closureDate >= previousWeekStartIso && closureDate < weekStartIso;
+    }).length;
     const completedLast30 = completedWithDate.filter((task) => {
       const closureDate = taskClosureDate(task);
       return closureDate && closureDate >= addDaysIso(-29);
     }).length;
     const overdue = active.filter((task) => Boolean(task.dueDate && task.dueDate < today));
+    const dueSoon = active.filter((task) => Boolean(task.dueDate && task.dueDate >= tomorrowIso && task.dueDate <= nextWeekIso));
     const waiting = active.filter((task) => task.status === "waiting");
     const withoutDueDate = active.filter((task) => !task.dueDate);
     const highPriority = active.filter((task) => task.priority === "high");
+    const staleInProgress = active.filter((task) => {
+      const statusDate = taskStatusTimestamp(task)?.slice(0, 10);
+      return task.status === "in_progress" && Boolean(statusDate && statusDate < addDaysIso(-14));
+    });
+    const activeByPrefix = {
+      P: active.filter((task) => task.prefix === "P").length,
+      W: active.filter((task) => task.prefix === "W").length,
+    };
     const attentionMap = new Map<string, Task>();
     const addAttention = (source: Task[]) => source.forEach((task) => {
       if (!attentionMap.has(task.id)) attentionMap.set(task.id, task);
@@ -699,61 +717,135 @@ export default function Home() {
       .filter((task) => task.status === "waiting" || Boolean(task.dueDate && task.dueDate < addDaysIso(-7)))
       .sort((a, b) => (a.dueDate ?? "9999-12-31").localeCompare(b.dueDate ?? "9999-12-31") || a.number - b.number);
     const insights: AnalyticsInsight[] = [];
+    const addInsight = (insight: AnalyticsInsight) => insights.push(insight);
 
     if (overdue.length > 0) {
-      insights.push({
+      addInsight({
         id: "overdue",
         title: `${overdue.length} משימות באיחור`,
         body: "כדאי להתחיל מהן לפני הוספת משימות חדשות, כדי להוריד עומס פתוח.",
         tone: "danger",
+        priority: 100,
         actionLabel: "הצג באיחור",
         action: { statusFilter: "overdue" },
       });
     } else if (active.length > 0) {
-      insights.push({
+      addInsight({
         id: "no-overdue",
         title: "אין משימות באיחור",
         body: "מצב טוב. אפשר להתמקד במשימות בעדיפות גבוהה או בממתינות.",
         tone: "good",
+        priority: 25,
         actionLabel: highPriority.length > 0 ? "הצג גבוהה" : "הצג פעילות",
         action: { statusFilter: highPriority.length > 0 ? "high" : "active" },
       });
     }
 
+    if (completedLast7 < completedPrevious7 && completedPrevious7 >= 2) {
+      addInsight({
+        id: "closure-slowdown",
+        title: "קצב הסגירה ירד השבוע",
+        body: `${completedLast7} סגירות השבוע לעומת ${completedPrevious7} בשבוע הקודם. כדאי לבחור משימה קטנה אחת ולסגור אותה כדי להחזיר תנופה.`,
+        tone: "warn",
+        priority: 92,
+        actionLabel: "הצג פעילות",
+        action: { statusFilter: "active" },
+      });
+    } else if (completedLast7 > completedPrevious7 && completedLast7 > 0) {
+      addInsight({
+        id: "closure-improved",
+        title: "קצב הסגירה השתפר",
+        body: `${completedLast7} סגירות השבוע לעומת ${completedPrevious7} בשבוע הקודם. שווה לשמר את הקצב עם עוד משימה קצרה.`,
+        tone: "good",
+        priority: 55,
+        actionLabel: "הצג פעילות",
+        action: { statusFilter: "active" },
+      });
+    }
+
+    if (activeByPrefix.P >= Math.max(6, activeByPrefix.W * 2)) {
+      addInsight({
+        id: "personal-load",
+        title: "עומס גבוה במשימות אישיות",
+        body: `${activeByPrefix.P} משימות אישיות פעילות לעומת ${activeByPrefix.W} בעבודה. כדאי לבחור נושא אישי אחד ולצמצם אותו לפני פתיחת עוד משימות.`,
+        tone: "warn",
+        priority: 86,
+        actionLabel: "הצג אישי",
+        action: { statusFilter: "active", prefixFilter: "P" },
+      });
+    } else if (activeByPrefix.W >= Math.max(6, activeByPrefix.P * 2)) {
+      addInsight({
+        id: "work-load",
+        title: "עומס גבוה במשימות עבודה",
+        body: `${activeByPrefix.W} משימות עבודה פעילות לעומת ${activeByPrefix.P} אישיות. כדאי למקד פעולה אחת שתשחרר חסימה או תוריד עומס.`,
+        tone: "warn",
+        priority: 86,
+        actionLabel: "הצג עבודה",
+        action: { statusFilter: "active", prefixFilter: "W" },
+      });
+    }
+
+    if (dueSoon.length > 0) {
+      addInsight({
+        id: "due-soon",
+        title: `${dueSoon.length} משימות מתקרבות השבוע`,
+        body: "יש משימות עם תאריך יעד קרוב. כדאי לעבור עליהן עכשיו ולוודא שהעדיפות והסטטוס עדיין נכונים.",
+        tone: dueSoon.length >= 3 ? "warn" : "neutral",
+        priority: dueSoon.length >= 3 ? 84 : 58,
+        actionLabel: "הצג השבוע",
+        action: { statusFilter: "week" },
+      });
+    }
+
     if (topCategory && topCategory.value >= 3) {
-      insights.push({
+      addInsight({
         id: "top-category",
         title: `עומס מרכזי בנושא ${topCategory.label}`,
         body: `${topCategory.value} משימות פעילות מרוכזות שם. זה כנראה המקום שבו מיקוד קצר ייתן הכי הרבה ערך.`,
         tone: "warn",
+        priority: topCategory.value >= 6 ? 88 : 70,
         actionLabel: "פתח נושא",
         action: { statusFilter: "active", topicFilter: topCategory.label },
       });
     }
 
     if (withoutDueDate.length > 0) {
-      insights.push({
+      addInsight({
         id: "without-due-date",
         title: `${withoutDueDate.length} משימות בלי תאריך יעד`,
         body: "לא חייבים לתארך הכול, אבל כדאי לתת יעד למשימות שצריכות לזוז השבוע.",
         tone: "neutral",
+        priority: withoutDueDate.length >= 8 ? 80 : 45,
         actionLabel: "הצג בלי יעד",
         action: { statusFilter: "no_due" },
       });
     }
 
     if (waiting.length > 0) {
-      insights.push({
+      addInsight({
         id: "waiting",
         title: `${waiting.length} משימות ממתינות`,
         body: "שווה לבדוק מי הגורם החוסם ולסגור לולאה קצרה במקום לתת לזה להישאר פתוח.",
         tone: "warn",
+        priority: waiting.length >= 3 ? 82 : 60,
         actionLabel: "הצג ממתינות",
         action: { statusFilter: "waiting" },
       });
     }
 
-    insights.push({
+    if (staleInProgress.length > 0) {
+      addInsight({
+        id: "stale-in-progress",
+        title: `${staleInProgress.length} משימות בטיפול שלא זזו`,
+        body: "יש משימות שנמצאות בטיפול מעל שבועיים לפי מועד שינוי הסטטוס. כדאי להחליט אם לקדם, להעביר לממתינה או לסגור.",
+        tone: "warn",
+        priority: 78,
+        actionLabel: "הצג בטיפול",
+        action: { statusFilter: "in_progress" },
+      });
+    }
+
+    addInsight({
       id: "completion-rate",
       title: done.length > completedLast30
         ? `${completedLast7} השבוע, ${completedLast30} ב-30 יום, ${done.length} היסטוריות`
@@ -764,16 +856,18 @@ export default function Home() {
           ? "יש משימות שהושלמו בעבר, אבל השבוע לא נסגרה משימה מתוארכת. סגירות חדשות יופיעו במדד השבועי."
           : "השבוע עוד לא נסגרו משימות. אפשר לבחור משימה קטנה אחת ולייצר התקדמות מהירה.",
       tone: completedLast7 > 0 ? "good" : "neutral",
+      priority: completedLast7 > 0 ? 50 : 72,
       actionLabel: done.length > 0 ? "הצג הושלמו" : "הצג פעילות",
       action: { statusFilter: done.length > 0 ? "done" : "active" },
     });
 
     if (stuckTasks.length > 0) {
-      insights.push({
+      addInsight({
         id: "stuck",
         title: "יש משימות שנראות תקועות",
         body: `${stuckTasks.length} משימות ממתינות או עם יעד ישן. כדאי לבחור אחת ולהחליט: לקדם, לעדכן יעד או לסגור.`,
         tone: "danger",
+        priority: 95,
         actionLabel: "פתח ראשונה",
         action: { query: stuckTasks[0].id, statusFilter: "all" },
       });
@@ -845,7 +939,7 @@ export default function Home() {
       waiting: waiting.length,
       byCategory: activeCategories,
       attention: Array.from(attentionMap.values()).slice(0, 8),
-      insights: insights.slice(0, 5),
+      insights: insights.sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0)).slice(0, 5),
     };
   }, [analyticsRange, tasks]);
 
@@ -919,7 +1013,7 @@ export default function Home() {
     if (!insight.action) return;
     setQuery(insight.action.query ?? "");
     setStatusFilter(insight.action.statusFilter ?? "active");
-    setPrefixFilter("all");
+    setPrefixFilter(insight.action.prefixFilter ?? "all");
     setActionFilter("all");
     setTopicFilter(insight.action.topicFilter ?? "all");
     setActiveView("tasks");
