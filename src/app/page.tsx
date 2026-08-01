@@ -716,18 +716,21 @@ export default function Home() {
       });
     }
 
+    const completionTrend = Array.from({ length: 7 }, (_, index) => {
+      const date = addDaysIso(index - 6);
+      return {
+        date,
+        label: new Intl.DateTimeFormat("he-IL", { weekday: "short" }).format(new Date(`${date}T00:00:00`)),
+        value: completedWithDate.filter((task) => task.completedAt === date).length,
+      };
+    });
+
     return {
       completedInRange: completedInRange.length,
       hasDatedCompletions: completedWithDate.length > 0,
+      hasRecentCompletions: completionTrend.some((row) => row.value > 0),
       undatedCompleted: done.length - completedWithDate.length,
-      completionTrend: Array.from({ length: 7 }, (_, index) => {
-        const date = addDaysIso(index - 6);
-        return {
-          date,
-          label: new Intl.DateTimeFormat("he-IL", { weekday: "short" }).format(new Date(`${date}T00:00:00`)),
-          value: completedWithDate.filter((task) => task.completedAt === date).length,
-        };
-      }),
+      completionTrend,
       waiting: waiting.length,
       byCategory: activeCategories,
       attention: Array.from(attentionMap.values()).slice(0, 8),
@@ -1299,7 +1302,7 @@ export default function Home() {
                       <h2>קצב סגירה - 7 ימים אחרונים</h2>
                       <span>משימות שהושלמו לפי יום</span>
                     </div>
-                    {analytics.hasDatedCompletions ? (
+                    {analytics.hasRecentCompletions ? (
                       <div className="week-chart" aria-label="קצב סגירה שבועי">
                         {analytics.completionTrend.map((row) => (
                           <div className="day-column" key={row.date}>
@@ -1311,11 +1314,15 @@ export default function Home() {
                       </div>
                     ) : (
                       <div className="chart-empty-state">
-                        <strong>עדיין אין נתוני סגירה מתוארכים</strong>
-                        <p>
-                          קיימות {analytics.undatedCompleted} משימות שבוצעו ללא תאריך סגירה היסטורי.
-                          משימות שתסמן כבוצעו מעכשיו יופיעו כאן לפי יום.
-                        </p>
+                        <strong>{analytics.hasDatedCompletions ? "אין סגירות ב-7 הימים האחרונים" : "עדיין אין נתוני סגירה מתוארכים"}</strong>
+                        {analytics.hasDatedCompletions ? (
+                          <p>יש משימות שבוצעו בעבר, אבל אף משימה לא נסגרה בשבוע האחרון. משימה שתסומן כבוצעה תופיע כאן מיד לפי יום.</p>
+                        ) : (
+                          <p>
+                            קיימות {analytics.undatedCompleted} משימות שבוצעו ללא תאריך סגירה היסטורי.
+                            משימות שתסמן כבוצעו מעכשיו יופיעו כאן לפי יום.
+                          </p>
+                        )}
                       </div>
                     )}
                   </section>
