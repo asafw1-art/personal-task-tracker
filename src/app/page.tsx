@@ -76,6 +76,10 @@ type AnalyticsRange = "week" | "month" | "all";
 type MainView = "tasks" | "stats" | "kanban";
 type TaxonomyMode = "topics" | "actions";
 type SettingsTab = "taxonomy" | "sync";
+type EditingTaxonomyItem =
+  | { type: "topic"; prefix: TaskPrefix; name: string; value: string }
+  | { type: "action"; name: string; value: string }
+  | null;
 
 type TaskTaxonomy = {
   topics: Record<TaskPrefix, string[]>;
@@ -483,6 +487,7 @@ export default function Home() {
   const [newTopicPrefix, setNewTopicPrefix] = useState<TaskPrefix>("P");
   const [newTopicName, setNewTopicName] = useState("");
   const [newActionName, setNewActionName] = useState("");
+  const [editingTaxonomyItem, setEditingTaxonomyItem] = useState<EditingTaxonomyItem>(null);
   const [importMessage, setImportMessage] = useState("");
   const [authEmail, setAuthEmail] = useState("");
   const [cloudUser, setCloudUser] = useState<User | null>(null);
@@ -682,7 +687,13 @@ export default function Home() {
   }), [tasks, taxonomy]);
 
   const actionOptions = useMemo(() => (
-    uniqueSorted([...taxonomy.actions, ...tasks.map((task) => task.actionType ?? "")])
+    uniqueSorted([
+      ...taxonomy.actions,
+      ...tasks.flatMap((task) => [
+        task.actionType ?? "",
+        ...(task.subtasks ?? []).map((subtask) => subtask.actionType ?? ""),
+      ]),
+    ])
   ), [tasks, taxonomy]);
 
   const filteredTasks = useMemo(() => {
@@ -1291,22 +1302,6 @@ export default function Home() {
     }));
   }
 
-  function renameTopic(prefix: TaskPrefix, topic: string) {
-    const nextName = window.prompt(`שם חדש לנושא ${topic}`, topic)?.trim();
-    if (!nextName || nextName === topic) return;
-    setTaxonomy((current) => ({
-      ...current,
-      topics: {
-        ...current.topics,
-        [prefix]: replaceValue(current.topics[prefix], topic, nextName),
-      },
-    }));
-    setTasks((current) => current.map((task) => (
-      task.prefix === prefix && task.category === topic ? { ...task, category: nextName } : task
-    )));
-    setTopicFilter((current) => current === topic ? nextName : current);
-  }
-
   function addAction(event: FormEvent) {
     event.preventDefault();
     const name = newActionName.trim();
@@ -1325,17 +1320,63 @@ export default function Home() {
     }));
   }
 
-  function renameAction(action: string) {
-    const nextName = window.prompt(`שם חדש לפעולה ${action}`, action)?.trim();
-    if (!nextName || nextName === action) return;
+  function applyTopicRename(prefix: TaskPrefix, topic: string, nextName: string) {
+    const cleanName = nextName.trim();
+    if (!cleanName || cleanName === topic) return;
     setTaxonomy((current) => ({
       ...current,
-      actions: replaceValue(current.actions, action, nextName),
+      topics: {
+        ...current.topics,
+        [prefix]: replaceValue(current.topics[prefix], topic, cleanName),
+      },
     }));
     setTasks((current) => current.map((task) => (
-      task.actionType === action ? { ...task, actionType: nextName } : task
+      task.prefix === prefix && task.category === topic ? { ...task, category: cleanName } : task
     )));
-    setActionFilter((current) => current === action ? nextName : current);
+    setTopicFilter((current) => current === topic ? cleanName : current);
+  }
+
+  function applyActionRename(action: string, nextName: string) {
+    const cleanName = nextName.trim();
+    if (!cleanName || cleanName === action) return;
+    setTaxonomy((current) => ({
+      ...current,
+      actions: replaceValue(current.actions, action, cleanName),
+    }));
+    setTasks((current) => current.map((task) => ({
+      ...task,
+      actionType: task.actionType === action ? cleanName : task.actionType,
+      subtasks: task.subtasks?.map((subtask) => (
+        subtask.actionType === action ? { ...subtask, actionType: cleanName } : subtask
+      )),
+    })));
+    setActionFilter((current) => current === action ? cleanName : current);
+  }
+
+  function startEditTopic(prefix: TaskPrefix, topic: string) {
+    setEditingTaxonomyItem({ type: "topic", prefix, name: topic, value: topic });
+  }
+
+  function startEditAction(action: string) {
+    setEditingTaxonomyItem({ type: "action", name: action, value: action });
+  }
+
+  function updateEditingTaxonomyValue(value: string) {
+    setEditingTaxonomyItem((current) => current ? { ...current, value } : current);
+  }
+
+  function cancelEditingTaxonomyItem() {
+    setEditingTaxonomyItem(null);
+  }
+
+  function saveEditingTaxonomyItem() {
+    if (!editingTaxonomyItem) return;
+    if (editingTaxonomyItem.type === "topic") {
+      applyTopicRename(editingTaxonomyItem.prefix, editingTaxonomyItem.name, editingTaxonomyItem.value);
+    } else {
+      applyActionRename(editingTaxonomyItem.name, editingTaxonomyItem.value);
+    }
+    setEditingTaxonomyItem(null);
   }
 
   function resetDataWithConfirmation() {
@@ -1883,6 +1924,24 @@ export default function Home() {
                   </div>
                 </div>
                 <p className="taxonomy-status">{taxonomyStatus}</p>
+                {editingTaxonomyItem && (
+                  <form className="taxonomy-edit-form" onSubmit={(event) => {
+                    event.preventDefault();
+                    saveEditingTaxonomyItem();
+                  }}>
+                    <label>
+                      <span>{editingTaxonomyItem.type === "topic" ? "עריכת נושא" : "עריכת פעולה"}</span>
+                      <input
+                        value={editingTaxonomyItem.value}
+                        onChange={(event) => updateEditingTaxonomyValue(event.target.value)}
+                        aria-label={editingTaxonomyItem.type === "topic" ? "שם נושא חדש" : "שם פעולה חדש"}
+                        autoFocus
+                      />
+                    </label>
+                    <button type="submit">שמירה</button>
+                    <button type="button" className="secondary-action" onClick={cancelEditingTaxonomyItem}>ביטול</button>
+                  </form>
+                )}
 
                 {taxonomyMode === "topics" ? (
                   <div className="taxonomy-manager">
@@ -1902,7 +1961,7 @@ export default function Home() {
                             {topicOptions[prefix].map((topic) => (
                               <span className="taxonomy-chip" key={topic}>
                                 {topic}
-                                <button onClick={() => renameTopic(prefix, topic)} aria-label={`עריכת נושא ${topic}`}>✎</button>
+                                <button type="button" onClick={() => startEditTopic(prefix, topic)} aria-label={`עריכת נושא ${topic}`}>✎</button>
                                 <button onClick={() => removeTopic(prefix, topic)} aria-label={`מחיקת נושא ${topic}`}>×</button>
                               </span>
                             ))}
@@ -1921,7 +1980,7 @@ export default function Home() {
                       {actionOptions.map((action) => (
                         <span className="taxonomy-chip" key={action}>
                           {action}
-                          <button onClick={() => renameAction(action)} aria-label={`עריכת פעולה ${action}`}>✎</button>
+                          <button type="button" onClick={() => startEditAction(action)} aria-label={`עריכת פעולה ${action}`}>✎</button>
                           <button onClick={() => removeAction(action)} aria-label={`מחיקת פעולה ${action}`}>×</button>
                         </span>
                       ))}
