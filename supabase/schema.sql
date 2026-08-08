@@ -15,6 +15,7 @@ create table public.tasks (
   due_at timestamptz,
   completed_at timestamptz,
   status_changed_at timestamptz not null default now(),
+  subtasks jsonb not null default '[]'::jsonb,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (user_id, prefix, task_number)

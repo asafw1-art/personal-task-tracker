@@ -1,6 +1,17 @@
 export type TaskStatus = "open" | "in_progress" | "waiting" | "done" | "cancelled";
+export type TaskSubtaskStatus = "open" | "done" | "cancelled";
 export type TaskPriority = "high" | "important" | "normal" | "low";
 export type TaskPrefix = "P" | "W";
+
+export type TaskSubtask = {
+  id: string;
+  number: number;
+  title: string;
+  status: TaskSubtaskStatus;
+  actionType?: string;
+  createdAt?: string;
+  statusChangedAt?: string;
+};
 
 export type Task = {
   id: string;
@@ -15,6 +26,7 @@ export type Task = {
   createdAt?: string;
   completedAt?: string;
   statusChangedAt?: string;
+  subtasks?: TaskSubtask[];
   notes?: string;
 };
 

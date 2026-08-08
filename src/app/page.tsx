@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { ChangeEvent, Dispatch, FormEvent, SetStateAction } from "react";
 import type { User } from "@supabase/supabase-js";
-import { canonicalTaskId, initialTasks, Task, TaskPrefix, TaskPriority, TaskStatus } from "@/lib/tasks";
+import { canonicalTaskId, initialTasks, Task, TaskPrefix, TaskPriority, TaskStatus, TaskSubtask, TaskSubtaskStatus } from "@/lib/tasks";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { fetchUserDevices, registerCurrentDevice, type UserDevice } from "@/lib/supabaseDevices";
 import { countCloudTasks, fetchCloudTasks, saveCloudTasks } from "@/lib/supabaseTasks";
@@ -25,6 +25,12 @@ const priorityLabels: Record<TaskPriority, string> = {
   important: "חשובה",
   normal: "רגילה",
   low: "נמוכה",
+};
+
+const subtaskStatusLabels: Record<TaskSubtaskStatus, string> = {
+  open: "טרם בוצע",
+  done: "בוצע",
+  cancelled: "בוטל",
 };
 
 const defaultTaxonomy: TaskTaxonomy = {
@@ -85,6 +91,7 @@ type TaskDraft = {
   status: TaskStatus;
   dueDate: string;
   notes: string;
+  subtasks: TaskSubtask[];
 };
 
 type TaskEditorState =
@@ -171,12 +178,50 @@ function isTaskStatus(value: unknown): value is TaskStatus {
   return typeof value === "string" && Object.keys(statusLabels).includes(value);
 }
 
+function isTaskSubtaskStatus(value: unknown): value is TaskSubtaskStatus {
+  return typeof value === "string" && Object.keys(subtaskStatusLabels).includes(value);
+}
+
 function isTaskPriority(value: unknown): value is TaskPriority {
   return typeof value === "string" && Object.keys(priorityLabels).includes(value);
 }
 
 function optionalString(value: unknown) {
   return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function normalizeImportedSubtasks(value: unknown, parentId: string): TaskSubtask[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const subtask = item as Record<string, unknown>;
+      const number = Number(subtask.number);
+      const id = typeof subtask.id === "string" && subtask.id.trim()
+        ? subtask.id.trim()
+        : Number.isInteger(number) && number > 0
+          ? `${parentId}.${number}`
+          : "";
+      if (!id.startsWith(`${parentId}.`) || !Number.isInteger(number) || number <= 0) return null;
+      if (typeof subtask.title !== "string" || !subtask.title.trim()) return null;
+      if (!isTaskSubtaskStatus(subtask.status)) return null;
+      const normalized: TaskSubtask = {
+        id,
+        number,
+        title: subtask.title.trim(),
+        status: subtask.status,
+      };
+
+      const actionType = optionalString(subtask.actionType);
+      const createdAt = optionalString(subtask.createdAt);
+      const statusChangedAt = optionalString(subtask.statusChangedAt);
+      if (actionType) normalized.actionType = actionType;
+      if (createdAt) normalized.createdAt = createdAt;
+      if (statusChangedAt) normalized.statusChangedAt = statusChangedAt;
+      return normalized;
+    })
+    .filter((subtask): subtask is TaskSubtask => Boolean(subtask))
+    .sort((a, b) => a.number - b.number);
 }
 
 function normalizeImportedTask(value: unknown): Task | null {
@@ -203,6 +248,7 @@ function normalizeImportedTask(value: unknown): Task | null {
     createdAt: optionalString(task.createdAt),
     completedAt: optionalString(task.completedAt),
     statusChangedAt: optionalString(task.statusChangedAt),
+    subtasks: normalizeImportedSubtasks(task.subtasks, id),
     notes: optionalString(task.notes),
   };
 }
@@ -238,6 +284,7 @@ function defaultTaskDraft(prefix: TaskPrefix = "P"): TaskDraft {
     status: "open",
     dueDate: "",
     notes: "",
+    subtasks: [],
   };
 }
 
@@ -251,7 +298,48 @@ function taskToDraft(task: Task): TaskDraft {
     status: task.status,
     dueDate: task.dueDate ?? "",
     notes: task.notes ?? "",
+    subtasks: [...(task.subtasks ?? [])].sort((a, b) => a.number - b.number),
   };
+}
+
+function nextSubtaskNumber(subtasks: TaskSubtask[]) {
+  return Math.max(0, ...subtasks.map((subtask) => subtask.number)) + 1;
+}
+
+function createSubtaskId(taskId: string, number: number) {
+  return `${taskId}.${number}`;
+}
+
+function subtaskProgress(subtasks: TaskSubtask[] = []) {
+  const activeSubtasks = subtasks.filter((subtask) => subtask.status !== "cancelled");
+  const done = activeSubtasks.filter((subtask) => subtask.status === "done").length;
+  return {
+    done,
+    total: activeSubtasks.length,
+    cancelled: subtasks.length - activeSubtasks.length,
+  };
+}
+
+function subtaskProgressLabel(subtasks: TaskSubtask[] = []) {
+  const progress = subtaskProgress(subtasks);
+  if (progress.total === 0 && progress.cancelled === 0) return "";
+  return progress.total > 0
+    ? `התקדמות ${progress.done}/${progress.total}`
+    : "כל צעדי הטיפול בוטלו";
+}
+
+function normalizeDraftSubtasks(subtasks: TaskSubtask[], parentId: string) {
+  return subtasks
+    .filter((subtask) => subtask.title.trim() || subtask.status === "cancelled")
+    .map((subtask) => ({
+      ...subtask,
+      id: createSubtaskId(parentId, subtask.number),
+      title: subtask.title.trim(),
+      actionType: subtask.actionType?.trim() || undefined,
+      createdAt: subtask.createdAt ?? nowIso(),
+      statusChangedAt: subtask.statusChangedAt ?? subtask.createdAt ?? nowIso(),
+    }))
+    .sort((a, b) => a.number - b.number);
 }
 
 function taskClosureDate(task: Task) {
@@ -1049,6 +1137,51 @@ export default function Home() {
     setTaskEditor((current) => current ? { ...current, draft: { ...current.draft, ...updates } } : current);
   }
 
+  function updateTaskDraftSubtasks(updater: (subtasks: TaskSubtask[], editor: Exclude<TaskEditorState, null>) => TaskSubtask[]) {
+    setTaskEditor((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        draft: {
+          ...current.draft,
+          subtasks: updater(current.draft.subtasks, current),
+        },
+      };
+    });
+  }
+
+  function addDraftSubtask() {
+    updateTaskDraftSubtasks((subtasks, editor) => {
+      const number = nextSubtaskNumber(subtasks);
+      const parentId = editor.mode === "edit" ? editor.taskId : `${editor.draft.prefix}0`;
+      return [...subtasks, {
+        id: createSubtaskId(parentId, number),
+        number,
+        title: "",
+        status: "open",
+        actionType: "",
+        createdAt: nowIso(),
+        statusChangedAt: nowIso(),
+      }];
+    });
+  }
+
+  function updateDraftSubtask(number: number, updates: Partial<TaskSubtask>) {
+    updateTaskDraftSubtasks((subtasks) => subtasks.map((subtask) => {
+      if (subtask.number !== number) return subtask;
+      const statusChangedAt = updates.status && updates.status !== subtask.status ? nowIso() : subtask.statusChangedAt;
+      return {
+        ...subtask,
+        ...updates,
+        statusChangedAt,
+      };
+    }));
+  }
+
+  function cancelDraftSubtask(number: number) {
+    updateDraftSubtask(number, { status: "cancelled" });
+  }
+
   function closeTaskEditor() {
     setTaskEditor(null);
     setTaskEditorError("");
@@ -1069,14 +1202,20 @@ export default function Home() {
       setTaskEditorError("יש למלא קטגוריה.");
       return;
     }
+    const incompleteSubtask = draft.subtasks.find((subtask) => subtask.status !== "cancelled" && !subtask.title.trim());
+    if (incompleteSubtask) {
+      setTaskEditorError("יש למלא שם לכל צעד טיפול פעיל, או לבטל אותו.");
+      return;
+    }
 
     setTasks((current) => {
       if (taskEditor.mode === "create") {
         const nextNumber = nextTaskNumber(current, draft.prefix);
+        const taskId = `${draft.prefix}${nextNumber}`;
         const createdAt = todayIso();
         const statusChangedAt = nowIso();
         return mergeUniqueTasks([...current, {
-          id: `${draft.prefix}${nextNumber}`,
+          id: taskId,
           prefix: draft.prefix,
           number: nextNumber,
           title,
@@ -1089,6 +1228,7 @@ export default function Home() {
           createdAt,
           completedAt: draft.status === "done" ? createdAt : undefined,
           statusChangedAt,
+          subtasks: normalizeDraftSubtasks(draft.subtasks, taskId),
         }]);
       }
 
@@ -1106,6 +1246,7 @@ export default function Home() {
           notes: draft.notes.trim() || undefined,
           completedAt: draft.status === "done" ? (task.status === "done" ? task.completedAt ?? todayIso() : todayIso()) : undefined,
           statusChangedAt,
+          subtasks: normalizeDraftSubtasks(draft.subtasks, task.id),
         };
       });
     });
@@ -1457,6 +1598,7 @@ export default function Home() {
                         <span>עדיפות {priorityLabels[task.priority]}</span>
                         {task.dueDate && <span>יעד {formatDate(task.dueDate)}</span>}
                         {taskStatusTimestampLabel(task) && <span className="status-timestamp">{taskStatusTimestampLabel(task)}</span>}
+                        {subtaskProgressLabel(task.subtasks) && <span className="subtask-progress">{subtaskProgressLabel(task.subtasks)}</span>}
                       </div>
                       {task.notes && <p className="task-notes">{task.notes}</p>}
                     </div>
@@ -1512,6 +1654,7 @@ export default function Home() {
                               <span>עדיפות {priorityLabels[task.priority]}</span>
                               {task.dueDate && <span>יעד {formatDate(task.dueDate)}</span>}
                               {taskStatusTimestampLabel(task) && <span className="status-timestamp">{taskStatusTimestampLabel(task)}</span>}
+                              {subtaskProgressLabel(task.subtasks) && <span className="subtask-progress">{subtaskProgressLabel(task.subtasks)}</span>}
                             </div>
                             <div className="kanban-actions">
                               <select value={task.status} onChange={(event) => updateStatus(task.id, event.target.value as TaskStatus)} aria-label={`סטטוס ${task.title}`}>
@@ -1902,6 +2045,60 @@ export default function Home() {
                 <span>הערות</span>
                 <textarea value={taskEditor.draft.notes} onChange={(event) => updateTaskDraft({ notes: event.target.value })} rows={5} />
               </label>
+              <section className="subtasks-editor">
+                <div className="subtasks-editor-header">
+                  <div>
+                    <h3>צעדי טיפול</h3>
+                    <p>פירוק פנימי של המשימה לפעולות קטנות. המספור נשמר ברקע ולא מוצג ברשימה.</p>
+                  </div>
+                  <button type="button" onClick={addDraftSubtask}>הוספת צעד</button>
+                </div>
+                {taskEditor.draft.subtasks.length === 0 ? (
+                  <p className="subtasks-empty">עדיין אין צעדי טיפול למשימה הזו.</p>
+                ) : (
+                  <div className="subtasks-list">
+                    {taskEditor.draft.subtasks.map((subtask) => (
+                      <div className={`subtask-row status-${subtask.status}`} key={subtask.number}>
+                        <label>
+                          <span>צעד טיפול</span>
+                          <input
+                            value={subtask.title}
+                            onChange={(event) => updateDraftSubtask(subtask.number, { title: event.target.value })}
+                            placeholder="לדוגמה: לתאם פגישה"
+                          />
+                        </label>
+                        <label>
+                          <span>פעולה</span>
+                          <select
+                            value={subtask.actionType ?? ""}
+                            onChange={(event) => updateDraftSubtask(subtask.number, { actionType: event.target.value })}
+                          >
+                            <option value="">ללא פעולה</option>
+                            {actionOptions.map((action) => <option value={action} key={action}>{action}</option>)}
+                          </select>
+                        </label>
+                        <label>
+                          <span>סטטוס</span>
+                          <select
+                            value={subtask.status}
+                            onChange={(event) => updateDraftSubtask(subtask.number, { status: event.target.value as TaskSubtaskStatus })}
+                          >
+                            {Object.entries(subtaskStatusLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
+                          </select>
+                        </label>
+                        <button
+                          type="button"
+                          className="subtask-cancel"
+                          onClick={() => cancelDraftSubtask(subtask.number)}
+                          disabled={subtask.status === "cancelled"}
+                        >
+                          ביטול
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
               {taskEditor.mode === "create" && (
                 <p className="editor-help">המספר ייווצר אוטומטית לפי הרצף הקיים ולא ניתן לבחור אותו ידנית.</p>
               )}

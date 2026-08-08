@@ -1,5 +1,5 @@
 import type { User } from "@supabase/supabase-js";
-import { Task, TaskPrefix, TaskPriority, TaskStatus } from "@/lib/tasks";
+import { Task, TaskPrefix, TaskPriority, TaskStatus, TaskSubtask, TaskSubtaskStatus } from "@/lib/tasks";
 import { supabase } from "@/lib/supabase";
 
 type TaskRow = {
@@ -14,8 +14,41 @@ type TaskRow = {
   due_at: string | null;
   completed_at: string | null;
   status_changed_at?: string | null;
+  subtasks?: unknown;
   created_at: string;
 };
+
+type OptionalColumns = {
+  actionType: boolean;
+  statusChangedAt: boolean;
+  subtasks: boolean;
+};
+
+const selectAttempts: { columns: string; optional: OptionalColumns }[] = [
+  {
+    columns: "prefix, task_number, title, category, action_type, priority, status, notes, due_at, completed_at, status_changed_at, subtasks, created_at",
+    optional: { actionType: true, statusChangedAt: true, subtasks: true },
+  },
+  {
+    columns: "prefix, task_number, title, category, action_type, priority, status, notes, due_at, completed_at, status_changed_at, created_at",
+    optional: { actionType: true, statusChangedAt: true, subtasks: false },
+  },
+  {
+    columns: "prefix, task_number, title, category, action_type, priority, status, notes, due_at, completed_at, created_at",
+    optional: { actionType: true, statusChangedAt: false, subtasks: false },
+  },
+  {
+    columns: "prefix, task_number, title, category, priority, status, notes, due_at, completed_at, created_at",
+    optional: { actionType: false, statusChangedAt: false, subtasks: false },
+  },
+];
+
+const upsertAttempts: OptionalColumns[] = [
+  { actionType: true, statusChangedAt: true, subtasks: true },
+  { actionType: true, statusChangedAt: true, subtasks: false },
+  { actionType: true, statusChangedAt: false, subtasks: false },
+  { actionType: false, statusChangedAt: false, subtasks: false },
+];
 
 function dateOnly(value: string | null | undefined) {
   return value ? value.slice(0, 10) : undefined;
@@ -24,6 +57,39 @@ function dateOnly(value: string | null | undefined) {
 function toTimestamp(value: string | undefined) {
   if (!value) return null;
   return new Date(value.includes("T") ? value : `${value}T00:00:00`).toISOString();
+}
+
+function isTaskSubtaskStatus(value: unknown): value is TaskSubtaskStatus {
+  return value === "open" || value === "done" || value === "cancelled";
+}
+
+function normalizeSubtasks(value: unknown): TaskSubtask[] {
+  if (!Array.isArray(value)) return [];
+
+  return value
+    .map((item) => {
+      if (!item || typeof item !== "object") return null;
+      const subtask = item as Record<string, unknown>;
+      const number = Number(subtask.number);
+      if (!Number.isInteger(number) || number <= 0) return null;
+      if (typeof subtask.id !== "string" || !subtask.id.trim()) return null;
+      if (typeof subtask.title !== "string" || !subtask.title.trim()) return null;
+      if (!isTaskSubtaskStatus(subtask.status)) return null;
+
+      const normalized: TaskSubtask = {
+        id: subtask.id.trim(),
+        number,
+        title: subtask.title.trim(),
+        status: subtask.status,
+      };
+
+      if (typeof subtask.actionType === "string" && subtask.actionType.trim()) normalized.actionType = subtask.actionType.trim();
+      if (typeof subtask.createdAt === "string") normalized.createdAt = subtask.createdAt;
+      if (typeof subtask.statusChangedAt === "string") normalized.statusChangedAt = subtask.statusChangedAt;
+      return normalized;
+    })
+    .filter((subtask): subtask is TaskSubtask => Boolean(subtask))
+    .sort((a, b) => a.number - b.number);
 }
 
 function rowToTask(row: TaskRow): Task {
@@ -40,28 +106,33 @@ function rowToTask(row: TaskRow): Task {
     dueDate: dateOnly(row.due_at),
     completedAt: dateOnly(row.completed_at),
     statusChangedAt: row.status_changed_at ?? undefined,
+    subtasks: normalizeSubtasks(row.subtasks),
     createdAt: dateOnly(row.created_at),
   };
 }
 
-function taskToUpsert(task: Task, user: User) {
+function taskToUpsert(task: Task, user: User, optional: OptionalColumns) {
   const now = new Date().toISOString();
-  return {
+  const row: Record<string, unknown> = {
     user_id: user.id,
     prefix: task.prefix,
     task_number: task.number,
     title: task.title,
     category: task.category,
-    action_type: task.actionType ?? null,
     priority: task.priority,
     status: task.status,
     notes: task.notes ?? null,
     due_at: toTimestamp(task.dueDate),
     completed_at: toTimestamp(task.completedAt),
-    status_changed_at: toTimestamp(task.statusChangedAt),
     created_at: toTimestamp(task.createdAt) ?? now,
     updated_at: now,
   };
+
+  if (optional.actionType) row.action_type = task.actionType ?? null;
+  if (optional.statusChangedAt) row.status_changed_at = toTimestamp(task.statusChangedAt);
+  if (optional.subtasks) row.subtasks = task.subtasks ?? [];
+
+  return row;
 }
 
 function requireSupabase() {
@@ -71,43 +142,21 @@ function requireSupabase() {
 
 export async function fetchCloudTasks() {
   const client = requireSupabase();
-  const query = client
-    .from("tasks")
-    .select("prefix, task_number, title, category, action_type, priority, status, notes, due_at, completed_at, status_changed_at, created_at")
-    .order("prefix", { ascending: true })
-    .order("task_number", { ascending: true });
-  const { data, error } = await query;
+  let lastError: unknown;
 
-  if (error && errorMessageMentions(error, "status_changed_at")) {
-    const fallback = await client
+  for (const attempt of selectAttempts) {
+    const { data, error } = await client
       .from("tasks")
-      .select("prefix, task_number, title, category, action_type, priority, status, notes, due_at, completed_at, created_at")
+      .select(attempt.columns)
       .order("prefix", { ascending: true })
       .order("task_number", { ascending: true });
-    if (fallback.error && errorMessageMentions(fallback.error, "action_type")) {
-      const legacyFallback = await fetchCloudTasksWithoutOptionalColumns(client);
-      return legacyFallback;
-    }
-    if (fallback.error) throw fallback.error;
-    return (fallback.data ?? []).map((row) => rowToTask(row as TaskRow));
+
+    if (!error) return (data ?? []).map((row) => rowToTask(row as unknown as TaskRow));
+    lastError = error;
+    if (!isOptionalColumnError(error)) throw error;
   }
 
-  if (error && errorMessageMentions(error, "action_type")) {
-    return fetchCloudTasksWithoutOptionalColumns(client);
-  }
-
-  if (error) throw error;
-  return (data ?? []).map((row) => rowToTask(row as TaskRow));
-}
-
-async function fetchCloudTasksWithoutOptionalColumns(client: ReturnType<typeof requireSupabase>) {
-    const fallback = await client
-      .from("tasks")
-      .select("prefix, task_number, title, category, priority, status, notes, due_at, completed_at, created_at")
-      .order("prefix", { ascending: true })
-      .order("task_number", { ascending: true });
-    if (fallback.error) throw fallback.error;
-    return (fallback.data ?? []).map((row) => rowToTask(row as TaskRow));
+  throw lastError;
 }
 
 export async function countCloudTasks() {
@@ -123,71 +172,25 @@ export async function countCloudTasks() {
 export async function saveCloudTasks(tasks: Task[], user: User) {
   if (tasks.length === 0) return;
   const client = requireSupabase();
-  const { error } = await client
-    .from("tasks")
-    .upsert(tasks.map((task) => taskToUpsert(task, user)), {
-      onConflict: "user_id,prefix,task_number",
-    });
+  let lastError: unknown;
 
-  if (error && errorMessageMentions(error, "status_changed_at")) {
-    const { error: fallbackError } = await client
+  for (const optional of upsertAttempts) {
+    const { error } = await client
       .from("tasks")
-      .upsert(tasks.map((task) => ({
-        user_id: user.id,
-        prefix: task.prefix,
-        task_number: task.number,
-        title: task.title,
-        category: task.category,
-        priority: task.priority,
-        status: task.status,
-        notes: task.notes ?? null,
-        due_at: toTimestamp(task.dueDate),
-        completed_at: toTimestamp(task.completedAt),
-        created_at: toTimestamp(task.createdAt) ?? new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-        action_type: task.actionType ?? null,
-      })), {
+      .upsert(tasks.map((task) => taskToUpsert(task, user, optional)), {
         onConflict: "user_id,prefix,task_number",
       });
 
-    if (fallbackError && errorMessageMentions(fallbackError, "action_type")) {
-      await saveCloudTasksWithoutOptionalColumns(tasks, user);
-      return;
-    }
-    if (fallbackError) throw fallbackError;
-    return;
+    if (!error) return;
+    lastError = error;
+    if (!isOptionalColumnError(error)) throw error;
   }
 
-  if (error && errorMessageMentions(error, "action_type")) {
-    await saveCloudTasksWithoutOptionalColumns(tasks, user);
-    return;
-  }
-
-  if (error) throw error;
+  throw lastError;
 }
 
-async function saveCloudTasksWithoutOptionalColumns(tasks: Task[], user: User) {
-  const client = requireSupabase();
-  const { error } = await client
-    .from("tasks")
-    .upsert(tasks.map((task) => ({
-      user_id: user.id,
-      prefix: task.prefix,
-      task_number: task.number,
-      title: task.title,
-      category: task.category,
-      priority: task.priority,
-      status: task.status,
-      notes: task.notes ?? null,
-      due_at: toTimestamp(task.dueDate),
-      completed_at: toTimestamp(task.completedAt),
-      created_at: toTimestamp(task.createdAt) ?? new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })), {
-      onConflict: "user_id,prefix,task_number",
-    });
-
-  if (error) throw error;
+function isOptionalColumnError(error: unknown) {
+  return ["subtasks", "status_changed_at", "action_type"].some((text) => errorMessageMentions(error, text));
 }
 
 function errorMessageMentions(error: unknown, text: string) {
