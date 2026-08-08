@@ -1249,21 +1249,84 @@ export default function Home() {
       return rows;
     })();
 
+    const createdDate = (task: Task) => task.createdAt?.slice(0, 10);
+    const openedLast7 = tasks.filter((task) => {
+      const date = createdDate(task);
+      return Boolean(date && date >= weekStartIso);
+    }).length;
+    const openedPrevious7 = tasks.filter((task) => {
+      const date = createdDate(task);
+      return Boolean(date && date >= previousWeekStartIso && date < weekStartIso);
+    }).length;
+    const previous30StartIso = addDaysIso(-59);
+    const openedLast30 = tasks.filter((task) => {
+      const date = createdDate(task);
+      return Boolean(date && date >= last30StartIso);
+    }).length;
+    const openedPrevious30 = tasks.filter((task) => {
+      const date = createdDate(task);
+      return Boolean(date && date >= previous30StartIso && date < last30StartIso);
+    }).length;
+    const completedPrevious30 = completedWithDate.filter((task) => {
+      const closureDate = taskClosureDate(task);
+      return closureDate && closureDate >= previous30StartIso && closureDate < last30StartIso;
+    }).length;
+    const olderThan30 = active.filter((task) => {
+      const date = createdDate(task);
+      return Boolean(date && date < last30StartIso);
+    }).length;
+    const cancelled = tasks.filter((task) => task.status === "cancelled").length;
+    const allCompletionRate = tasks.length > 0 ? Math.round((done.length / tasks.length) * 100) : 0;
+    const weeklyDirection = completedLast7 > completedPrevious7
+      ? `קצב הסגירה עלה: ${completedLast7} השבוע מול ${completedPrevious7} בשבוע הקודם`
+      : completedLast7 < completedPrevious7
+        ? `קצב הסגירה ירד: ${completedLast7} השבוע מול ${completedPrevious7} בשבוע הקודם`
+        : `קצב הסגירה יציב: ${completedLast7} השבוע וגם ${completedPrevious7} בשבוע הקודם`;
+    const weeklyOpenedDirection = openedLast7 > openedPrevious7
+      ? `נפתחו יותר משימות מהשבוע הקודם: ${openedLast7} מול ${openedPrevious7}`
+      : openedLast7 < openedPrevious7
+        ? `נפתחו פחות משימות מהשבוע הקודם: ${openedLast7} מול ${openedPrevious7}`
+        : `כמות המשימות שנפתחו יציבה: ${openedLast7} השבוע וגם ${openedPrevious7} בשבוע הקודם`;
+    const monthlyNet = openedLast30 - completedLast30;
+    const previousMonthlyNet = openedPrevious30 - completedPrevious30;
+    const monthlyTrend = monthlyNet > previousMonthlyNet
+      ? `העומס גדל לעומת התקופה הקודמת: נטו ${monthlyNet > 0 ? "+" : ""}${monthlyNet}`
+      : monthlyNet < previousMonthlyNet
+        ? `העומס ירד לעומת התקופה הקודמת: נטו ${monthlyNet > 0 ? "+" : ""}${monthlyNet}`
+        : `העומס נטו יציב: ${monthlyNet > 0 ? "+" : ""}${monthlyNet}`;
     const summaryTitle = analyticsRange === "week"
       ? "סיכום שבועי"
       : analyticsRange === "month"
         ? "סיכום חודשי"
         : "סיכום כללי";
-    const summaryBody = completedInRangeCount > 0 || completedSubtasksInRangeCount > 0
-      ? "יש התקדמות מתועדת בטווח שנבחר. כדאי לשמר את הקצב ולבחור את החסימה הבאה לטיפול."
-      : "אין סגירות מתועדות בטווח שנבחר. זה לא בהכרח אומר שאין עבודה, אבל כן כדאי לייצר סגירה קטנה וברורה.";
-    const summaryHighlights = [
-      `${completedInRangeCount} משימות נסגרו בטווח`,
-      `${completedSubtasksInRangeCount} צעדי טיפול נסגרו בטווח`,
-      overdue.length > 0 ? `${overdue.length} משימות באיחור` : "אין משימות באיחור",
-      openSubtasks > 0 ? `${openSubtasks} צעדי טיפול עדיין פתוחים` : "אין צעדי טיפול פתוחים",
-      topCategory ? `העומס המרכזי נמצא בנושא ${topCategory.label}` : "אין כרגע עומס לפי נושא",
-    ];
+    const summaryBody = analyticsRange === "week"
+      ? "מבט קצר על השבוע הנוכחי: מה נכנס, מה נסגר, והאם יש משהו שמצריך פעולה מיידית."
+      : analyticsRange === "month"
+        ? "מבט מגמה על 30 הימים האחרונים: האם העומס גדל או קטן, ואיפה הוא מתרכז."
+        : "תמונה מבנית של כלל המערכת: מצב המשימות, יחס אישי/עבודה, והיקף ההיסטוריה.";
+    const summaryHighlights = analyticsRange === "week"
+      ? [
+        `${openedLast7} משימות נפתחו השבוע`,
+        `${completedLast7} משימות נסגרו השבוע`,
+        weeklyDirection,
+        weeklyOpenedDirection,
+        `${completedSubtasksInRangeCount} צעדי טיפול נסגרו השבוע`,
+      ]
+      : analyticsRange === "month"
+        ? [
+          `${openedLast30} משימות נפתחו ב-30 הימים האחרונים`,
+          `${completedLast30} משימות נסגרו ב-30 הימים האחרונים`,
+          monthlyTrend,
+          `${olderThan30} משימות פעילות פתוחות מעל 30 יום`,
+          topCategory ? `העומס המרכזי החודש נמצא בנושא ${topCategory.label}` : "אין כרגע נושא עומס מרכזי",
+        ]
+        : [
+          `${tasks.length} משימות בסך הכול, ${done.length} הושלמו ו-${cancelled} בוטלו`,
+          `שיעור השלמה כללי: ${allCompletionRate}%`,
+          `${activeByPrefix.P} משימות אישיות פעילות מול ${activeByPrefix.W} משימות עבודה פעילות`,
+          `${withoutDueDate.length} משימות פעילות בלי תאריך יעד`,
+          countedSubtaskItems.length > 0 ? `${subtaskCompletionRate}% השלמה בצעדי טיפול` : "אין עדיין צעדי טיפול למדידה",
+        ];
     const summaryAction = overdue.length > 0
       ? { actionLabel: "הצג באיחור", action: { statusFilter: "overdue" as TaskFilter } }
       : openSubtasks > 0
