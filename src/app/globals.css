@@ -91,7 +91,7 @@ textarea { resize: vertical; min-height: 86px; }
 .drawer-header h2 { margin: 0; }
 .icon-button { align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; color: var(--muted); display: flex; font-size: 1.35rem; font-weight: 700; height: 40px; justify-content: center; line-height: 1; width: 40px; }
 .icon-button:hover { background: #f8fafc; color: var(--text); }
-.settings-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; background: #e9eef7; border: 1px solid var(--border); border-radius: 12px; margin-bottom: 14px; padding: 4px; }
+.settings-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; background: #e9eef7; border: 1px solid var(--border); border-radius: 12px; margin-bottom: 14px; padding: 4px; }
 .settings-tabs button { background: transparent; border: 0; border-radius: 9px; color: var(--muted); font-weight: 700; padding: 10px 16px; }
 .settings-tabs button.active { background: var(--surface); box-shadow: 0 4px 12px rgba(23, 32, 51, 0.08); color: var(--accent-dark); }
 .task-editor-form { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 16px; }
@@ -129,6 +129,14 @@ textarea { resize: vertical; min-height: 86px; }
 .subtask-cancel:hover { background: #fef2f2; color: #991b1b; }
 .subtask-cancel:disabled { cursor: default; opacity: .55; }
 .taxonomy-panel { display: grid; gap: 14px; padding: 16px; }
+.notification-settings-panel { display: grid; gap: 14px; padding: 16px; }
+.notification-settings-list { display: grid; gap: 10px; }
+.notification-setting { align-items: center; background: #f8fafc; border: 1px solid var(--border); border-radius: 12px; cursor: pointer; display: grid; gap: 12px; grid-template-columns: auto 1fr; padding: 12px; }
+.notification-setting:hover { border-color: #bfdbfe; }
+.notification-setting input { accent-color: var(--accent); height: 20px; width: 20px; }
+.notification-setting span { display: grid; gap: 4px; }
+.notification-setting strong { color: var(--text); }
+.notification-setting small { color: var(--muted); line-height: 1.45; }
 .taxonomy-status { background: #eef4ff; border-radius: 10px; color: var(--muted); line-height: 1.45; margin: 0; padding: 10px 12px; }
 .taxonomy-manager { display: grid; gap: 14px; }
 .taxonomy-form { display: grid; grid-template-columns: 130px 1fr 130px; gap: 10px; }

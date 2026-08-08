@@ -11,6 +11,7 @@ import { fetchCloudTaxonomy, replaceCloudTaxonomy } from "@/lib/supabaseTaxonomy
 
 const STORAGE_KEY = "asaf-task-tracker-v1";
 const TAXONOMY_STORAGE_KEY = "asaf-task-tracker-taxonomy-v1";
+const NOTIFICATION_PREFERENCES_STORAGE_KEY = "asaf-task-tracker-notification-preferences-v1";
 
 const statusLabels: Record<TaskStatus, string> = {
   open: "פתוחה",
@@ -87,7 +88,8 @@ type TaskFilter = TaskStatus | "active" | "all" | "overdue" | "today" | "week" |
 type AnalyticsRange = "week" | "month" | "all";
 type MainView = "tasks" | "stats" | "kanban";
 type TaxonomyMode = "topics" | "actions";
-type SettingsTab = "taxonomy" | "sync";
+type SettingsTab = "taxonomy" | "notifications" | "sync";
+type NotificationPreferenceKey = "overdue" | "openSubtasks" | "noWeeklyClosures" | "waiting" | "dueSoon";
 type EditingTaxonomyItem =
   | { type: "topic"; prefix: TaskPrefix; name: string; value: string }
   | { type: "action"; name: string; value: string }
@@ -96,6 +98,16 @@ type EditingTaxonomyItem =
 type TaskTaxonomy = {
   topics: Record<TaskPrefix, string[]>;
   actions: string[];
+};
+
+type NotificationPreferences = Record<NotificationPreferenceKey, boolean>;
+
+const defaultNotificationPreferences: NotificationPreferences = {
+  overdue: true,
+  openSubtasks: true,
+  noWeeklyClosures: true,
+  waiting: false,
+  dueSoon: false,
 };
 
 type TaskDraft = {
@@ -473,6 +485,22 @@ function parseStoredTaxonomy(raw: string | null): TaskTaxonomy {
   }
 }
 
+function parseStoredNotificationPreferences(raw: string | null): NotificationPreferences {
+  if (!raw) return defaultNotificationPreferences;
+  try {
+    const parsed = JSON.parse(raw) as Partial<Record<NotificationPreferenceKey, unknown>>;
+    return {
+      overdue: typeof parsed.overdue === "boolean" ? parsed.overdue : defaultNotificationPreferences.overdue,
+      openSubtasks: typeof parsed.openSubtasks === "boolean" ? parsed.openSubtasks : defaultNotificationPreferences.openSubtasks,
+      noWeeklyClosures: typeof parsed.noWeeklyClosures === "boolean" ? parsed.noWeeklyClosures : defaultNotificationPreferences.noWeeklyClosures,
+      waiting: typeof parsed.waiting === "boolean" ? parsed.waiting : defaultNotificationPreferences.waiting,
+      dueSoon: typeof parsed.dueSoon === "boolean" ? parsed.dueSoon : defaultNotificationPreferences.dueSoon,
+    };
+  } catch {
+    return defaultNotificationPreferences;
+  }
+}
+
 function replaceValue(values: string[], oldValue: string, newValue: string) {
   return uniqueSorted(values.map((value) => value === oldValue ? newValue : value));
 }
@@ -497,6 +525,8 @@ export default function Home() {
   const [taxonomyLoaded, setTaxonomyLoaded] = useState(false);
   const [taxonomyCloudReady, setTaxonomyCloudReady] = useState(false);
   const [taxonomyStatus, setTaxonomyStatus] = useState("נושאים ופעולות נשמרים מקומית עד להתחברות לענן.");
+  const [notificationPreferences, setNotificationPreferences] = useState<NotificationPreferences>(defaultNotificationPreferences);
+  const [notificationPreferencesLoaded, setNotificationPreferencesLoaded] = useState(false);
   const [newTopicPrefix, setNewTopicPrefix] = useState<TaskPrefix>("P");
   const [newTopicName, setNewTopicName] = useState("");
   const [newActionName, setNewActionName] = useState("");
@@ -536,6 +566,19 @@ export default function Home() {
     if (!taxonomyLoaded) return;
     window.localStorage.setItem(TAXONOMY_STORAGE_KEY, JSON.stringify(taxonomy));
   }, [taxonomy, taxonomyLoaded]);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setNotificationPreferences(parseStoredNotificationPreferences(window.localStorage.getItem(NOTIFICATION_PREFERENCES_STORAGE_KEY)));
+      setNotificationPreferencesLoaded(true);
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
+  }, []);
+
+  useEffect(() => {
+    if (!notificationPreferencesLoaded) return;
+    window.localStorage.setItem(NOTIFICATION_PREFERENCES_STORAGE_KEY, JSON.stringify(notificationPreferences));
+  }, [notificationPreferences, notificationPreferencesLoaded]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -750,8 +793,11 @@ export default function Home() {
   const appNotifications = useMemo(() => {
     const today = todayIso();
     const weekStartIso = addDaysIso(-6);
+    const nextWeekIso = addDaysIso(7);
     const active = tasks.filter((task) => !["done", "cancelled"].includes(task.status));
     const overdueCount = active.filter((task) => Boolean(task.dueDate && task.dueDate < today)).length;
+    const waitingCount = active.filter((task) => task.status === "waiting").length;
+    const dueSoonCount = active.filter((task) => Boolean(task.dueDate && task.dueDate >= today && task.dueDate <= nextWeekIso)).length;
     const openSubtasks = active.reduce((sum, task) => sum + subtaskProgress(task.subtasks).open, 0);
     const completedThisWeek = tasks.filter((task) => {
       const closureDate = task.status === "done" ? taskClosureDate(task) : "";
@@ -759,7 +805,7 @@ export default function Home() {
     }).length;
     const notifications: AppNotification[] = [];
 
-    if (overdueCount > 0) {
+    if (notificationPreferences.overdue && overdueCount > 0) {
       notifications.push({
         id: "overdue",
         title: `${overdueCount} משימות באיחור`,
@@ -770,7 +816,7 @@ export default function Home() {
       });
     }
 
-    if (openSubtasks > 0) {
+    if (notificationPreferences.openSubtasks && openSubtasks > 0) {
       notifications.push({
         id: "open-subtasks",
         title: `${openSubtasks} צעדי טיפול פתוחים`,
@@ -781,7 +827,7 @@ export default function Home() {
       });
     }
 
-    if (active.length > 0 && completedThisWeek === 0) {
+    if (notificationPreferences.noWeeklyClosures && active.length > 0 && completedThisWeek === 0) {
       notifications.push({
         id: "no-weekly-closures",
         title: "אין סגירות השבוע",
@@ -792,8 +838,30 @@ export default function Home() {
       });
     }
 
+    if (notificationPreferences.waiting && waitingCount > 0) {
+      notifications.push({
+        id: "waiting",
+        title: `${waitingCount} משימות ממתינות`,
+        body: "שווה לבדוק מי צריך להחזיר תשובה או מה חסום.",
+        tone: "warn",
+        actionLabel: "הצג ממתינות",
+        action: { statusFilter: "waiting" },
+      });
+    }
+
+    if (notificationPreferences.dueSoon && dueSoonCount > 0) {
+      notifications.push({
+        id: "due-soon",
+        title: `${dueSoonCount} משימות לשבוע הקרוב`,
+        body: "כדאי לוודא שהעדיפות והסטטוס עדיין נכונים.",
+        tone: "neutral",
+        actionLabel: "הצג השבוע",
+        action: { statusFilter: "week" },
+      });
+    }
+
     return notifications;
-  }, [tasks]);
+  }, [notificationPreferences, tasks]);
 
   const statistics = useMemo(() => {
     const today = todayIso();
@@ -1318,6 +1386,10 @@ export default function Home() {
     setActionFilter("all");
     setTopicFilter("all");
     setActiveView("tasks");
+  }
+
+  function updateNotificationPreference(key: NotificationPreferenceKey, value: boolean) {
+    setNotificationPreferences((current) => ({ ...current, [key]: value }));
   }
 
   function updateStatus(id: string, status: TaskStatus) {
@@ -2224,7 +2296,7 @@ export default function Home() {
             <div className="drawer-header">
               <div>
                 <p className="eyebrow">הגדרות</p>
-                <h2>{settingsTab === "taxonomy" ? "נושאים ופעולות" : "חיבור, סנכרון וגיבוי"}</h2>
+                <h2>{settingsTab === "taxonomy" ? "נושאים ופעולות" : settingsTab === "notifications" ? "התראות" : "חיבור, סנכרון וגיבוי"}</h2>
               </div>
               <button className="icon-button" onClick={() => setIsSettingsOpen(false)} aria-label="סגירת הגדרות">×</button>
             </div>
@@ -2232,6 +2304,9 @@ export default function Home() {
             <div className="settings-tabs" aria-label="אזורי הגדרות">
               <button className={settingsTab === "taxonomy" ? "active" : ""} onClick={() => setSettingsTab("taxonomy")}>
                 נושאים ופעולות
+              </button>
+              <button className={settingsTab === "notifications" ? "active" : ""} onClick={() => setSettingsTab("notifications")}>
+                התראות
               </button>
               <button className={settingsTab === "sync" ? "active" : ""} onClick={() => setSettingsTab("sync")}>
                 חיבור, סנכרון וגיבוי
@@ -2315,6 +2390,72 @@ export default function Home() {
                     </div>
                   </div>
                 )}
+              </section>
+              ) : settingsTab === "notifications" ? (
+              <section className="panel notification-settings-panel">
+                <div className="panel-heading">
+                  <div>
+                    <h2>העדפות התראות</h2>
+                    <span>בחר אילו התראות יופיעו בראש האפליקציה.</span>
+                  </div>
+                </div>
+                <div className="notification-settings-list">
+                  <label className="notification-setting">
+                    <input
+                      type="checkbox"
+                      checked={notificationPreferences.overdue}
+                      onChange={(event) => updateNotificationPreference("overdue", event.target.checked)}
+                    />
+                    <span>
+                      <strong>משימות באיחור</strong>
+                      <small>התראה כשיש משימות פעילות שתאריך היעד שלהן עבר.</small>
+                    </span>
+                  </label>
+                  <label className="notification-setting">
+                    <input
+                      type="checkbox"
+                      checked={notificationPreferences.openSubtasks}
+                      onChange={(event) => updateNotificationPreference("openSubtasks", event.target.checked)}
+                    />
+                    <span>
+                      <strong>צעדי טיפול פתוחים</strong>
+                      <small>התראה כשיש צעדי טיפול שעדיין לא בוצעו בתוך משימות פעילות.</small>
+                    </span>
+                  </label>
+                  <label className="notification-setting">
+                    <input
+                      type="checkbox"
+                      checked={notificationPreferences.noWeeklyClosures}
+                      onChange={(event) => updateNotificationPreference("noWeeklyClosures", event.target.checked)}
+                    />
+                    <span>
+                      <strong>אין סגירות השבוע</strong>
+                      <small>התראה כשיש משימות פעילות אבל לא נסגרה משימה בשבעת הימים האחרונים.</small>
+                    </span>
+                  </label>
+                  <label className="notification-setting">
+                    <input
+                      type="checkbox"
+                      checked={notificationPreferences.waiting}
+                      onChange={(event) => updateNotificationPreference("waiting", event.target.checked)}
+                    />
+                    <span>
+                      <strong>משימות ממתינות</strong>
+                      <small>התראה כשיש משימות שמחכות לגורם חיצוני או החלטה.</small>
+                    </span>
+                  </label>
+                  <label className="notification-setting">
+                    <input
+                      type="checkbox"
+                      checked={notificationPreferences.dueSoon}
+                      onChange={(event) => updateNotificationPreference("dueSoon", event.target.checked)}
+                    />
+                    <span>
+                      <strong>תאריך יעד מתקרב</strong>
+                      <small>התראה על משימות שתאריך היעד שלהן בשבעת הימים הקרובים.</small>
+                    </span>
+                  </label>
+                </div>
               </section>
               ) : (
               <>
