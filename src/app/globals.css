@@ -185,6 +185,14 @@ textarea { resize: vertical; min-height: 86px; }
 .analytics-header { align-items: center; display: flex; justify-content: space-between; gap: 16px; }
 .analytics-header h2 { margin: 0 0 6px; font-size: 1.15rem; }
 .analytics-header p, .panel-heading span, .muted-line { color: var(--muted); margin: 0; }
+.period-summary-panel { align-items: center; display: grid; gap: 16px; grid-template-columns: minmax(220px, 1.1fr) minmax(260px, 1fr) auto; padding: 18px; }
+.period-summary-panel h2 { margin: 0 0 8px; font-size: 1.18rem; }
+.period-summary-panel p:not(.eyebrow) { color: var(--muted); line-height: 1.55; margin: 0; }
+.period-summary-panel ul { display: grid; gap: 7px; list-style: none; margin: 0; padding: 0; }
+.period-summary-panel li { align-items: center; color: var(--text); display: flex; gap: 8px; line-height: 1.4; }
+.period-summary-panel li::before { background: var(--accent); border-radius: 999px; content: ""; flex: 0 0 auto; height: 7px; width: 7px; }
+.period-summary-panel button { background: var(--accent); border: 0; border-radius: 10px; color: #fff; font-weight: 700; padding: 11px 14px; white-space: nowrap; }
+.period-summary-panel button:hover { background: var(--accent-dark); }
 .insights-panel { padding: 16px; }
 .insights-grid { display: grid; gap: 10px; grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .insight-card { background: #f8fafc; border: 1px solid var(--border); border-radius: 12px; display: grid; gap: 12px; grid-template-rows: 1fr auto; min-height: 168px; padding: 12px; }
@@ -287,6 +295,8 @@ textarea { resize: vertical; min-height: 86px; }
   .app-notification button { width: 100%; }
   .metric-grid, .chart-grid, .timeline-stats, .analytics-layout { grid-template-columns: 1fr; }
   .analytics-header { align-items: stretch; flex-direction: column; }
+  .period-summary-panel { align-items: stretch; grid-template-columns: 1fr; }
+  .period-summary-panel button { width: 100%; }
   .range-tabs { display: grid; grid-template-columns: repeat(3, 1fr); }
   .insights-grid { grid-template-columns: 1fr; }
   .insight-card { min-height: 0; }

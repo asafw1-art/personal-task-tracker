@@ -1181,7 +1181,36 @@ export default function Home() {
       return rows;
     })();
 
+    const summaryTitle = analyticsRange === "week"
+      ? "סיכום שבועי"
+      : analyticsRange === "month"
+        ? "סיכום חודשי"
+        : "סיכום כללי";
+    const summaryBody = completedInRangeCount > 0 || completedSubtasksInRangeCount > 0
+      ? "יש התקדמות מתועדת בטווח שנבחר. כדאי לשמר את הקצב ולבחור את החסימה הבאה לטיפול."
+      : "אין סגירות מתועדות בטווח שנבחר. זה לא בהכרח אומר שאין עבודה, אבל כן כדאי לייצר סגירה קטנה וברורה.";
+    const summaryHighlights = [
+      `${completedInRangeCount} משימות נסגרו בטווח`,
+      `${completedSubtasksInRangeCount} צעדי טיפול נסגרו בטווח`,
+      overdue.length > 0 ? `${overdue.length} משימות באיחור` : "אין משימות באיחור",
+      openSubtasks > 0 ? `${openSubtasks} צעדי טיפול עדיין פתוחים` : "אין צעדי טיפול פתוחים",
+      topCategory ? `העומס המרכזי נמצא בנושא ${topCategory.label}` : "אין כרגע עומס לפי נושא",
+    ];
+    const summaryAction = overdue.length > 0
+      ? { actionLabel: "הצג באיחור", action: { statusFilter: "overdue" as TaskFilter } }
+      : openSubtasks > 0
+        ? { actionLabel: "הצג צעדים פתוחים", action: { statusFilter: "subtasks_open" as TaskFilter } }
+        : dueSoon.length > 0
+          ? { actionLabel: "הצג השבוע", action: { statusFilter: "week" as TaskFilter } }
+          : { actionLabel: "הצג פעילות", action: { statusFilter: "active" as TaskFilter } };
+
     return {
+      periodSummary: {
+        title: summaryTitle,
+        body: summaryBody,
+        highlights: summaryHighlights,
+        ...summaryAction,
+      },
       completedInRange: completedInRangeCount,
       hasDatedCompletions: completedWithDate.length > 0,
       hasRecentCompletions: completionTrend.some((row) => row.value > 0),
@@ -1269,12 +1298,16 @@ export default function Home() {
   }
 
   function applyInsightAction(insight: AnalyticsInsight) {
-    if (!insight.action) return;
-    setQuery(insight.action.query ?? "");
-    setStatusFilter(insight.action.statusFilter ?? "active");
-    setPrefixFilter(insight.action.prefixFilter ?? "all");
-    setActionFilter(insight.action.actionFilter ?? "all");
-    setTopicFilter(insight.action.topicFilter ?? "all");
+    applyAnalyticsAction(insight.action);
+  }
+
+  function applyAnalyticsAction(action: AnalyticsInsight["action"]) {
+    if (!action) return;
+    setQuery(action.query ?? "");
+    setStatusFilter(action.statusFilter ?? "active");
+    setPrefixFilter(action.prefixFilter ?? "all");
+    setActionFilter(action.actionFilter ?? "all");
+    setTopicFilter(action.topicFilter ?? "all");
     setActiveView("tasks");
   }
 
@@ -2023,6 +2056,18 @@ export default function Home() {
                   <button className={analyticsRange === "all" ? "active" : ""} onClick={() => setAnalyticsRange("all")}>הכול</button>
                 </div>
               </div>
+
+              <section className="panel period-summary-panel" aria-label={analytics.periodSummary.title}>
+                <div>
+                  <p className="eyebrow">{analytics.periodSummary.title}</p>
+                  <h2>מה קרה בטווח הזה</h2>
+                  <p>{analytics.periodSummary.body}</p>
+                </div>
+                <ul>
+                  {analytics.periodSummary.highlights.map((item) => <li key={item}>{item}</li>)}
+                </ul>
+                <button onClick={() => applyAnalyticsAction(analytics.periodSummary.action)}>{analytics.periodSummary.actionLabel}</button>
+              </section>
 
               <section className="panel insights-panel" aria-label="תובנות מרכזיות">
                 <div className="panel-heading">
