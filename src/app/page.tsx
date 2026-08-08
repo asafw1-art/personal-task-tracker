@@ -495,6 +495,7 @@ export default function Home() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [taskEditor, setTaskEditor] = useState<TaskEditorState>(null);
   const [taskEditorError, setTaskEditorError] = useState("");
+  const [expandedSubtaskTaskIds, setExpandedSubtaskTaskIds] = useState<Set<string>>(() => new Set());
   const [cloudStatus, setCloudStatus] = useState(
     isSupabaseConfigured ? "בודק חיבור ל-Supabase..." : "Supabase עדיין לא מוגדר. עובדים במצב מקומי."
   );
@@ -1133,6 +1134,18 @@ export default function Home() {
     setTaskEditor({ mode: "edit", taskId: task.id, draft: taskToDraft(task) });
   }
 
+  function toggleTaskSubtasks(taskId: string) {
+    setExpandedSubtaskTaskIds((current) => {
+      const next = new Set(current);
+      if (next.has(taskId)) {
+        next.delete(taskId);
+      } else {
+        next.add(taskId);
+      }
+      return next;
+    });
+  }
+
   function updateTaskDraft(updates: Partial<TaskDraft>) {
     setTaskEditor((current) => current ? { ...current, draft: { ...current.draft, ...updates } } : current);
   }
@@ -1487,6 +1500,37 @@ export default function Home() {
     }
   }
 
+  function renderSubtasksPreview(task: Task) {
+    const subtasks = task.subtasks ?? [];
+    if (subtasks.length === 0) return null;
+
+    const expanded = expandedSubtaskTaskIds.has(task.id);
+    return (
+      <div className="subtasks-preview">
+        <button
+          type="button"
+          className="subtasks-toggle"
+          onClick={() => toggleTaskSubtasks(task.id)}
+          aria-expanded={expanded}
+          aria-controls={`subtasks-preview-${task.id}`}
+        >
+          <span aria-hidden="true">{expanded ? "▾" : "▸"}</span>
+          <span>{expanded ? "הסתר צעדי טיפול" : "הצג צעדי טיפול"}</span>
+        </button>
+        {expanded && (
+          <ul className="subtasks-preview-list" id={`subtasks-preview-${task.id}`}>
+            {subtasks.map((subtask) => (
+              <li className={`subtasks-preview-item status-${subtask.status}`} key={subtask.id}>
+                <span>{subtask.title}</span>
+                <strong>{subtaskStatusLabels[subtask.status]}</strong>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    );
+  }
+
   return (
     <main className={activeView === "kanban" ? "kanban-main" : undefined}>
       <header className="hero">
@@ -1601,12 +1645,15 @@ export default function Home() {
                         {subtaskProgressLabel(task.subtasks) && <span className="subtask-progress">{subtaskProgressLabel(task.subtasks)}</span>}
                       </div>
                       {task.notes && <p className="task-notes">{task.notes}</p>}
+                      {renderSubtasksPreview(task)}
                     </div>
                     <div className="task-actions">
                       <select value={task.status} onChange={(e) => updateStatus(task.id, e.target.value as TaskStatus)} aria-label={`סטטוס ${task.title}`}>
                         {Object.entries(statusLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
                       </select>
-                      <button onClick={() => openEditTask(task)}>עריכה</button>
+                      <button className="edit-icon-button" onClick={() => openEditTask(task)} aria-label={`עריכת ${task.title}`} title="עריכה">
+                        <span aria-hidden="true">✎</span>
+                      </button>
                     </div>
                   </article>
                 ))}
@@ -1656,11 +1703,14 @@ export default function Home() {
                               {taskStatusTimestampLabel(task) && <span className="status-timestamp">{taskStatusTimestampLabel(task)}</span>}
                               {subtaskProgressLabel(task.subtasks) && <span className="subtask-progress">{subtaskProgressLabel(task.subtasks)}</span>}
                             </div>
+                            {renderSubtasksPreview(task)}
                             <div className="kanban-actions">
                               <select value={task.status} onChange={(event) => updateStatus(task.id, event.target.value as TaskStatus)} aria-label={`סטטוס ${task.title}`}>
                                 {Object.entries(statusLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
                               </select>
-                              <button onClick={() => openEditTask(task)}>עריכה</button>
+                              <button className="edit-icon-button" onClick={() => openEditTask(task)} aria-label={`עריכת ${task.title}`} title="עריכה">
+                                <span aria-hidden="true">✎</span>
+                              </button>
                             </div>
                           </article>
                         ))}
