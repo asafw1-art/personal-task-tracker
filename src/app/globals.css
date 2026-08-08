@@ -43,6 +43,7 @@ textarea { resize: vertical; min-height: 86px; }
 .status-waiting { border-right: 5px solid var(--waiting); }
 .status-in_progress { border-right: 5px solid var(--accent); }
 .is-overdue { border-right: 5px solid #dc2626; }
+.has-open-subtasks { box-shadow: 0 10px 30px rgba(37, 99, 235, 0.12); }
 .task-heading { display: flex; align-items: baseline; gap: 10px; }
 .task-heading h2 { margin: 0; font-size: 1rem; }
 .task-id { direction: ltr; display: inline-block; background: #eef4ff; color: var(--accent-dark); border-radius: 8px; padding: 3px 8px; font-weight: 800; }
@@ -92,14 +93,17 @@ textarea { resize: vertical; min-height: 86px; }
 .subtasks-preview { display: grid; gap: 8px; margin-top: 10px; }
 .subtasks-toggle { align-items: center; background: #f8fafc; border: 1px solid #dbe7ff; border-radius: 10px; color: var(--accent-dark); display: inline-flex; font-weight: 700; gap: 7px; justify-self: start; padding: 7px 10px; }
 .subtasks-toggle:hover { background: #eef4ff; }
+.subtasks-preview-panel { display: grid; gap: 8px; }
+.subtask-add-inline { align-items: center; background: #eef4ff; border: 1px solid #bfdbfe; border-radius: 10px; color: var(--accent-dark); display: inline-flex; font-weight: 700; gap: 6px; justify-self: start; padding: 7px 10px; }
+.subtask-add-inline:hover { background: #dbeafe; }
+.subtask-add-inline span:first-child { align-items: center; background: var(--accent); border-radius: 999px; color: #fff; display: inline-flex; height: 20px; justify-content: center; line-height: 1; width: 20px; }
 .subtasks-preview-list { display: grid; gap: 6px; list-style: none; margin: 0; padding: 0; }
-.subtasks-preview-item { align-items: center; background: #f8fafc; border: 1px solid #edf2f7; border-radius: 10px; display: flex; gap: 10px; justify-content: space-between; padding: 8px 10px; }
-.subtasks-preview-item span { overflow-wrap: anywhere; }
-.subtasks-preview-item strong { border-radius: 999px; color: var(--muted); flex: 0 0 auto; font-size: .82rem; padding: 4px 8px; }
-.subtasks-preview-item.status-open strong { background: #eef4ff; color: var(--accent-dark); }
-.subtasks-preview-item.status-done strong { background: #dcfce7; color: var(--success); }
+.subtasks-preview-item { align-items: center; background: #f8fafc; border: 1px solid #edf2f7; border-radius: 10px; display: grid; gap: 8px; grid-template-columns: minmax(150px, 1fr) minmax(110px, .55fr) minmax(100px, .45fr); padding: 8px; }
+.subtasks-preview-item input, .subtasks-preview-item select { padding: 8px 9px; }
+.subtasks-preview-item.status-open { border-right: 4px solid var(--accent); }
+.subtasks-preview-item.status-done { background: #f0fdf4; border-color: #bbf7d0; }
 .subtasks-preview-item.status-cancelled { opacity: .72; }
-.subtasks-preview-item.status-cancelled strong { background: #f1f5f9; color: var(--muted); }
+.subtasks-preview-item.status-cancelled { background: #f8fafc; }
 .subtasks-editor { border: 1px solid var(--border); border-radius: 14px; display: grid; gap: 12px; padding: 12px; }
 .subtasks-editor-header { align-items: center; display: flex; gap: 12px; justify-content: space-between; }
 .subtasks-editor-header h3 { font-size: 1rem; margin: 0 0 4px; }
@@ -185,7 +189,7 @@ textarea { resize: vertical; min-height: 86px; }
 .range-tabs { display: flex; gap: 4px; background: #e9eef7; border: 1px solid var(--border); border-radius: 12px; padding: 4px; }
 .range-tabs button { border: 0; border-radius: 9px; background: transparent; color: var(--muted); font-weight: 700; padding: 9px 13px; }
 .range-tabs button.active { background: var(--surface); color: var(--accent-dark); box-shadow: 0 4px 12px rgba(23, 32, 51, 0.08); }
-.analytics-metrics { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+.analytics-metrics { grid-template-columns: repeat(7, minmax(0, 1fr)); }
 .analytics-layout { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(300px, .65fr); gap: 14px; }
 .analytics-main { display: grid; gap: 14px; }
 .panel-heading { align-items: baseline; display: flex; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
@@ -287,6 +291,8 @@ textarea { resize: vertical; min-height: 86px; }
   .task-heading { align-items: flex-start; flex-direction: column; gap: 6px; }
   .subtasks-editor-header { align-items: stretch; flex-direction: column; }
   .subtasks-editor-header button { width: 100%; }
+  .subtasks-preview-item { grid-template-columns: 1fr; }
+  .subtask-add-inline { justify-content: center; width: 100%; }
   .subtask-row { grid-template-columns: 1fr; }
   .subtask-cancel { width: 100%; }
   .taxonomy-form, .taxonomy-grid, .taxonomy-edit-form { grid-template-columns: 1fr; }

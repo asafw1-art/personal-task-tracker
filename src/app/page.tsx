@@ -71,7 +71,7 @@ type ImportSummary = {
   skipped: number;
 };
 
-type TaskFilter = TaskStatus | "active" | "all" | "overdue" | "today" | "week" | "no_due" | "high";
+type TaskFilter = TaskStatus | "active" | "all" | "overdue" | "today" | "week" | "no_due" | "high" | "subtasks_open";
 type AnalyticsRange = "week" | "month" | "all";
 type MainView = "tasks" | "stats" | "kanban";
 type TaxonomyMode = "topics" | "actions";
@@ -319,6 +319,7 @@ function subtaskProgress(subtasks: TaskSubtask[] = []) {
   const done = activeSubtasks.filter((subtask) => subtask.status === "done").length;
   return {
     done,
+    open: activeSubtasks.length - done,
     total: activeSubtasks.length,
     cancelled: subtasks.length - activeSubtasks.length,
   };
@@ -327,9 +328,9 @@ function subtaskProgress(subtasks: TaskSubtask[] = []) {
 function subtaskProgressLabel(subtasks: TaskSubtask[] = []) {
   const progress = subtaskProgress(subtasks);
   if (progress.total === 0 && progress.cancelled === 0) return "";
-  return progress.total > 0
-    ? `התקדמות ${progress.done}/${progress.total}`
-    : "כל צעדי הטיפול בוטלו";
+  if (progress.total === 0) return "כל צעדי הטיפול בוטלו";
+  if (progress.open === 0) return "כל הצעדים בוצעו";
+  return `${progress.open} צעדים פתוחים`;
 }
 
 function normalizeDraftSubtasks(subtasks: TaskSubtask[], parentId: string) {
@@ -708,10 +709,11 @@ export default function Home() {
     return tasks
       .filter((task) => prefixFilter === "all" || task.prefix === prefixFilter)
       .filter((task) => topicFilter === "all" || task.category === topicFilter)
-      .filter((task) => actionFilter === "all" || (task.actionType ?? "") === actionFilter)
+      .filter((task) => actionFilter === "all" || (task.actionType ?? "") === actionFilter || (task.subtasks ?? []).some((subtask) => subtask.actionType === actionFilter))
       .filter((task) => {
         if (statusFilter === "all") return true;
         if (statusFilter === "active") return !["done", "cancelled"].includes(task.status);
+        if (statusFilter === "subtasks_open") return !["done", "cancelled"].includes(task.status) && subtaskProgress(task.subtasks).open > 0;
         if (statusFilter === "overdue") return Boolean(task.dueDate && task.dueDate < today && !["done", "cancelled"].includes(task.status));
         if (statusFilter === "today") return task.dueDate === today;
         if (statusFilter === "week") return Boolean(task.dueDate && task.dueDate >= today && task.dueDate <= weekEnd);
@@ -730,6 +732,7 @@ export default function Home() {
     active: tasks.filter((t) => !["done", "cancelled"].includes(t.status)).length,
     waiting: tasks.filter((t) => t.status === "waiting").length,
     done: tasks.filter((t) => t.status === "done").length,
+    openSubtaskTasks: tasks.filter((t) => !["done", "cancelled"].includes(t.status) && subtaskProgress(t.subtasks).open > 0).length,
   }), [tasks]);
 
   const statistics = useMemo(() => {
@@ -789,6 +792,8 @@ export default function Home() {
     const waiting = active.filter((task) => task.status === "waiting");
     const withoutDueDate = active.filter((task) => !task.dueDate);
     const highPriority = active.filter((task) => task.priority === "high");
+    const withOpenSubtasks = active.filter((task) => subtaskProgress(task.subtasks).open > 0);
+    const openSubtasks = withOpenSubtasks.reduce((sum, task) => sum + subtaskProgress(task.subtasks).open, 0);
     const staleInProgress = active.filter((task) => {
       const statusDate = taskStatusTimestamp(task)?.slice(0, 10);
       return task.status === "in_progress" && Boolean(statusDate && statusDate < addDaysIso(-14));
@@ -804,6 +809,7 @@ export default function Home() {
 
     addAttention([...overdue].sort((a, b) => (a.dueDate ?? "").localeCompare(b.dueDate ?? "") || a.number - b.number));
     addAttention([...highPriority].sort((a, b) => a.number - b.number));
+    addAttention([...withOpenSubtasks].sort((a, b) => subtaskProgress(b.subtasks).open - subtaskProgress(a.subtasks).open || a.number - b.number));
     addAttention([...waiting].sort((a, b) => a.number - b.number));
     addAttention([...withoutDueDate].sort((a, b) => a.number - b.number));
 
@@ -817,6 +823,18 @@ export default function Home() {
       .sort((a, b) => (a.dueDate ?? "9999-12-31").localeCompare(b.dueDate ?? "9999-12-31") || a.number - b.number);
     const insights: AnalyticsInsight[] = [];
     const addInsight = (insight: AnalyticsInsight) => insights.push(insight);
+
+    if (openSubtasks > 0) {
+      addInsight({
+        id: "open-subtasks",
+        title: `${openSubtasks} צעדי טיפול פתוחים`,
+        body: `${withOpenSubtasks.length} משימות כבר פורקו לצעדים. כדאי לסגור צעד קטן אחד כדי לייצר התקדמות גם בלי לסגור משימה שלמה.`,
+        tone: openSubtasks >= 8 ? "warn" : "neutral",
+        priority: openSubtasks >= 8 ? 89 : 68,
+        actionLabel: "הצג צעדים פתוחים",
+        action: { statusFilter: "subtasks_open" },
+      });
+    }
 
     if (overdue.length > 0) {
       addInsight({
@@ -1036,6 +1054,8 @@ export default function Home() {
       undatedCompleted: done.length - completedWithDate.length,
       completionTrend,
       waiting: waiting.length,
+      openSubtasks,
+      withOpenSubtasks: withOpenSubtasks.length,
       byCategory: activeCategories,
       attention: Array.from(attentionMap.values()).slice(0, 8),
       insights: insights.sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0)).slice(0, 5),
@@ -1155,6 +1175,46 @@ export default function Home() {
       }
       return next;
     });
+  }
+
+  function updateTaskSubtask(taskId: string, subtaskNumber: number, updates: Partial<TaskSubtask>) {
+    setTasks((current) => current.map((task) => {
+      if (task.id !== taskId) return task;
+      return {
+        ...task,
+        subtasks: (task.subtasks ?? []).map((subtask) => {
+          if (subtask.number !== subtaskNumber) return subtask;
+          const statusChangedAt = updates.status && updates.status !== subtask.status ? nowIso() : subtask.statusChangedAt;
+          return {
+            ...subtask,
+            ...updates,
+            actionType: updates.actionType === "" ? undefined : updates.actionType ?? subtask.actionType,
+            statusChangedAt,
+          };
+        }),
+      };
+    }));
+  }
+
+  function addTaskSubtask(task: Task) {
+    const subtasks = task.subtasks ?? [];
+    const number = nextSubtaskNumber(subtasks);
+    const createdAt = nowIso();
+    const newSubtask: TaskSubtask = {
+      id: createSubtaskId(task.id, number),
+      number,
+      title: "צעד טיפול חדש",
+      status: "open",
+      createdAt,
+      statusChangedAt: createdAt,
+    };
+
+    setTasks((current) => current.map((currentTask) => (
+      currentTask.id === task.id
+        ? { ...currentTask, subtasks: [...(currentTask.subtasks ?? []), newSubtask] }
+        : currentTask
+    )));
+    setExpandedSubtaskTaskIds((current) => new Set(current).add(task.id));
   }
 
   function updateTaskDraft(updates: Partial<TaskDraft>) {
@@ -1556,17 +1616,41 @@ export default function Home() {
           aria-controls={`subtasks-preview-${task.id}`}
         >
           <span aria-hidden="true">{expanded ? "▾" : "▸"}</span>
-          <span>{expanded ? "הסתר צעדי טיפול" : "הצג צעדי טיפול"}</span>
+          <span>צעדי טיפול</span>
         </button>
         {expanded && (
-          <ul className="subtasks-preview-list" id={`subtasks-preview-${task.id}`}>
-            {subtasks.map((subtask) => (
-              <li className={`subtasks-preview-item status-${subtask.status}`} key={subtask.id}>
-                <span>{subtask.title}</span>
-                <strong>{subtaskStatusLabels[subtask.status]}</strong>
-              </li>
-            ))}
-          </ul>
+          <div className="subtasks-preview-panel" id={`subtasks-preview-${task.id}`}>
+            <button type="button" className="subtask-add-inline" onClick={() => addTaskSubtask(task)} aria-label={`הוספת צעד טיפול ל-${task.title}`}>
+              <span aria-hidden="true">+</span>
+              <span>צעד טיפול</span>
+            </button>
+            <ul className="subtasks-preview-list">
+              {subtasks.map((subtask) => (
+                <li className={`subtasks-preview-item status-${subtask.status}`} key={subtask.id}>
+                  <input
+                    value={subtask.title}
+                    onChange={(event) => updateTaskSubtask(task.id, subtask.number, { title: event.target.value })}
+                    aria-label={`שם צעד טיפול ${subtask.title}`}
+                  />
+                  <select
+                    value={subtask.actionType ?? ""}
+                    onChange={(event) => updateTaskSubtask(task.id, subtask.number, { actionType: event.target.value })}
+                    aria-label={`פעולה עבור ${subtask.title}`}
+                  >
+                    <option value="">ללא פעולה</option>
+                    {actionOptions.map((action) => <option value={action} key={action}>{action}</option>)}
+                  </select>
+                  <select
+                    value={subtask.status}
+                    onChange={(event) => updateTaskSubtask(task.id, subtask.number, { status: event.target.value as TaskSubtaskStatus })}
+                    aria-label={`סטטוס עבור ${subtask.title}`}
+                  >
+                    {Object.entries(subtaskStatusLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
+                  </select>
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
       </div>
     );
@@ -1663,12 +1747,13 @@ export default function Home() {
                 <button className={statusFilter === "overdue" ? "active" : ""} onClick={() => setStatusFilter("overdue")}>באיחור</button>
                 <button className={statusFilter === "no_due" ? "active" : ""} onClick={() => setStatusFilter("no_due")}>בלי יעד</button>
                 <button className={statusFilter === "high" ? "active" : ""} onClick={() => setStatusFilter("high")}>גבוהה</button>
+                <button className={statusFilter === "subtasks_open" ? "active" : ""} onClick={() => setStatusFilter("subtasks_open")}>צעדים פתוחים</button>
               </section>
 
               <section className="task-list" aria-live="polite">
                 {filteredTasks.length === 0 && <div className="empty">לא נמצאו משימות מתאימות.</div>}
                 {filteredTasks.map((task) => (
-                  <article className={`task-card status-${task.status}${isOverdue(task) ? " is-overdue" : ""}`} key={task.id}>
+                  <article className={`task-card status-${task.status}${isOverdue(task) ? " is-overdue" : ""}${subtaskProgress(task.subtasks).open >= 3 ? " has-open-subtasks" : ""}`} key={task.id}>
                     <button className="check" aria-label={`סימון ${task.title} כבוצעה`} onClick={() => updateStatus(task.id, task.status === "done" ? "open" : "done")}>
                       {task.status === "done" ? "✓" : ""}
                     </button>
@@ -1731,7 +1816,7 @@ export default function Home() {
                         {columnTasks.length === 0 ? (
                           <p className="kanban-empty">אין משימות</p>
                         ) : columnTasks.map((task) => (
-                          <article className={`kanban-card status-${task.status}${isOverdue(task) ? " is-overdue" : ""}`} key={task.id}>
+                          <article className={`kanban-card status-${task.status}${isOverdue(task) ? " is-overdue" : ""}${subtaskProgress(task.subtasks).open >= 3 ? " has-open-subtasks" : ""}`} key={task.id}>
                             <div className="task-heading">
                               <span className="task-id">{task.id}</span>
                               <h3>{task.title}</h3>
@@ -1803,6 +1888,7 @@ export default function Home() {
                 <div className="metric metric-danger"><span>באיחור</span><strong>{statistics.overdue}</strong><small>דורשות החלטה</small></div>
                 <div className="metric metric-warn"><span>ממתינות</span><strong>{analytics.waiting}</strong><small>תקועות על גורם חיצוני</small></div>
                 <div className="metric"><span>בלי תאריך יעד</span><strong>{statistics.withoutDueDate}</strong><small>כדאי למקד</small></div>
+                <div className="metric"><span>צעדים פתוחים</span><strong>{analytics.openSubtasks}</strong><small>{analytics.withOpenSubtasks} משימות</small></div>
                 <div className="metric metric-good"><span>נסגרו בטווח</span><strong>{analytics.completedInRange}</strong><small>{analyticsRangeLabel()}</small></div>
                 <div className="metric"><span>כל המשימות</span><strong>{statistics.total}</strong><small>{statistics.done} הושלמו</small></div>
               </div>
