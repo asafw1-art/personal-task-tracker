@@ -189,7 +189,7 @@ textarea { resize: vertical; min-height: 86px; }
 .range-tabs { display: flex; gap: 4px; background: #e9eef7; border: 1px solid var(--border); border-radius: 12px; padding: 4px; }
 .range-tabs button { border: 0; border-radius: 9px; background: transparent; color: var(--muted); font-weight: 700; padding: 9px 13px; }
 .range-tabs button.active { background: var(--surface); color: var(--accent-dark); box-shadow: 0 4px 12px rgba(23, 32, 51, 0.08); }
-.analytics-metrics { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.analytics-metrics { grid-template-columns: repeat(auto-fit, minmax(135px, 1fr)); }
 .analytics-layout { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(300px, .65fr); gap: 14px; }
 .analytics-main { display: grid; gap: 14px; }
 .panel-heading { align-items: baseline; display: flex; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
@@ -220,6 +220,10 @@ textarea { resize: vertical; min-height: 86px; }
 .bar-row strong { color: var(--text); text-align: left; }
 .bar-track { height: 10px; overflow: hidden; border-radius: 999px; background: #e8eef8; }
 .bar-track div { height: 100%; min-width: 4px; border-radius: inherit; background: linear-gradient(90deg, var(--accent), var(--success)); }
+.subtask-load-row { align-items: center; background: #f8fafc; border: 1px solid var(--border); border-radius: 12px; color: var(--text); cursor: pointer; display: grid; gap: 10px; grid-template-columns: auto minmax(0, 1fr) auto; margin-top: 10px; padding: 12px; text-align: right; width: 100%; }
+.subtask-load-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.subtask-load-row > span:last-child { color: var(--muted); font-size: .9rem; }
+.subtask-load-row:hover { border-color: #b9c8ef; box-shadow: 0 8px 18px rgba(23, 32, 51, 0.08); }
 .timeline-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
 .timeline-stats div { border: 1px solid var(--border); border-radius: 12px; padding: 12px; }
 .timeline-stats strong { display: block; font-size: 1.6rem; }
@@ -285,6 +289,8 @@ textarea { resize: vertical; min-height: 86px; }
   .device-meta { justify-items: start; text-align: right; }
   .cloud-login, .cloud-actions { display: grid; grid-template-columns: 1fr; }
   .bar-row { grid-template-columns: 82px 1fr 28px; }
+  .subtask-load-row { grid-template-columns: auto 1fr; }
+  .subtask-load-row > span:last-child { grid-column: 1 / -1; }
   .task-card { grid-template-columns: 40px 1fr; }
   .task-actions { grid-column: 1 / -1; }
   .edit-grid { grid-template-columns: 1fr; }

@@ -61,6 +61,7 @@ type AnalyticsInsight = {
     statusFilter?: TaskFilter;
     prefixFilter?: TaskPrefix | "all";
     topicFilter?: string;
+    actionFilter?: string;
     query?: string;
   };
 };
@@ -794,6 +795,29 @@ export default function Home() {
     const highPriority = active.filter((task) => task.priority === "high");
     const withOpenSubtasks = active.filter((task) => subtaskProgress(task.subtasks).open > 0);
     const openSubtasks = withOpenSubtasks.reduce((sum, task) => sum + subtaskProgress(task.subtasks).open, 0);
+    const allSubtaskItems = tasks.flatMap((task) => (task.subtasks ?? []).map((subtask) => ({ task, subtask })));
+    const countedSubtaskItems = allSubtaskItems.filter(({ subtask }) => subtask.status !== "cancelled");
+    const doneSubtaskItems = allSubtaskItems.filter(({ subtask }) => subtask.status === "done");
+    const completedSubtasksInRange = doneSubtaskItems.filter(({ subtask }) => {
+      const statusDate = subtask.statusChangedAt?.slice(0, 10);
+      return !rangeStartIso || Boolean(statusDate && statusDate >= rangeStartIso);
+    });
+    const completedSubtasksInRangeCount = analyticsRange === "all" ? doneSubtaskItems.length : completedSubtasksInRange.length;
+    const subtaskCompletionRate = countedSubtaskItems.length > 0
+      ? Math.round((doneSubtaskItems.length / countedSubtaskItems.length) * 100)
+      : 0;
+    const openSubtaskItems = allSubtaskItems.filter(({ task, subtask }) => (
+      !["done", "cancelled"].includes(task.status) && subtask.status === "open"
+    ));
+    const subtasksByAction = Array.from(new Set(openSubtaskItems.map(({ subtask }) => subtask.actionType?.trim() || "ללא פעולה")))
+      .map((label) => ({
+        label,
+        value: openSubtaskItems.filter(({ subtask }) => (subtask.actionType?.trim() || "ללא פעולה") === label).length,
+      }))
+      .sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
+    const tasksByOpenSubtasks = withOpenSubtasks
+      .map((task) => ({ task, value: subtaskProgress(task.subtasks).open }))
+      .sort((a, b) => b.value - a.value || a.task.number - b.task.number);
     const staleInProgress = active.filter((task) => {
       const statusDate = taskStatusTimestamp(task)?.slice(0, 10);
       return task.status === "in_progress" && Boolean(statusDate && statusDate < addDaysIso(-14));
@@ -833,6 +857,57 @@ export default function Home() {
         priority: openSubtasks >= 8 ? 89 : 68,
         actionLabel: "הצג צעדים פתוחים",
         action: { statusFilter: "subtasks_open" },
+      });
+    }
+
+    if (completedSubtasksInRangeCount > 0) {
+      addInsight({
+        id: "completed-subtasks",
+        title: `${completedSubtasksInRangeCount} צעדי טיפול נסגרו`,
+        body: `זה סימן להתקדמות בתוך משימות, גם אם המשימה הראשית עדיין לא נסגרה. שיעור השלמת הצעדים הכולל עומד על ${subtaskCompletionRate}%.`,
+        tone: "good",
+        priority: 73,
+        actionLabel: "הצג צעדים פתוחים",
+        action: { statusFilter: "subtasks_open" },
+      });
+    } else if (openSubtasks > 0) {
+      addInsight({
+        id: "no-subtask-progress",
+        title: "אין סגירת צעדי טיפול בטווח",
+        body: "יש צעדים פתוחים, אבל לא נסגרו צעדים בטווח שבחרת. כדאי לבחור צעד קטן אחד ולסמן אותו כבוצע.",
+        tone: analyticsRange === "week" ? "warn" : "neutral",
+        priority: analyticsRange === "week" ? 90 : 63,
+        actionLabel: "הצג צעדים פתוחים",
+        action: { statusFilter: "subtasks_open" },
+      });
+    }
+
+    if (tasksByOpenSubtasks[0]?.value >= 4) {
+      const topTask = tasksByOpenSubtasks[0];
+      addInsight({
+        id: "subtask-heavy-task",
+        title: `הרבה צעדים פתוחים ב-${topTask.task.id}`,
+        body: `במשימה "${topTask.task.title}" יש ${topTask.value} צעדי טיפול פתוחים. זה מקום טוב להתחיל בו כדי לפרק עומס.`,
+        tone: "warn",
+        priority: 87,
+        actionLabel: "פתח משימה",
+        action: { query: topTask.task.id, statusFilter: "all" },
+      });
+    }
+
+    if (subtasksByAction[0]?.value >= 3) {
+      const topAction = subtasksByAction[0];
+      addInsight({
+        id: "subtask-action-load",
+        title: `עומס צעדים בפעולה ${topAction.label}`,
+        body: `${topAction.value} צעדי טיפול פתוחים משויכים לפעולה הזו. אפשר לרכז טיפול מסוג אחד ולסגור כמה צעדים ברצף.`,
+        tone: "neutral",
+        priority: topAction.value >= 6 ? 83 : 66,
+        actionLabel: topAction.label === "ללא פעולה" ? "הצג צעדים" : "פתח פעולה",
+        action: {
+          statusFilter: "subtasks_open",
+          actionFilter: topAction.label === "ללא פעולה" ? "all" : topAction.label,
+        },
       });
     }
 
@@ -1056,6 +1131,12 @@ export default function Home() {
       waiting: waiting.length,
       openSubtasks,
       withOpenSubtasks: withOpenSubtasks.length,
+      completedSubtasksInRange: completedSubtasksInRangeCount,
+      totalSubtasks: countedSubtaskItems.length,
+      doneSubtasks: doneSubtaskItems.length,
+      subtaskCompletionRate,
+      subtasksByAction,
+      tasksByOpenSubtasks: tasksByOpenSubtasks.slice(0, 5),
       byCategory: activeCategories,
       attention: Array.from(attentionMap.values()).slice(0, 8),
       insights: insights.sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0)).slice(0, 5),
@@ -1133,7 +1214,7 @@ export default function Home() {
     setQuery(insight.action.query ?? "");
     setStatusFilter(insight.action.statusFilter ?? "active");
     setPrefixFilter(insight.action.prefixFilter ?? "all");
-    setActionFilter("all");
+    setActionFilter(insight.action.actionFilter ?? "all");
     setTopicFilter(insight.action.topicFilter ?? "all");
     setActiveView("tasks");
   }
@@ -1889,6 +1970,8 @@ export default function Home() {
                 <div className="metric metric-warn"><span>ממתינות</span><strong>{analytics.waiting}</strong><small>תקועות על גורם חיצוני</small></div>
                 <div className="metric"><span>בלי תאריך יעד</span><strong>{statistics.withoutDueDate}</strong><small>כדאי למקד</small></div>
                 <div className="metric"><span>צעדים פתוחים</span><strong>{analytics.openSubtasks}</strong><small>{analytics.withOpenSubtasks} משימות</small></div>
+                <div className="metric metric-good"><span>צעדים נסגרו</span><strong>{analytics.completedSubtasksInRange}</strong><small>{analyticsRangeLabel()}</small></div>
+                <div className="metric"><span>השלמת צעדים</span><strong>{analytics.subtaskCompletionRate}%</strong><small>{analytics.doneSubtasks}/{analytics.totalSubtasks} צעדים</small></div>
                 <div className="metric metric-good"><span>נסגרו בטווח</span><strong>{analytics.completedInRange}</strong><small>{analyticsRangeLabel()}</small></div>
                 <div className="metric"><span>כל המשימות</span><strong>{statistics.total}</strong><small>{statistics.done} הושלמו</small></div>
               </div>
@@ -1917,6 +2000,38 @@ export default function Home() {
                         <p>{completionChartEmptyBody()}</p>
                       </div>
                     )}
+                  </section>
+
+                  <section className="panel chart-panel">
+                    <div className="panel-heading">
+                      <h2>צעדי טיפול לפי פעולה</h2>
+                      <span>צעדים פתוחים בלבד</span>
+                    </div>
+                    {analytics.subtasksByAction.length === 0 ? (
+                      <p className="muted-line">אין כרגע צעדי טיפול פתוחים.</p>
+                    ) : analytics.subtasksByAction.slice(0, 8).map((row) => (
+                      <div className="bar-row" key={row.label}>
+                        <span>{row.label}</span>
+                        <div className="bar-track"><div style={{ width: `${(row.value / maxValue(analytics.subtasksByAction)) * 100}%` }} /></div>
+                        <strong>{row.value}</strong>
+                      </div>
+                    ))}
+                  </section>
+
+                  <section className="panel chart-panel">
+                    <div className="panel-heading">
+                      <h2>משימות עם צעדי טיפול פתוחים</h2>
+                      <span>איפה כדאי להתחיל לפרק</span>
+                    </div>
+                    {analytics.tasksByOpenSubtasks.length === 0 ? (
+                      <p className="muted-line">אין משימות עם צעדי טיפול פתוחים.</p>
+                    ) : analytics.tasksByOpenSubtasks.map((row) => (
+                      <button className="subtask-load-row" key={row.task.id} onClick={() => focusTask(row.task.id)}>
+                        <span className="task-id">{row.task.id}</span>
+                        <strong>{row.task.title}</strong>
+                        <span>{row.value} צעדים פתוחים</span>
+                      </button>
+                    ))}
                   </section>
 
                   <section className="panel chart-panel">
