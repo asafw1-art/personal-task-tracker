@@ -26,6 +26,16 @@ h1 { margin: 0; font-size: clamp(2rem, 5vw, 3.3rem); }
 .stats button { padding: 16px; text-align: right; }
 .stats strong { display: block; font-size: 1.8rem; }
 .stats span { color: var(--muted); }
+.app-notifications { display: grid; gap: 8px; margin: -2px 0 14px; }
+.app-notification { align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); display: flex; gap: 14px; justify-content: space-between; padding: 12px 14px; }
+.app-notification div { display: grid; gap: 3px; }
+.app-notification strong { font-size: .98rem; }
+.app-notification span { color: var(--muted); font-size: .9rem; line-height: 1.45; }
+.app-notification button { background: #fff; border: 1px solid var(--border); border-radius: 10px; color: var(--accent-dark); font-weight: 700; padding: 9px 12px; white-space: nowrap; }
+.app-notification button:hover { background: #eef4ff; border-color: #bfdbfe; }
+.notification-danger { border-right: 5px solid #dc2626; }
+.notification-warn { border-right: 5px solid var(--waiting); }
+.notification-neutral { border-right: 5px solid var(--accent); }
 .view-tabs { display: inline-grid; grid-template-columns: repeat(3, minmax(120px, 1fr)); gap: 4px; background: #e9eef7; border: 1px solid var(--border); border-radius: 12px; padding: 4px; margin-bottom: 14px; }
 .view-tabs button { border: 0; border-radius: 9px; background: transparent; color: var(--muted); padding: 10px 16px; font-weight: 700; }
 .view-tabs button.active { background: var(--surface); color: var(--accent-dark); box-shadow: 0 4px 12px rgba(23, 32, 51, 0.08); }
@@ -273,6 +283,8 @@ textarea { resize: vertical; min-height: 86px; }
   .stats { gap: 8px; }
   .stats button { padding: 12px; }
   .stats strong { font-size: 1.45rem; }
+  .app-notification { align-items: stretch; flex-direction: column; }
+  .app-notification button { width: 100%; }
   .metric-grid, .chart-grid, .timeline-stats, .analytics-layout { grid-template-columns: 1fr; }
   .analytics-header { align-items: stretch; flex-direction: column; }
   .range-tabs { display: grid; grid-template-columns: repeat(3, 1fr); }

@@ -66,6 +66,17 @@ type AnalyticsInsight = {
   };
 };
 
+type AppNotification = {
+  id: string;
+  title: string;
+  body: string;
+  tone: "danger" | "warn" | "neutral";
+  actionLabel: string;
+  action: {
+    statusFilter: TaskFilter;
+  };
+};
+
 type ImportSummary = {
   added: number;
   updated: number;
@@ -736,6 +747,54 @@ export default function Home() {
     openSubtaskTasks: tasks.filter((t) => !["done", "cancelled"].includes(t.status) && subtaskProgress(t.subtasks).open > 0).length,
   }), [tasks]);
 
+  const appNotifications = useMemo(() => {
+    const today = todayIso();
+    const weekStartIso = addDaysIso(-6);
+    const active = tasks.filter((task) => !["done", "cancelled"].includes(task.status));
+    const overdueCount = active.filter((task) => Boolean(task.dueDate && task.dueDate < today)).length;
+    const openSubtasks = active.reduce((sum, task) => sum + subtaskProgress(task.subtasks).open, 0);
+    const completedThisWeek = tasks.filter((task) => {
+      const closureDate = task.status === "done" ? taskClosureDate(task) : "";
+      return Boolean(closureDate && closureDate >= weekStartIso);
+    }).length;
+    const notifications: AppNotification[] = [];
+
+    if (overdueCount > 0) {
+      notifications.push({
+        id: "overdue",
+        title: `${overdueCount} משימות באיחור`,
+        body: "כדאי לעבור עליהן לפני שמוסיפים משימות חדשות.",
+        tone: "danger",
+        actionLabel: "הצג באיחור",
+        action: { statusFilter: "overdue" },
+      });
+    }
+
+    if (openSubtasks > 0) {
+      notifications.push({
+        id: "open-subtasks",
+        title: `${openSubtasks} צעדי טיפול פתוחים`,
+        body: "יש התקדמות שאפשר לייצר גם בלי לסגור משימה שלמה.",
+        tone: openSubtasks >= 8 ? "warn" : "neutral",
+        actionLabel: "הצג צעדים",
+        action: { statusFilter: "subtasks_open" },
+      });
+    }
+
+    if (active.length > 0 && completedThisWeek === 0) {
+      notifications.push({
+        id: "no-weekly-closures",
+        title: "אין סגירות השבוע",
+        body: "משימה קטנה אחת או צעד טיפול אחד יכולים להחזיר קצב.",
+        tone: "warn",
+        actionLabel: "הצג פעילות",
+        action: { statusFilter: "active" },
+      });
+    }
+
+    return notifications;
+  }, [tasks]);
+
   const statistics = useMemo(() => {
     const today = todayIso();
     const monthStartIso = `${today.slice(0, 7)}-01`;
@@ -1216,6 +1275,15 @@ export default function Home() {
     setPrefixFilter(insight.action.prefixFilter ?? "all");
     setActionFilter(insight.action.actionFilter ?? "all");
     setTopicFilter(insight.action.topicFilter ?? "all");
+    setActiveView("tasks");
+  }
+
+  function applyNotificationAction(notification: AppNotification) {
+    setQuery("");
+    setStatusFilter(notification.action.statusFilter);
+    setPrefixFilter("all");
+    setActionFilter("all");
+    setTopicFilter("all");
     setActiveView("tasks");
   }
 
@@ -1787,6 +1855,20 @@ export default function Home() {
             <button onClick={() => { setStatusFilter("waiting"); setActiveView("tasks"); }}><strong>{counts.waiting}</strong><span>ממתינות</span></button>
             <button onClick={() => { setStatusFilter("done"); setActiveView("tasks"); }}><strong>{counts.done}</strong><span>הושלמו</span></button>
           </section>
+
+          {appNotifications.length > 0 && (
+            <section className="app-notifications" aria-label="התראות פעילות" aria-live="polite">
+              {appNotifications.map((notification) => (
+                <article className={`app-notification notification-${notification.tone}`} key={notification.id}>
+                  <div>
+                    <strong>{notification.title}</strong>
+                    <span>{notification.body}</span>
+                  </div>
+                  <button onClick={() => applyNotificationAction(notification)}>{notification.actionLabel}</button>
+                </article>
+              ))}
+            </section>
+          )}
 
           <nav className="view-tabs" aria-label="מעבר בין תצוגות">
             <button className={activeView === "tasks" ? "active" : ""} onClick={() => setActiveView("tasks")}>משימות</button>
