@@ -176,6 +176,8 @@ textarea { resize: vertical; min-height: 86px; }
 .notification-setting span { display: grid; gap: 4px; }
 .notification-setting strong { color: var(--text); }
 .notification-setting small { color: var(--muted); line-height: 1.45; }
+.analytics-threshold-setting { cursor: default; grid-template-columns: minmax(0, 1fr) 120px; }
+.analytics-threshold-setting input[type="number"] { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; color: var(--text); font: inherit; height: auto; padding: 10px 12px; text-align: center; width: 100%; }
 .taxonomy-status { background: #eef4ff; border-radius: 10px; color: var(--muted); line-height: 1.45; margin: 0; padding: 10px 12px; }
 .taxonomy-manager { display: grid; gap: 14px; }
 .taxonomy-form { display: grid; grid-template-columns: 130px 1fr 130px; gap: 10px; }

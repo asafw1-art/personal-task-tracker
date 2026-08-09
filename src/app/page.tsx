@@ -14,7 +14,9 @@ import { fetchCloudTaxonomy, replaceCloudTaxonomy } from "@/lib/supabaseTaxonomy
 const STORAGE_KEY = "asaf-task-tracker-v1";
 const TAXONOMY_STORAGE_KEY = "asaf-task-tracker-taxonomy-v1";
 const NOTIFICATION_PREFERENCES_STORAGE_KEY = "asaf-task-tracker-notification-preferences-v1";
+const ANALYTICS_PREFERENCES_STORAGE_KEY = "asaf-task-tracker-analytics-preferences-v1";
 const THEME_STORAGE_KEY = "asaf-task-tracker-theme-v1";
+const DEFAULT_STUCK_THRESHOLD_DAYS = 21;
 
 const statusLabels: Record<TaskStatus, string> = {
   open: "פתוחה",
@@ -505,6 +507,23 @@ function parseStoredNotificationPreferences(raw: string | null): NotificationPre
   }
 }
 
+function clampStuckThresholdDays(value: number) {
+  if (!Number.isFinite(value)) return DEFAULT_STUCK_THRESHOLD_DAYS;
+  return Math.min(120, Math.max(1, Math.round(value)));
+}
+
+function parseStoredStuckThresholdDays(raw: string | null) {
+  if (!raw) return DEFAULT_STUCK_THRESHOLD_DAYS;
+  try {
+    const parsed = JSON.parse(raw) as Partial<{ stuckThresholdDays: unknown }>;
+    if (typeof parsed.stuckThresholdDays === "number") return clampStuckThresholdDays(parsed.stuckThresholdDays);
+  } catch {
+    const numericValue = Number(raw);
+    if (Number.isFinite(numericValue)) return clampStuckThresholdDays(numericValue);
+  }
+  return DEFAULT_STUCK_THRESHOLD_DAYS;
+}
+
 function replaceValue(values: string[], oldValue: string, newValue: string) {
   return uniqueSorted(values.map((value) => value === oldValue ? newValue : value));
 }
@@ -537,6 +556,8 @@ export default function Home() {
   const [taxonomyStatus, setTaxonomyStatus] = useState("נושאים ופעולות נשמרים מקומית עד להתחברות לענן.");
   const [notificationPreferences, setNotificationPreferences] = useState<NotificationPreferences>(defaultNotificationPreferences);
   const [notificationPreferencesLoaded, setNotificationPreferencesLoaded] = useState(false);
+  const [stuckThresholdDays, setStuckThresholdDays] = useState(DEFAULT_STUCK_THRESHOLD_DAYS);
+  const [analyticsPreferencesLoaded, setAnalyticsPreferencesLoaded] = useState(false);
   const [newTopicPrefix, setNewTopicPrefix] = useState<TaskPrefix>("P");
   const [newTopicName, setNewTopicName] = useState("");
   const [newActionName, setNewActionName] = useState("");
@@ -598,6 +619,19 @@ export default function Home() {
     if (!notificationPreferencesLoaded) return;
     window.localStorage.setItem(NOTIFICATION_PREFERENCES_STORAGE_KEY, JSON.stringify(notificationPreferences));
   }, [notificationPreferences, notificationPreferencesLoaded]);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setStuckThresholdDays(parseStoredStuckThresholdDays(window.localStorage.getItem(ANALYTICS_PREFERENCES_STORAGE_KEY)));
+      setAnalyticsPreferencesLoaded(true);
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
+  }, []);
+
+  useEffect(() => {
+    if (!analyticsPreferencesLoaded) return;
+    window.localStorage.setItem(ANALYTICS_PREFERENCES_STORAGE_KEY, JSON.stringify({ stuckThresholdDays }));
+  }, [analyticsPreferencesLoaded, stuckThresholdDays]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -975,6 +1009,7 @@ export default function Home() {
     const tomorrowIso = addDaysIso(1);
     const nextWeekIso = addDaysIso(7);
     const last30StartIso = addDaysIso(-29);
+    const stuckThresholdIso = addDaysIso(-stuckThresholdDays);
     const rangeStartIso = analyticsRange === "week" ? weekStartIso : analyticsRange === "month" ? last30StartIso : "";
     const active = tasks.filter((task) => !["done", "cancelled"].includes(task.status));
     const done = tasks.filter((task) => task.status === "done");
@@ -1028,8 +1063,16 @@ export default function Home() {
       .sort((a, b) => b.value - a.value || a.task.number - b.task.number);
     const staleInProgress = active.filter((task) => {
       const statusDate = taskStatusTimestamp(task)?.slice(0, 10);
-      return task.status === "in_progress" && Boolean(statusDate && statusDate < addDaysIso(-14));
+      return task.status === "in_progress" && Boolean(statusDate && statusDate < stuckThresholdIso);
     });
+    const activeWithAllSubtasksDone = active.filter((task) => {
+      const progress = subtaskProgress(task.subtasks);
+      return progress.total > 0 && progress.open === 0;
+    });
+    const doneWithOpenSubtasks = done.filter((task) => subtaskProgress(task.subtasks).open > 0);
+    const inProgressWithoutSubtasks = active.filter((task) => (
+      task.status === "in_progress" && subtaskProgress(task.subtasks).total === 0
+    ));
     const activeByPrefix = {
       P: active.filter((task) => task.prefix === "P").length,
       W: active.filter((task) => task.prefix === "W").length,
@@ -1050,9 +1093,18 @@ export default function Home() {
       value: active.filter((task) => task.category === category).length,
     })).sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
     const topCategory = activeCategories[0];
+    const activeActions = Array.from(new Set(active.map((task) => task.actionType?.trim() || "ללא פעולה"))).map((action) => ({
+      label: action,
+      value: active.filter((task) => (task.actionType?.trim() || "ללא פעולה") === action).length,
+    })).sort((a, b) => b.value - a.value || a.label.localeCompare(b.label));
+    const topAction = activeActions[0];
+    const highWithoutDueDate = withoutDueDate.filter((task) => task.priority === "high" || task.priority === "important");
     const stuckTasks = active
-      .filter((task) => task.status === "waiting" || Boolean(task.dueDate && task.dueDate < addDaysIso(-7)))
-      .sort((a, b) => (a.dueDate ?? "9999-12-31").localeCompare(b.dueDate ?? "9999-12-31") || a.number - b.number);
+      .filter((task) => {
+        const statusDate = taskStatusTimestamp(task)?.slice(0, 10);
+        return Boolean(statusDate && statusDate < stuckThresholdIso);
+      })
+      .sort((a, b) => (taskStatusTimestamp(a) ?? "").localeCompare(taskStatusTimestamp(b) ?? "") || a.number - b.number);
     const insights: AnalyticsInsight[] = [];
     const addInsight = (insight: AnalyticsInsight) => insights.push(insight);
 
@@ -1209,6 +1261,69 @@ export default function Home() {
       });
     }
 
+    if (topAction && topAction.value >= 3) {
+      addInsight({
+        id: "top-action",
+        title: `עומס פעולה: ${topAction.label}`,
+        body: `${topAction.value} משימות פעילות משויכות לאותה פעולה. זה יכול לעזור לבחור מצב עבודה אחד ולסגור כמה פריטים ברצף.`,
+        tone: topAction.value >= 6 ? "warn" : "neutral",
+        priority: topAction.value >= 6 ? 85 : 64,
+        actionLabel: topAction.label === "ללא פעולה" ? "הצג פעילות" : "פתח פעולה",
+        action: {
+          statusFilter: "active",
+          actionFilter: topAction.label === "ללא פעולה" ? "all" : topAction.label,
+        },
+      });
+    }
+
+    if (highWithoutDueDate.length > 0) {
+      addInsight({
+        id: "high-without-due-date",
+        title: `${highWithoutDueDate.length} משימות חשובות בלי יעד`,
+        body: "אלה משימות בעדיפות גבוהה או חשובה שאין להן תאריך יעד. כדאי לתת יעד רק לאלו שבאמת צריכות לזוז בקרוב.",
+        tone: "warn",
+        priority: highWithoutDueDate.length >= 3 ? 83 : 69,
+        actionLabel: "הצג בלי יעד",
+        action: { statusFilter: "no_due" },
+      });
+    }
+
+    if (activeWithAllSubtasksDone.length > 0) {
+      addInsight({
+        id: "all-subtasks-done",
+        title: `${activeWithAllSubtasksDone.length} משימות שכל הצעדים שלהן בוצעו`,
+        body: "יש משימות פעילות שכל צעדי הטיפול שלהן כבר סגורים. זה מקום טוב לבדוק אם אפשר לסגור את המשימה הראשית.",
+        tone: "good",
+        priority: 76,
+        actionLabel: "פתח ראשונה",
+        action: { query: activeWithAllSubtasksDone[0].id, statusFilter: "all" },
+      });
+    }
+
+    if (doneWithOpenSubtasks.length > 0) {
+      addInsight({
+        id: "done-with-open-subtasks",
+        title: `${doneWithOpenSubtasks.length} משימות סגורות עם צעדים פתוחים`,
+        body: "יש משימות שסומנו כבוצעו אבל נשארו בהן צעדי טיפול פתוחים. כדאי לבדוק אם הצעדים בוצעו, בוטלו או צריכים משימה חדשה.",
+        tone: "warn",
+        priority: 81,
+        actionLabel: "פתח לבדיקה",
+        action: { query: doneWithOpenSubtasks[0].id, statusFilter: "all" },
+      });
+    }
+
+    if (inProgressWithoutSubtasks.length > 0) {
+      addInsight({
+        id: "in-progress-without-subtasks",
+        title: `${inProgressWithoutSubtasks.length} משימות בטיפול בלי צעדי טיפול`,
+        body: "משימות בטיפול בלי צעדים מקשות להבין מה ההתקדמות הבאה. כדאי להוסיף צעד טיפול אחד ברור למשימה המרכזית ביותר.",
+        tone: "neutral",
+        priority: inProgressWithoutSubtasks.length >= 3 ? 71 : 52,
+        actionLabel: "פתח ראשונה",
+        action: { query: inProgressWithoutSubtasks[0].id, statusFilter: "all" },
+      });
+    }
+
     if (withoutDueDate.length > 0) {
       addInsight({
         id: "without-due-date",
@@ -1237,7 +1352,7 @@ export default function Home() {
       addInsight({
         id: "stale-in-progress",
         title: `${staleInProgress.length} משימות בטיפול שלא זזו`,
-        body: "יש משימות שנמצאות בטיפול מעל שבועיים לפי מועד שינוי הסטטוס. כדאי להחליט אם לקדם, להעביר לממתינה או לסגור.",
+        body: `יש משימות שנמצאות בטיפול מעל ${stuckThresholdDays} יום לפי מועד שינוי הסטטוס האחרון. כדאי להחליט אם לקדם, להעביר לממתינה או לסגור.`,
         tone: "warn",
         priority: 78,
         actionLabel: "הצג בטיפול",
@@ -1265,7 +1380,7 @@ export default function Home() {
       addInsight({
         id: "stuck",
         title: "יש משימות שנראות תקועות",
-        body: `${stuckTasks.length} משימות ממתינות או עם יעד ישן. כדאי לבחור אחת ולהחליט: לקדם, לעדכן יעד או לסגור.`,
+        body: `${stuckTasks.length} משימות פעילות לא שינו סטטוס מעל ${stuckThresholdDays} יום. כדאי לבחור אחת ולהחליט: לקדם, לעדכן יעד, להעביר לממתינה או לסגור.`,
         tone: "danger",
         priority: 95,
         actionLabel: "פתח ראשונה",
@@ -1416,6 +1531,15 @@ export default function Home() {
           ? { actionLabel: "הצג השבוע", action: { statusFilter: "week" as TaskFilter } }
           : { actionLabel: "הצג פעילות", action: { statusFilter: "active" as TaskFilter } };
 
+    const sortedInsights = insights.sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
+    const positiveInsight = sortedInsights.find((insight) => insight.tone === "good");
+    const actionableInsights = sortedInsights
+      .filter((insight) => insight.tone !== "good")
+      .slice(0, positiveInsight ? 4 : 5);
+    const selectedInsights = positiveInsight
+      ? [...actionableInsights, positiveInsight].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))
+      : actionableInsights;
+
     return {
       periodSummary: {
         title: summaryTitle,
@@ -1439,9 +1563,9 @@ export default function Home() {
       tasksByOpenSubtasks: tasksByOpenSubtasks.slice(0, 5),
       byCategory: activeCategories,
       attention: Array.from(attentionMap.values()).slice(0, 8),
-      insights: insights.sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0)).slice(0, 5),
+      insights: selectedInsights,
     };
-  }, [analyticsRange, tasks]);
+  }, [analyticsRange, stuckThresholdDays, tasks]);
 
   function maxValue(rows: StatRow[]) {
     return Math.max(1, ...rows.map((row) => row.value));
@@ -1534,6 +1658,10 @@ export default function Home() {
 
   function updateNotificationPreference(key: NotificationPreferenceKey, value: boolean) {
     setNotificationPreferences((current) => ({ ...current, [key]: value }));
+  }
+
+  function updateStuckThresholdDays(value: string) {
+    setStuckThresholdDays(clampStuckThresholdDays(Number(value)));
   }
 
   function updateStatus(id: string, status: TaskStatus) {
@@ -2845,6 +2973,20 @@ export default function Home() {
                     <span>בחר אילו התראות יופיעו בראש האפליקציה.</span>
                   </div>
                 </div>
+                <label className="notification-setting analytics-threshold-setting">
+                  <span>
+                    <strong>סף משימה תקועה</strong>
+                    <small>משימה פעילה שלא שינתה סטטוס מעל מספר הימים הזה תופיע בתובנות כתקועה.</small>
+                  </span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="120"
+                    value={stuckThresholdDays}
+                    onChange={(event) => updateStuckThresholdDays(event.target.value)}
+                    aria-label="סף ימים למשימה תקועה"
+                  />
+                </label>
                 <div className="notification-settings-list">
                   <label className="notification-setting">
                     <input
