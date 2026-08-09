@@ -116,6 +116,45 @@ const defaultNotificationPreferences: NotificationPreferences = {
   dueSoon: false,
 };
 
+function taskFilterLabel(filter: TaskFilter) {
+  const labels: Record<TaskFilter, string> = {
+    ...statusLabels,
+    active: "פעילות",
+    all: "הכול",
+    overdue: "באיחור",
+    today: "להיום",
+    week: "השבוע",
+    no_due: "בלי יעד",
+    high: "עדיפות גבוהה",
+    subtasks_open: "צעדי טיפול פתוחים",
+  };
+
+  return labels[filter];
+}
+
+function LoadingSkeleton() {
+  return (
+    <section className="loading-skeleton" aria-label="טוען את האפליקציה" aria-live="polite">
+      <div className="panel skeleton-hero">
+        <span className="skeleton-line skeleton-short" />
+        <span className="skeleton-line skeleton-title" />
+        <span className="skeleton-line skeleton-medium" />
+      </div>
+      <div className="skeleton-stats" aria-hidden="true">
+        <span className="skeleton-card" />
+        <span className="skeleton-card" />
+        <span className="skeleton-card" />
+      </div>
+      <div className="panel skeleton-panel" aria-hidden="true">
+        <span className="skeleton-line skeleton-medium" />
+        <span className="skeleton-line" />
+        <span className="skeleton-line" />
+        <span className="skeleton-button" />
+      </div>
+    </section>
+  );
+}
+
 type TaskDraft = {
   prefix: TaskPrefix;
   title: string;
@@ -564,6 +603,7 @@ export default function Home() {
   const [editingTaxonomyItem, setEditingTaxonomyItem] = useState<EditingTaxonomyItem>(null);
   const [importMessage, setImportMessage] = useState("");
   const [authEmail, setAuthEmail] = useState("");
+  const [authChecked, setAuthChecked] = useState(!supabase);
   const [cloudUser, setCloudUser] = useState<User | null>(null);
   const [cloudSyncEnabled, setCloudSyncEnabled] = useState(false);
   const [cloudTaskCount, setCloudTaskCount] = useState<number | null>(null);
@@ -666,10 +706,11 @@ export default function Home() {
       setCloudUser(user);
       setIsCloudReady(!user);
       setCloudStatus(user ? "טוען משימות מהענן..." : "לא מחובר. יש להתחבר כדי לראות את המשימות.");
-    });
+    }).finally(() => setAuthChecked(true));
 
     const { data: subscription } = supabase.auth.onAuthStateChange((_event, session) => {
       const user = session?.user ?? null;
+      setAuthChecked(true);
       setTaskStorageUser(user?.id ?? null);
       setCloudUser(user);
       setCloudSyncEnabled(false);
@@ -897,6 +938,125 @@ export default function Home() {
       })
       .sort((a, b) => a.prefix.localeCompare(b.prefix) || a.number - b.number);
   }, [tasks, query, statusFilter, prefixFilter, topicFilter, actionFilter]);
+
+  const activeFilters = useMemo(() => {
+    const filters: { key: string; label: string }[] = [];
+    const trimmedQuery = query.trim();
+
+    if (trimmedQuery) filters.push({ key: "query", label: `חיפוש: ${trimmedQuery}` });
+    if (statusFilter !== "active") filters.push({ key: "status", label: `סטטוס: ${taskFilterLabel(statusFilter)}` });
+    if (prefixFilter !== "all") filters.push({ key: "prefix", label: `סוג: ${prefixFilter === "P" ? "אישי" : "עבודה"}` });
+    if (topicFilter !== "all") filters.push({ key: "topic", label: `נושא: ${topicFilter}` });
+    if (actionFilter !== "all") filters.push({ key: "action", label: `פעולה: ${actionFilter}` });
+
+    return filters;
+  }, [actionFilter, prefixFilter, query, statusFilter, topicFilter]);
+
+  const clearTaskFilters = useCallback(() => {
+    setQuery("");
+    setStatusFilter("active");
+    setPrefixFilter("all");
+    setTopicFilter("all");
+    setActionFilter("all");
+    setActiveView("tasks");
+  }, []);
+
+  const openCreateTask = useCallback(() => {
+    setTaskEditorError("");
+    setTaskEditor({ mode: "create", draft: defaultTaskDraft(prefixFilter === "W" ? "W" : "P") });
+  }, [prefixFilter]);
+
+  const emptyTaskState = useMemo(() => {
+    const hasNarrowingFilters = activeFilters.length > 0;
+
+    if (query.trim()) {
+      return {
+        title: "לא נמצאו תוצאות לחיפוש",
+        body: "לא נמצאה משימה שמתאימה לחיפוש הנוכחי. אפשר לנקות את החיפוש או לנסות מזהה/מילה אחרת.",
+        actionLabel: "ניקוי סינון",
+        action: clearTaskFilters,
+      };
+    }
+
+    if (statusFilter === "waiting") {
+      return {
+        title: "אין משימות ממתינות",
+        body: "אין כרגע משימות שמחכות לגורם חיצוני. זה סימן טוב להתקדמות.",
+        actionLabel: "הצג פעילות",
+        action: clearTaskFilters,
+      };
+    }
+
+    if (statusFilter === "overdue") {
+      return {
+        title: "אין משימות באיחור",
+        body: "אין משימות פעילות שעברו את תאריך היעד שלהן.",
+        actionLabel: "הצג פעילות",
+        action: clearTaskFilters,
+      };
+    }
+
+    if (statusFilter === "subtasks_open") {
+      return {
+        title: "אין צעדי טיפול פתוחים",
+        body: "לא נמצאו משימות פעילות עם צעדי טיפול פתוחים.",
+        actionLabel: "הצג פעילות",
+        action: clearTaskFilters,
+      };
+    }
+
+    if (statusFilter === "no_due") {
+      return {
+        title: "אין משימות בלי יעד",
+        body: "לכל המשימות הפעילות שמוצגות כרגע יש תאריך יעד.",
+        actionLabel: "הצג פעילות",
+        action: clearTaskFilters,
+      };
+    }
+
+    if (statusFilter === "high") {
+      return {
+        title: "אין משימות בעדיפות גבוהה",
+        body: "לא נמצאו משימות פעילות שמסומנות בעדיפות גבוהה.",
+        actionLabel: "הצג פעילות",
+        action: clearTaskFilters,
+      };
+    }
+
+    if (statusFilter === "today" || statusFilter === "week") {
+      return {
+        title: statusFilter === "today" ? "אין משימות להיום" : "אין משימות לשבוע הקרוב",
+        body: "לא נמצאו משימות פעילות בטווח הזמן שנבחר.",
+        actionLabel: "הצג פעילות",
+        action: clearTaskFilters,
+      };
+    }
+
+    if (statusFilter === "done" || statusFilter === "cancelled") {
+      return {
+        title: statusFilter === "done" ? "אין משימות שבוצעו" : "אין משימות שבוטלו",
+        body: "לא נמצאו משימות בהיסטוריה עבור הסטטוס הזה.",
+        actionLabel: "הצג פעילות",
+        action: clearTaskFilters,
+      };
+    }
+
+    if (hasNarrowingFilters) {
+      return {
+        title: "אין התאמה לסינון הנוכחי",
+        body: "השילוב של הסינונים מצמצם את הרשימה לאפס משימות.",
+        actionLabel: "ניקוי סינון",
+        action: clearTaskFilters,
+      };
+    }
+
+    return {
+      title: tasks.length === 0 ? "עדיין אין משימות" : "אין משימות פעילות",
+      body: tasks.length === 0 ? "אפשר להתחיל ממשימה ראשונה דרך כפתור הפלוס." : "כל המשימות הפעילות טופלו או נסגרו.",
+      actionLabel: "הוספת משימה",
+      action: openCreateTask,
+    };
+  }, [activeFilters.length, clearTaskFilters, openCreateTask, query, statusFilter, tasks.length]);
 
   const counts = useMemo(() => ({
     active: tasks.filter((t) => !["done", "cancelled"].includes(t.status)).length,
@@ -1682,11 +1842,6 @@ export default function Home() {
     return Boolean(task.dueDate && !["done", "cancelled"].includes(task.status) && task.dueDate < todayIso());
   }
 
-  function openCreateTask() {
-    setTaskEditorError("");
-    setTaskEditor({ mode: "create", draft: defaultTaskDraft(prefixFilter === "W" ? "W" : "P") });
-  }
-
   function openEditTask(task: Task) {
     setTaskEditorError("");
     setTaskEditor({ mode: "edit", taskId: task.id, draft: taskToDraft(task) });
@@ -2402,7 +2557,9 @@ export default function Home() {
         )}
       </header>
 
-      {!cloudUser ? (
+      {!authChecked ? (
+        <LoadingSkeleton />
+      ) : !cloudUser ? (
         <section className="auth-gate" aria-label="התחברות">
           <div className="panel auth-panel">
             <div>
@@ -2425,10 +2582,7 @@ export default function Home() {
           </div>
         </section>
       ) : !isCloudReady ? (
-        <section className="panel loading-panel" aria-live="polite">
-          <h2>טוען את המשימות שלך</h2>
-          <p>{cloudStatus}</p>
-        </section>
+        <LoadingSkeleton />
       ) : (
         <>
           <section className="stats" aria-label="סיכום משימות">
@@ -2485,6 +2639,21 @@ export default function Home() {
                 </select>
               </section>
 
+              {activeFilters.length > 0 && (
+                <section className="active-filters" aria-label="סינון פעיל">
+                  <div className="active-filters-summary">
+                    <strong>סינון פעיל</strong>
+                    <span>{activeFilters.length} תנאים מצמצמים את הרשימה</span>
+                  </div>
+                  <div className="active-filter-chips">
+                    {activeFilters.map((filter) => (
+                      <span className="active-filter-chip" key={filter.key}>{filter.label}</span>
+                    ))}
+                  </div>
+                  <button type="button" onClick={clearTaskFilters}>ניקוי סינון</button>
+                </section>
+              )}
+
               <section className="quick-filters" aria-label="סינון מהיר">
                 <button className={statusFilter === "today" ? "active" : ""} onClick={() => setStatusFilter("today")}>להיום</button>
                 <button className={statusFilter === "week" ? "active" : ""} onClick={() => setStatusFilter("week")}>השבוע</button>
@@ -2495,7 +2664,13 @@ export default function Home() {
               </section>
 
               <section className="task-list" aria-live="polite">
-                {filteredTasks.length === 0 && <div className="empty">לא נמצאו משימות מתאימות.</div>}
+                {filteredTasks.length === 0 && (
+                  <div className="empty smart-empty">
+                    <strong>{emptyTaskState.title}</strong>
+                    <p>{emptyTaskState.body}</p>
+                    <button type="button" onClick={emptyTaskState.action}>{emptyTaskState.actionLabel}</button>
+                  </div>
+                )}
                 {filteredTasks.map((task) => (
                   <article className={`task-card status-${task.status}${isOverdue(task) ? " is-overdue" : ""}${subtaskProgress(task.subtasks).open >= 3 ? " has-open-subtasks" : ""}`} key={task.id}>
                     <button className="check" aria-label={`סימון ${task.title} כבוצעה`} onClick={() => updateStatus(task.id, task.status === "done" ? "open" : "done")}>
