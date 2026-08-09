@@ -347,7 +347,18 @@ function errorMessage(error: unknown) {
 }
 
 function mergeUniqueTasks(tasks: Task[]) {
-  return Array.from(new Map(tasks.map((task) => [task.id, task])).values())
+  const merged = new Map<string, Task>();
+
+  tasks.forEach((task) => {
+    const existing = merged.get(task.id);
+    merged.set(task.id, {
+      ...existing,
+      ...task,
+      focused: task.focused ?? existing?.focused,
+    });
+  });
+
+  return Array.from(merged.values())
     .sort((a, b) => Number(Boolean(b.focused)) - Number(Boolean(a.focused)) || a.prefix.localeCompare(b.prefix) || a.number - b.number);
 }
 
