@@ -43,6 +43,11 @@ function visibleEnvironmentKeys() {
     .sort();
 }
 
+function normalizeGeminiModel(model: string | undefined) {
+  if (!model || model === "gemini-2.5-flash") return "gemini-3.5-flash";
+  return model;
+}
+
 function compactTask(task: Task) {
   return {
     id: task.id,
@@ -123,7 +128,7 @@ async function verifyUser(request: Request) {
 
 async function callGemini(prompt: string) {
   const apiKey = process.env.GEMINI_API_KEY;
-  const model = process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
+  const model = normalizeGeminiModel(process.env.GEMINI_MODEL);
 
   if (!apiKey) return null;
 
