@@ -498,6 +498,12 @@ function applyLocalFocusedTasks(tasks: Task[], userId: string) {
   return tasks.map((task) => focusedIds.has(task.id) ? { ...task, focused: true } : task);
 }
 
+function hasLocalFocusedTaskOverrides(tasks: Task[], userId: string) {
+  const focusedIds = readLocalFocusedTaskIds(userId);
+  if (focusedIds.size === 0) return false;
+  return tasks.some((task) => focusedIds.has(task.id) && !task.focused);
+}
+
 function parseStoredTasks(raw: string | null, fallbackTasks: Task[]) {
   if (!raw) return fallbackTasks;
   try {
@@ -961,11 +967,18 @@ export default function Home() {
       .then((cloudTasks) => {
         if (cancelled) return;
         if (cloudTasks.length > 0) {
-          setTasks(applyLocalFocusedTasks(mergeUniqueTasks(cloudTasks), cloudUser.id));
+          const mergedTasks = mergeUniqueTasks(cloudTasks);
+          const hasFocusedOverrides = hasLocalFocusedTaskOverrides(mergedTasks, cloudUser.id);
+          const localFocusedTasks = applyLocalFocusedTasks(mergedTasks, cloudUser.id);
+          setTasks(localFocusedTasks);
           setCloudTaskCount(cloudTasks.length);
           setCloudSyncEnabled(true);
           setLastCloudPullAt(new Date().toISOString());
           setCloudStatus(`מחובר לענן. נטענו ${cloudTasks.length} משימות.`);
+          if (hasFocusedOverrides) {
+            saveCloudTasks(localFocusedTasks, cloudUser)
+              .catch((error: unknown) => setCloudStatus(`שמירת המיקוד לענן נכשלה: ${errorMessage(error)}`));
+          }
         } else {
           setTasks([]);
           setCloudTaskCount(0);
@@ -2062,7 +2075,7 @@ export default function Home() {
 
     if (cloudUser) writeLocalFocusedTaskIds(cloudUser.id, nextTasks);
 
-    if (cloudUser && cloudSyncEnabled && isCloudReady) {
+    if (cloudUser && isCloudReady) {
       saveCloudTasks(nextTasks, cloudUser)
         .then(() => {
           setCloudTaskCount(nextTasks.length);
