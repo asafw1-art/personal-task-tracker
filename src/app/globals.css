@@ -9,6 +9,7 @@
   --success: #15803d;
   --waiting: #b45309;
   --shadow: 0 10px 30px rgba(23, 32, 51, 0.07);
+  --font-app: "Segoe UI", Arial, "Noto Sans Hebrew", sans-serif;
 }
 [data-theme="dark"] {
   color-scheme: dark;
@@ -24,8 +25,9 @@
   --shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--text); font-family: Arial, "Noto Sans Hebrew", sans-serif; }
-button, input, select, textarea { font: inherit; }
+html { font-family: var(--font-app); }
+body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font-app); }
+button, input, select, textarea, option { font-family: var(--font-app); font-size: inherit; }
 button { cursor: pointer; }
 main { width: min(980px, calc(100% - 28px)); margin: 0 auto; padding: 28px 0 64px; }
 .kanban-main { width: min(1320px, calc(100% - 28px)); }
