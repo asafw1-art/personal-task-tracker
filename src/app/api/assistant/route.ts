@@ -99,6 +99,8 @@ function buildSystemPrompt() {
     "{\"type\":\"update_subtask_status\",\"label\":\"אישור וביצוע\",\"taskId\":\"P20\",\"subtaskNumber\":1,\"status\":\"open|done|cancelled\"}",
     "{\"type\":\"filter_tasks\",\"label\":\"הצג משימות\",\"filter\":{\"query\":\"...\",\"statusFilter\":\"active|overdue|subtasks_open|waiting|done|all\",\"prefixFilter\":\"P|W|all\",\"topicFilter\":\"...\",\"actionFilter\":\"...\"}}",
     "אם המשתמש מבקש ניתוח או שאלה בלבד, אל תחזיר proposedAction.",
+    "{\"type\":\"delete_assistant_history\",\"label\":\"אישור ומחיקת שיחות\"}",
+    "If the user asks to delete, clear, reset, erase, or remove the AI chat history, return proposedAction type delete_assistant_history. Explain that it requires approval.",
   ].join("\n");
 }
 

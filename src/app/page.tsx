@@ -6,7 +6,7 @@ import type { User } from "@supabase/supabase-js";
 import type { AssistantMessage, AssistantProposedAction } from "@/lib/assistant";
 import { canonicalTaskId, initialTasks, Task, TaskPrefix, TaskPriority, TaskStatus, TaskSubtask, TaskSubtaskStatus } from "@/lib/tasks";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
-import { addAssistantMessage, fetchAssistantMessages, getOrCreateAssistantThread, updateAssistantMessageActionStatus } from "@/lib/supabaseAssistant";
+import { addAssistantMessage, deleteAssistantHistory as deleteCloudAssistantHistory, fetchAssistantMessages, getOrCreateAssistantThread, updateAssistantMessageActionStatus } from "@/lib/supabaseAssistant";
 import { fetchUserDevices, registerCurrentDevice, type UserDevice } from "@/lib/supabaseDevices";
 import { countCloudTasks, fetchCloudTasks, saveCloudTasks } from "@/lib/supabaseTasks";
 import { fetchCloudTaxonomy, replaceCloudTaxonomy } from "@/lib/supabaseTaxonomy";
@@ -1643,6 +1643,25 @@ export default function Home() {
     setExpandedSubtaskTaskIds((current) => new Set(current).add(action.taskId));
   }
 
+  async function clearAssistantHistory(options: { confirmBeforeDelete: boolean }) {
+    if (!cloudUser) {
+      setAssistantStatus("יש להתחבר לענן כדי למחוק את היסטוריית הצ׳ט.");
+      return;
+    }
+
+    if (options.confirmBeforeDelete) {
+      const confirmed = window.confirm("למחוק את כל היסטוריית השיחות עם עוזר ה-AI? הפעולה לא תשנה משימות, אבל אי אפשר לבטל אותה.");
+      if (!confirmed) return;
+    }
+
+    setAssistantStatus("מוחק את היסטוריית הצ׳ט...");
+    await deleteCloudAssistantHistory(cloudUser);
+    const thread = await getOrCreateAssistantThread(cloudUser);
+    setAssistantThreadId(thread.id);
+    setAssistantMessages([]);
+    setAssistantStatus("היסטוריית הצ׳ט נמחקה. אפשר להתחיל שיחה חדשה.");
+  }
+
   async function approveAssistantAction(message: AssistantMessage) {
     if (!message.proposedAction) return;
 
@@ -1662,6 +1681,9 @@ export default function Home() {
         setTopicFilter(message.proposedAction.filter.topicFilter ?? "all");
         setActionFilter(message.proposedAction.filter.actionFilter ?? "all");
         setActiveView("tasks");
+      } else if (message.proposedAction.type === "delete_assistant_history") {
+        await clearAssistantHistory({ confirmBeforeDelete: false });
+        return;
       }
 
       setAssistantMessages((current) => current.map((item) => item.id === message.id ? { ...item, actionStatus: "done" } : item));
@@ -1731,6 +1753,7 @@ export default function Home() {
   }
 
   function assistantActionDescription(action: AssistantProposedAction) {
+    if (action.type === "delete_assistant_history") return "מחיקת כל היסטוריית השיחות עם עוזר ה-AI";
     if (action.type === "create_task") return `יצירת משימה: ${action.task.title}`;
     if (action.type === "update_task_status") return `שינוי ${action.taskId} לסטטוס ${statusLabels[action.status]}`;
     if (action.type === "add_subtask") return `הוספת צעד טיפול ל-${action.taskId}: ${action.subtask.title}`;
@@ -2916,6 +2939,16 @@ export default function Home() {
                   <input type="file" accept="application/json,.json" onChange={importData} />
                 </label>
               </section>
+
+              {cloudUser && (
+                <section className="panel danger-panel">
+                  <div>
+                    <h2>היסטוריית צ׳ט AI</h2>
+                    <p>מחיקת השיחות עם עוזר ה-AI בלבד. המשימות, הנושאים, הפעולות והגיבויים לא יושפעו.</p>
+                  </div>
+                  <button onClick={() => clearAssistantHistory({ confirmBeforeDelete: true })}>מחיקת שיחות AI</button>
+                </section>
+              )}
 
               {importMessage && <p className="import-message">{importMessage}</p>}
 

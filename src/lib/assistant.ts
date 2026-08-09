@@ -49,6 +49,10 @@ export type AssistantProposedAction =
         topicFilter?: string;
         actionFilter?: string;
       };
+    }
+  | {
+      type: "delete_assistant_history";
+      label: string;
     };
 
 export type AssistantThread = {

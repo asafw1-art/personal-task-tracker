@@ -125,3 +125,13 @@ export async function updateAssistantMessageActionStatus(messageId: string, acti
 
   if (error) throw error;
 }
+
+export async function deleteAssistantHistory(user: User) {
+  const client = requireSupabase();
+  const { error } = await client
+    .from("assistant_threads")
+    .delete()
+    .eq("user_id", user.id);
+
+  if (error) throw error;
+}
