@@ -688,6 +688,7 @@ function sortTasks(tasks: Task[]) {
 export default function Home() {
   const [tasks, setTasks] = usePersistentTasks();
   const [query, setQuery] = useState("");
+  const [quickAddTitle, setQuickAddTitle] = useState("");
   const [statusFilter, setStatusFilter] = useState<TaskFilter>("active");
   const [prefixFilter, setPrefixFilter] = useState<"all" | "P" | "W">("all");
   const [topicFilter, setTopicFilter] = useState("all");
@@ -716,6 +717,7 @@ export default function Home() {
   const [editingTaxonomyItem, setEditingTaxonomyItem] = useState<EditingTaxonomyItem>(null);
   const [importMessage, setImportMessage] = useState("");
   const [authEmail, setAuthEmail] = useState("");
+  const [authIsSending, setAuthIsSending] = useState(false);
   const [authChecked, setAuthChecked] = useState(!supabase);
   const [cloudUser, setCloudUser] = useState<User | null>(null);
   const [cloudSyncEnabled, setCloudSyncEnabled] = useState(false);
@@ -1116,6 +1118,42 @@ export default function Home() {
     setTaskEditorError("");
     setTaskEditor({ mode: "create", draft: defaultTaskDraft(prefixFilter === "W" ? "W" : "P") });
   }, [prefixFilter]);
+
+  function quickAddTask(event: FormEvent) {
+    event.preventDefault();
+    const title = quickAddTitle.trim();
+    if (!title) return;
+
+    setTasks((current) => {
+      let prefix: TaskPrefix = prefixFilter === "W" ? "W" : "P";
+      if (prefixFilter === "all" && topicFilter !== "all") {
+        if (topicOptions.W.includes(topicFilter) && !topicOptions.P.includes(topicFilter)) prefix = "W";
+        if (topicOptions.P.includes(topicFilter) && !topicOptions.W.includes(topicFilter)) prefix = "P";
+      }
+      const nextNumber = nextTaskNumber(current, prefix);
+      const createdAt = todayIso();
+      const statusChangedAt = nowIso();
+      return mergeUniqueTasks([...current, {
+        id: `${prefix}${nextNumber}`,
+        prefix,
+        number: nextNumber,
+        title,
+        category: topicFilter !== "all" ? topicFilter : prefix === "W" ? "עבודה" : "אישי",
+        actionType: actionFilter !== "all" ? actionFilter : undefined,
+        priority: "normal",
+        status: "open",
+        notes: undefined,
+        dueDate: undefined,
+        createdAt,
+        statusChangedAt,
+        subtasks: [],
+      }]);
+    });
+
+    setQuickAddTitle("");
+    setActiveView("tasks");
+    setStatusFilter("active");
+  }
 
   const emptyTaskState = useMemo(() => {
     const hasNarrowingFilters = activeFilters.length > 0;
@@ -2603,14 +2641,20 @@ export default function Home() {
 
     const email = authEmail.trim();
     if (!email) return;
-    const { error } = await supabase.auth.signInWithOtp({
-      email,
-      options: {
-        emailRedirectTo: appOrigin(),
-      },
-    });
+    setAuthIsSending(true);
+    setCloudStatus("שולח קישור התחברות למייל...");
+    try {
+      const { error } = await supabase.auth.signInWithOtp({
+        email,
+        options: {
+          emailRedirectTo: appOrigin(),
+        },
+      });
 
-    setCloudStatus(error ? `שליחת קישור ההתחברות נכשלה: ${error.message}` : "נשלח קישור התחברות למייל.");
+      setCloudStatus(error ? `שליחת קישור ההתחברות נכשלה: ${error.message}` : "נשלח קישור התחברות למייל.");
+    } finally {
+      setAuthIsSending(false);
+    }
   }
 
   async function signOut() {
@@ -2754,6 +2798,9 @@ export default function Home() {
   }
 
   const pageTitle = displayName ? `המשימות של ${displayName}` : "המשימות שלי";
+  const authStatusClassName = cloudStatus.includes("נכשלה") || cloudStatus.includes("שגיאה") || cloudStatus.includes("לא מוגדר")
+    ? "auth-status auth-status-error"
+    : "auth-status";
 
   return (
     <main className={activeView === "kanban" ? "kanban-main" : undefined}>
@@ -2785,14 +2832,14 @@ export default function Home() {
               <form className="auth-form" onSubmit={signIn}>
                 <label>
                   <span>כתובת מייל</span>
-                  <input type="email" value={authEmail} onChange={(event) => setAuthEmail(event.target.value)} placeholder="name@example.com" aria-label="כתובת מייל להתחברות" />
+                  <input type="email" value={authEmail} onChange={(event) => setAuthEmail(event.target.value)} placeholder="name@example.com" aria-label="כתובת מייל להתחברות" disabled={authIsSending} />
                 </label>
-                <button type="submit">שליחת קישור התחברות</button>
+                <button type="submit" disabled={authIsSending || !authEmail.trim()}>{authIsSending ? "שולח..." : "שליחת קישור התחברות"}</button>
               </form>
             ) : (
               <code>NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY</code>
             )}
-            <p className="auth-status">{cloudStatus}</p>
+            <p className={authStatusClassName}>{cloudStatus}</p>
           </div>
         </section>
       ) : !isCloudReady ? (
@@ -2842,6 +2889,23 @@ export default function Home() {
 
           {activeView === "tasks" ? (
             <>
+              <form className="panel quick-add" onSubmit={quickAddTask} aria-label="הוספה מהירה של משימה">
+                <div>
+                  <label htmlFor="quick-add-title">הוספה מהירה</label>
+                  <input
+                    id="quick-add-title"
+                    value={quickAddTitle}
+                    onChange={(event) => setQuickAddTitle(event.target.value)}
+                    placeholder="מה צריך לעשות עכשיו?"
+                    aria-describedby="quick-add-help"
+                  />
+                  <small id="quick-add-help">
+                    Enter יוסיף משימה חדשה. פרטים מלאים אפשר להוסיף דרך כפתור הפלוס.
+                  </small>
+                </div>
+                <button type="submit" disabled={!quickAddTitle.trim()}>הוספה</button>
+              </form>
+
               <section className="panel controls">
                 <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="חיפוש משימה או מזהה, למשל P19" aria-label="חיפוש" />
                 <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)} aria-label="סינון סטטוס">

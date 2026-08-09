@@ -53,6 +53,13 @@ h1 { margin: 0; font-size: clamp(2rem, 5vw, 3.3rem); }
 .view-tabs button { border: 0; border-radius: 9px; background: transparent; color: var(--muted); padding: 10px 16px; font-weight: 700; }
 .view-tabs button.active { background: var(--surface); color: var(--accent-dark); box-shadow: 0 4px 12px rgba(23, 32, 51, 0.08); }
 .controls { display: grid; grid-template-columns: 1fr 160px 140px 150px 150px; gap: 10px; padding: 12px; margin-bottom: 12px; }
+.quick-add { align-items: end; display: grid; gap: 12px; grid-template-columns: 1fr auto; margin-bottom: 12px; padding: 12px; }
+.quick-add div { display: grid; gap: 6px; }
+.quick-add label { color: var(--text); font-size: .92rem; font-weight: 800; }
+.quick-add small { color: var(--muted); line-height: 1.4; }
+.quick-add button { background: var(--accent); border: 0; border-radius: 10px; color: #fff; font-weight: 800; min-width: 104px; padding: 11px 16px; }
+.quick-add button:hover { background: var(--accent-dark); }
+.quick-add button:disabled, .auth-form button:disabled { cursor: default; opacity: .58; }
 .quick-filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 12px; }
 .quick-filters button { border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--muted); font-weight: 700; padding: 8px 12px; }
 .quick-filters button.active { background: #eef4ff; border-color: #bfdbfe; color: var(--accent-dark); }
@@ -110,6 +117,7 @@ textarea { resize: vertical; min-height: 86px; }
 .auth-form label, .task-editor-form label { color: var(--muted); display: grid; font-size: .9rem; gap: 6px; }
 .auth-form label > span, .task-editor-form label > span { font-weight: 700; }
 .auth-status { background: #eef4ff; border-radius: 12px; padding: 12px; }
+.auth-status-error { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
 .loading-panel { padding: 24px; }
 .loading-skeleton { display: grid; gap: 14px; }
 .skeleton-hero { display: grid; gap: 12px; padding: 22px; }
@@ -429,6 +437,11 @@ textarea { resize: vertical; min-height: 86px; }
   border-color: #315f95;
   color: var(--accent-dark);
 }
+[data-theme="dark"] .auth-status-error {
+  background: rgba(127, 29, 29, .28);
+  border-color: rgba(248, 113, 113, .45);
+  color: #fecaca;
+}
 [data-theme="dark"] .assistant-empty,
 [data-theme="dark"] .assistant-message.role-assistant,
 [data-theme="dark"] .chart-empty-state,
@@ -494,6 +507,8 @@ textarea { resize: vertical; min-height: 86px; }
   .settings-button { align-self: flex-start; }
   .view-tabs { display: grid; grid-template-columns: 1fr; width: 100%; }
   .controls { grid-template-columns: 1fr; }
+  .quick-add { align-items: stretch; grid-template-columns: 1fr; }
+  .quick-add button { width: 100%; }
   .active-filters { align-items: stretch; grid-template-columns: 1fr; }
   .active-filters button { width: 100%; }
   .skeleton-stats { gap: 8px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
