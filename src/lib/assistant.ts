@@ -60,6 +60,8 @@ export type AssistantThread = {
   title: string;
   createdAt: string;
   updatedAt: string;
+  deletedAt?: string;
+  purgeAfter?: string;
 };
 
 export type AssistantMessage = {

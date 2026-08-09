@@ -3,10 +3,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ChangeEvent, Dispatch, FormEvent, SetStateAction } from "react";
 import type { User } from "@supabase/supabase-js";
-import type { AssistantMessage, AssistantProposedAction } from "@/lib/assistant";
+import type { AssistantMessage, AssistantProposedAction, AssistantThread } from "@/lib/assistant";
 import { canonicalTaskId, initialTasks, Task, TaskPrefix, TaskPriority, TaskStatus, TaskSubtask, TaskSubtaskStatus } from "@/lib/tasks";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
-import { addAssistantMessage, deleteAssistantHistory as deleteCloudAssistantHistory, fetchAssistantMessages, getOrCreateAssistantThread, updateAssistantMessageActionStatus } from "@/lib/supabaseAssistant";
+import { addAssistantMessage, fetchAssistantMessages, fetchDeletedAssistantThreads, getOrCreateAssistantThread, restoreAssistantThread, softDeleteAssistantHistory, updateAssistantMessageActionStatus } from "@/lib/supabaseAssistant";
 import { fetchUserDevices, registerCurrentDevice, type UserDevice } from "@/lib/supabaseDevices";
 import { countCloudTasks, fetchCloudTasks, saveCloudTasks } from "@/lib/supabaseTasks";
 import { fetchCloudTaxonomy, replaceCloudTaxonomy } from "@/lib/supabaseTaxonomy";
@@ -560,6 +560,8 @@ export default function Home() {
   const [assistantInput, setAssistantInput] = useState("");
   const [assistantStatus, setAssistantStatus] = useState("הצ׳ט ייטען אחרי התחברות לענן.");
   const [assistantIsSending, setAssistantIsSending] = useState(false);
+  const [deletedAssistantThreads, setDeletedAssistantThreads] = useState<AssistantThread[]>([]);
+  const [assistantRestoreStatus, setAssistantRestoreStatus] = useState("");
   const assistantMessagesRef = useRef<HTMLDivElement | null>(null);
   const [cloudStatus, setCloudStatus] = useState(
     isSupabaseConfigured ? "בודק חיבור ל-Supabase..." : "Supabase עדיין לא מוגדר. עובדים במצב מקומי."
@@ -643,6 +645,8 @@ export default function Home() {
       setDevicesStatus("");
       setAssistantThreadId(null);
       setAssistantMessages([]);
+      setDeletedAssistantThreads([]);
+      setAssistantRestoreStatus("");
       setAssistantStatus(user ? "טוען את שיחת ה-AI..." : "הצ׳ט ייטען אחרי התחברות לענן.");
       setTaxonomyCloudReady(false);
       setTaxonomyStatus(user ? "טוען נושאים ופעולות מהענן..." : "נושאים ופעולות נשמרים מקומית עד להתחברות לענן.");
@@ -691,6 +695,16 @@ export default function Home() {
         if (cancelled) return;
         setAssistantMessages(messages);
         setAssistantStatus(messages.length > 0 ? "שיחת ה-AI נטענה מהענן." : "אפשר לשאול את העוזר על המשימות שלך.");
+        fetchDeletedAssistantThreads(cloudUser)
+          .then((threads) => {
+            if (!cancelled) {
+              setDeletedAssistantThreads(threads);
+              setAssistantRestoreStatus(threads.length ? `יש ${threads.length} שיחות שניתן לשחזר.` : "אין שיחות מחוקות לשחזור.");
+            }
+          })
+          .catch((error: unknown) => {
+            if (!cancelled) setAssistantRestoreStatus(`שחזור שיחות עדיין לא פעיל: ${errorMessage(error)}`);
+          });
       })
       .catch((error: unknown) => {
         if (!cancelled) setAssistantStatus(`הצ׳ט עדיין לא מוכן: ${errorMessage(error)}. יש להריץ את SQL הצ׳ט ב-Supabase.`);
@@ -1654,6 +1668,34 @@ export default function Home() {
     setExpandedSubtaskTaskIds((current) => new Set(current).add(action.taskId));
   }
 
+  async function refreshDeletedAssistantThreadList() {
+    if (!cloudUser) return;
+    setAssistantRestoreStatus("בודק שיחות שנמחקו...");
+    try {
+      const threads = await fetchDeletedAssistantThreads(cloudUser);
+      setDeletedAssistantThreads(threads);
+      setAssistantRestoreStatus(threads.length ? `יש ${threads.length} שיחות שניתן לשחזר.` : "אין שיחות מחוקות לשחזור.");
+    } catch (error) {
+      setAssistantRestoreStatus(`לא הצלחתי לטעון שיחות לשחזור: ${errorMessage(error)}`);
+    }
+  }
+
+  async function restoreDeletedAssistantThread(threadId: string) {
+    setAssistantRestoreStatus("משחזר שיחת AI...");
+    try {
+      const thread = await restoreAssistantThread(threadId);
+      const messages = await fetchAssistantMessages(thread.id);
+      setAssistantThreadId(thread.id);
+      setAssistantMessages(messages);
+      setIsAssistantOpen(true);
+      await refreshDeletedAssistantThreadList();
+      setAssistantStatus("שיחת ה-AI שוחזרה.");
+      setAssistantRestoreStatus("השיחה שוחזרה ונפתחה בצ׳ט.");
+    } catch (error) {
+      setAssistantRestoreStatus(`השחזור נכשל: ${errorMessage(error)}`);
+    }
+  }
+
   async function clearAssistantHistory(options: { confirmBeforeDelete: boolean }) {
     if (!cloudUser) {
       setAssistantStatus("יש להתחבר לענן כדי למחוק את היסטוריית הצ׳ט.");
@@ -1661,16 +1703,17 @@ export default function Home() {
     }
 
     if (options.confirmBeforeDelete) {
-      const confirmed = window.confirm("למחוק את כל היסטוריית השיחות עם עוזר ה-AI? הפעולה לא תשנה משימות, אבל אי אפשר לבטל אותה.");
+      const confirmed = window.confirm("למחוק את שיחת ה-AI הפעילה? היא תישמר ברקע ל-30 יום ותוכל לשחזר אותה מההגדרות.");
       if (!confirmed) return;
     }
 
-    setAssistantStatus("מוחק את היסטוריית הצ׳ט...");
-    await deleteCloudAssistantHistory(cloudUser);
+    setAssistantStatus("מעביר את שיחת ה-AI לשחזור ל-30 יום...");
+    await softDeleteAssistantHistory(cloudUser);
     const thread = await getOrCreateAssistantThread(cloudUser);
     setAssistantThreadId(thread.id);
     setAssistantMessages([]);
-    setAssistantStatus("היסטוריית הצ׳ט נמחקה. אפשר להתחיל שיחה חדשה.");
+    await refreshDeletedAssistantThreadList();
+    setAssistantStatus("שיחת ה-AI נמחקה מהתצוגה ונשמרה לשחזור ל-30 יום.");
   }
 
   async function approveAssistantAction(message: AssistantMessage) {
@@ -1764,7 +1807,7 @@ export default function Home() {
   }
 
   function assistantActionDescription(action: AssistantProposedAction) {
-    if (action.type === "delete_assistant_history") return "מחיקת כל היסטוריית השיחות עם עוזר ה-AI";
+    if (action.type === "delete_assistant_history") return "העברת שיחת ה-AI לשחזור למשך 30 יום";
     if (action.type === "create_task") return `יצירת משימה: ${action.task.title}`;
     if (action.type === "update_task_status") return `שינוי ${action.taskId} לסטטוס ${statusLabels[action.status]}`;
     if (action.type === "add_subtask") return `הוספת צעד טיפול ל-${action.taskId}: ${action.subtask.title}`;
@@ -2955,9 +2998,35 @@ export default function Home() {
                 <section className="panel danger-panel">
                   <div>
                     <h2>היסטוריית צ׳ט AI</h2>
-                    <p>מחיקת השיחות עם עוזר ה-AI בלבד. המשימות, הנושאים, הפעולות והגיבויים לא יושפעו.</p>
+                    <p>הסרת השיחה הפעילה מהתצוגה ושמירה ברקע ל-30 יום לשחזור אישי. המשימות, הנושאים, הפעולות והגיבויים לא יושפעו.</p>
                   </div>
-                  <button onClick={() => clearAssistantHistory({ confirmBeforeDelete: true })}>מחיקת שיחות AI</button>
+                  <button onClick={() => clearAssistantHistory({ confirmBeforeDelete: true })}>מחיקת שיחת AI</button>
+                </section>
+              )}
+
+              {cloudUser && (
+                <section className="panel assistant-restore-panel">
+                  <div className="devices-header">
+                    <div>
+                      <h2>שחזור שיחות AI</h2>
+                      <p>{assistantRestoreStatus || "שיחות שנמחקו נשמרות כאן עד 30 יום."}</p>
+                    </div>
+                    <button onClick={refreshDeletedAssistantThreadList}>רענון שחזור</button>
+                  </div>
+                  <div className="assistant-restore-list" aria-label="שיחות AI שנמחקו">
+                    {deletedAssistantThreads.length === 0 ? (
+                      <p className="devices-empty">אין שיחות מחוקות לשחזור.</p>
+                    ) : deletedAssistantThreads.map((thread) => (
+                      <article className="assistant-restore-card" key={thread.id}>
+                        <div>
+                          <h3>{thread.title}</h3>
+                          {thread.deletedAt && <p>נמחקה: {formatDateTime(thread.deletedAt)}</p>}
+                          {thread.purgeAfter && <p>זמינה לשחזור עד: {formatDateTime(thread.purgeAfter)}</p>}
+                        </div>
+                        <button onClick={() => restoreDeletedAssistantThread(thread.id)}>שחזור</button>
+                      </article>
+                    ))}
+                  </div>
                 </section>
               )}
 

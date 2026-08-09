@@ -102,8 +102,8 @@ function buildSystemPrompt() {
     "{\"type\":\"add_subtask\",\"label\":\"אישור וביצוע\",\"taskId\":\"P20\",\"subtask\":{\"title\":\"...\",\"actionType\":\"...\"}}",
     "{\"type\":\"update_subtask_status\",\"label\":\"אישור וביצוע\",\"taskId\":\"P20\",\"subtaskNumber\":1,\"status\":\"open|done|cancelled\"}",
     "{\"type\":\"filter_tasks\",\"label\":\"הצג משימות\",\"filter\":{\"query\":\"...\",\"statusFilter\":\"active|overdue|subtasks_open|waiting|done|all\",\"prefixFilter\":\"P|W|all\",\"topicFilter\":\"...\",\"actionFilter\":\"...\"}}",
-    "{\"type\":\"delete_assistant_history\",\"label\":\"אישור ומחיקת שיחות\"}",
-    "If the user asks to delete, clear, reset, erase, or remove the AI chat history, return proposedAction type delete_assistant_history. Explain that it requires approval.",
+    "{\"type\":\"delete_assistant_history\",\"label\":\"אישור והעברה לשחזור\"}",
+    "If the user asks to delete, clear, reset, erase, or remove the AI chat history, return proposedAction type delete_assistant_history. Explain that it will be hidden now and kept recoverable for 30 days.",
     "If the user asks to delete or clear all tasks, reply that this can only be done from settings and do not return proposedAction.",
     "אם המשתמש מבקש ניתוח או שאלה בלבד, אל תחזיר proposedAction.",
   ].join("\n");

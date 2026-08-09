@@ -324,6 +324,13 @@ textarea { resize: vertical; min-height: 86px; }
 .device-card h3 { margin: 0 0 4px; font-size: 1rem; }
 .device-meta { display: grid; justify-items: end; gap: 6px; font-size: .9rem; text-align: left; }
 .current-device { background: #dcfce7; border-radius: 999px; color: var(--success); font-weight: 700; padding: 4px 8px; }
+.assistant-restore-panel { display: grid; gap: 14px; padding: 16px; }
+.assistant-restore-list { display: grid; gap: 10px; }
+.assistant-restore-card { align-items: center; border: 1px solid var(--border); border-radius: 12px; display: flex; gap: 14px; justify-content: space-between; padding: 12px; }
+.assistant-restore-card h3 { font-size: 1rem; margin: 0 0 4px; }
+.assistant-restore-card p { color: var(--muted); margin: 0; }
+.assistant-restore-card button { background: var(--accent); border: 0; border-radius: 10px; color: #fff; font-weight: 700; padding: 10px 14px; white-space: nowrap; }
+.assistant-restore-card button:hover { background: var(--accent-dark); }
 .file-button input { display: none; }
 .import-message { background: #eef7f0; border: 1px solid #c8e6d0; border-radius: 12px; color: var(--success); padding: 12px 14px; }
 .danger-panel { border-color: #fecaca; }
@@ -449,6 +456,8 @@ textarea { resize: vertical; min-height: 86px; }
   .devices-header, .device-card { align-items: stretch; flex-direction: column; }
   .devices-header button { width: 100%; }
   .device-meta { justify-items: start; text-align: right; }
+  .assistant-restore-card { align-items: stretch; flex-direction: column; }
+  .assistant-restore-card button { width: 100%; }
   .cloud-login, .cloud-actions { display: grid; grid-template-columns: 1fr; }
   .bar-row { grid-template-columns: 82px 1fr 28px; }
   .subtask-load-row { grid-template-columns: auto 1fr; }

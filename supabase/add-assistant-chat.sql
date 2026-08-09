@@ -3,7 +3,9 @@ create table if not exists public.assistant_threads (
   user_id uuid not null references auth.users(id) on delete cascade,
   title text not null default 'שיחה פעילה',
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  deleted_at timestamptz,
+  purge_after timestamptz
 );
 
 create table if not exists public.assistant_messages (
@@ -31,6 +33,14 @@ create table if not exists public.assistant_actions (
 
 create index if not exists assistant_threads_user_updated_idx
   on public.assistant_threads(user_id, updated_at desc);
+
+create index if not exists assistant_threads_user_deleted_idx
+  on public.assistant_threads(user_id, deleted_at desc)
+  where deleted_at is not null;
+
+create index if not exists assistant_threads_user_active_idx
+  on public.assistant_threads(user_id, updated_at desc)
+  where deleted_at is null;
 
 create index if not exists assistant_messages_thread_created_idx
   on public.assistant_messages(thread_id, created_at);
