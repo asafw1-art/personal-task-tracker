@@ -3,8 +3,10 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { ChangeEvent, Dispatch, FormEvent, SetStateAction } from "react";
 import type { User } from "@supabase/supabase-js";
+import type { AssistantMessage, AssistantProposedAction } from "@/lib/assistant";
 import { canonicalTaskId, initialTasks, Task, TaskPrefix, TaskPriority, TaskStatus, TaskSubtask, TaskSubtaskStatus } from "@/lib/tasks";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
+import { addAssistantMessage, fetchAssistantMessages, getOrCreateAssistantThread, updateAssistantMessageActionStatus } from "@/lib/supabaseAssistant";
 import { fetchUserDevices, registerCurrentDevice, type UserDevice } from "@/lib/supabaseDevices";
 import { countCloudTasks, fetchCloudTasks, saveCloudTasks } from "@/lib/supabaseTasks";
 import { fetchCloudTaxonomy, replaceCloudTaxonomy } from "@/lib/supabaseTaxonomy";
@@ -544,6 +546,12 @@ export default function Home() {
   const [taskEditor, setTaskEditor] = useState<TaskEditorState>(null);
   const [taskEditorError, setTaskEditorError] = useState("");
   const [expandedSubtaskTaskIds, setExpandedSubtaskTaskIds] = useState<Set<string>>(() => new Set());
+  const [isAssistantOpen, setIsAssistantOpen] = useState(false);
+  const [assistantThreadId, setAssistantThreadId] = useState<string | null>(null);
+  const [assistantMessages, setAssistantMessages] = useState<AssistantMessage[]>([]);
+  const [assistantInput, setAssistantInput] = useState("");
+  const [assistantStatus, setAssistantStatus] = useState("הצ׳ט ייטען אחרי התחברות לענן.");
+  const [assistantIsSending, setAssistantIsSending] = useState(false);
   const [cloudStatus, setCloudStatus] = useState(
     isSupabaseConfigured ? "בודק חיבור ל-Supabase..." : "Supabase עדיין לא מוגדר. עובדים במצב מקומי."
   );
@@ -600,6 +608,9 @@ export default function Home() {
       setLastCloudPullAt(null);
       setCloudDevices([]);
       setDevicesStatus("");
+      setAssistantThreadId(null);
+      setAssistantMessages([]);
+      setAssistantStatus(user ? "טוען את שיחת ה-AI..." : "הצ׳ט ייטען אחרי התחברות לענן.");
       setTaxonomyCloudReady(false);
       setTaxonomyStatus(user ? "טוען נושאים ופעולות מהענן..." : "נושאים ופעולות נשמרים מקומית עד להתחברות לענן.");
       setIsCloudReady(!user);
@@ -633,6 +644,29 @@ export default function Home() {
       cancelled = true;
     };
   }, [cloudUser, taxonomyLoaded]);
+
+  useEffect(() => {
+    if (!cloudUser || !isCloudReady) return;
+
+    let cancelled = false;
+
+    getOrCreateAssistantThread(cloudUser)
+      .then(async (thread) => {
+        if (cancelled) return;
+        setAssistantThreadId(thread.id);
+        const messages = await fetchAssistantMessages(thread.id);
+        if (cancelled) return;
+        setAssistantMessages(messages);
+        setAssistantStatus(messages.length > 0 ? "שיחת ה-AI נטענה מהענן." : "אפשר לשאול את העוזר על המשימות שלך.");
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setAssistantStatus(`הצ׳ט עדיין לא מוכן: ${errorMessage(error)}. יש להריץ את SQL הצ׳ט ב-Supabase.`);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [cloudUser, isCloudReady]);
 
   useEffect(() => {
     if (!cloudUser || !taxonomyCloudReady || !taxonomyLoaded) return;
@@ -1534,6 +1568,149 @@ export default function Home() {
     setExpandedSubtaskTaskIds((current) => new Set(current).add(task.id));
   }
 
+  function createTaskFromAssistant(action: Extract<AssistantProposedAction, { type: "create_task" }>) {
+    const prefix = action.task.prefix ?? "P";
+    const title = action.task.title.trim();
+    if (!title) throw new Error("הפעולה לא כוללת שם משימה.");
+
+    setTasks((current) => {
+      const nextNumber = nextTaskNumber(current, prefix);
+      const taskId = `${prefix}${nextNumber}`;
+      const createdAt = todayIso();
+      const statusChangedAt = nowIso();
+      return mergeUniqueTasks([...current, {
+        id: taskId,
+        prefix,
+        number: nextNumber,
+        title,
+        category: action.task.category?.trim() || (prefix === "W" ? "עבודה" : "אישי"),
+        actionType: action.task.actionType?.trim() || undefined,
+        priority: action.task.priority ?? "normal",
+        status: "open",
+        dueDate: action.task.dueDate || undefined,
+        notes: action.task.notes?.trim() || undefined,
+        createdAt,
+        statusChangedAt,
+        subtasks: [],
+      }]);
+    });
+  }
+
+  function addSubtaskFromAssistant(action: Extract<AssistantProposedAction, { type: "add_subtask" }>) {
+    const title = action.subtask.title.trim();
+    if (!title) throw new Error("הפעולה לא כוללת שם צעד טיפול.");
+
+    setTasks((current) => current.map((task) => {
+      if (task.id !== action.taskId) return task;
+      const subtasks = task.subtasks ?? [];
+      const number = nextSubtaskNumber(subtasks);
+      const createdAt = nowIso();
+      return {
+        ...task,
+        subtasks: [...subtasks, {
+          id: createSubtaskId(task.id, number),
+          number,
+          title,
+          status: "open",
+          actionType: action.subtask.actionType?.trim() || undefined,
+          createdAt,
+          statusChangedAt: createdAt,
+        }],
+      };
+    }));
+    setExpandedSubtaskTaskIds((current) => new Set(current).add(action.taskId));
+  }
+
+  async function approveAssistantAction(message: AssistantMessage) {
+    if (!message.proposedAction) return;
+
+    try {
+      if (message.proposedAction.type === "create_task") {
+        createTaskFromAssistant(message.proposedAction);
+      } else if (message.proposedAction.type === "update_task_status") {
+        updateStatus(message.proposedAction.taskId, message.proposedAction.status);
+      } else if (message.proposedAction.type === "add_subtask") {
+        addSubtaskFromAssistant(message.proposedAction);
+      } else if (message.proposedAction.type === "update_subtask_status") {
+        updateTaskSubtask(message.proposedAction.taskId, message.proposedAction.subtaskNumber, { status: message.proposedAction.status });
+      } else if (message.proposedAction.type === "filter_tasks") {
+        setQuery(message.proposedAction.filter.query ?? "");
+        setStatusFilter((message.proposedAction.filter.statusFilter as TaskFilter | undefined) ?? "active");
+        setPrefixFilter((message.proposedAction.filter.prefixFilter as TaskPrefix | "all" | undefined) ?? "all");
+        setTopicFilter(message.proposedAction.filter.topicFilter ?? "all");
+        setActionFilter(message.proposedAction.filter.actionFilter ?? "all");
+        setActiveView("tasks");
+      }
+
+      setAssistantMessages((current) => current.map((item) => item.id === message.id ? { ...item, actionStatus: "done" } : item));
+      await updateAssistantMessageActionStatus(message.id, "done");
+      setAssistantStatus("הפעולה בוצעה.");
+    } catch (error) {
+      setAssistantMessages((current) => current.map((item) => item.id === message.id ? { ...item, actionStatus: "failed" } : item));
+      await updateAssistantMessageActionStatus(message.id, "failed").catch(() => undefined);
+      setAssistantStatus(`הפעולה נכשלה: ${errorMessage(error)}`);
+    }
+  }
+
+  async function sendAssistantMessage(event: FormEvent) {
+    event.preventDefault();
+    const message = assistantInput.trim();
+    if (!message || !cloudUser || !assistantThreadId || !supabase) return;
+
+    setAssistantInput("");
+    setAssistantIsSending(true);
+    setAssistantStatus("שולח לעוזר...");
+
+    try {
+      const userMessage = await addAssistantMessage(assistantThreadId, cloudUser, "user", message);
+      setAssistantMessages((current) => [...current, userMessage]);
+
+      const session = await supabase.auth.getSession();
+      const token = session.data.session?.access_token;
+      if (!token) throw new Error("אין session פעיל.");
+
+      const response = await fetch("/api/assistant", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          message,
+          tasks,
+          taxonomy,
+          recentMessages: assistantMessages.slice(-8).map((item) => ({ role: item.role, content: item.content })),
+        }),
+      });
+
+      const data = await response.json() as { reply?: string; proposedAction?: AssistantProposedAction; error?: string };
+      if (!response.ok || data.error) throw new Error(data.error ?? "העוזר החזיר שגיאה.");
+
+      const assistantMessage = await addAssistantMessage(
+        assistantThreadId,
+        cloudUser,
+        "assistant",
+        data.reply ?? "לא התקבלה תשובה.",
+        data.proposedAction,
+        data.proposedAction ? "proposed" : undefined,
+      );
+      setAssistantMessages((current) => [...current, assistantMessage]);
+      setAssistantStatus(data.proposedAction ? "העוזר הציע פעולה שמחכה לאישור." : "העוזר ענה.");
+    } catch (error) {
+      setAssistantStatus(`שגיאת צ׳ט: ${errorMessage(error)}`);
+    } finally {
+      setAssistantIsSending(false);
+    }
+  }
+
+  function assistantActionDescription(action: AssistantProposedAction) {
+    if (action.type === "create_task") return `יצירת משימה: ${action.task.title}`;
+    if (action.type === "update_task_status") return `שינוי ${action.taskId} לסטטוס ${statusLabels[action.status]}`;
+    if (action.type === "add_subtask") return `הוספת צעד טיפול ל-${action.taskId}: ${action.subtask.title}`;
+    if (action.type === "update_subtask_status") return `שינוי צעד ${action.subtaskNumber} ב-${action.taskId} ל-${subtaskStatusLabels[action.status]}`;
+    return "החלת סינון על רשימת המשימות";
+  }
+
   function updateTaskDraft(updates: Partial<TaskDraft>) {
     setTaskEditor((current) => current ? { ...current, draft: { ...current.draft, ...updates } } : current);
   }
@@ -1845,6 +2022,9 @@ export default function Home() {
     setLastCloudPullAt(null);
     setCloudDevices([]);
     setDevicesStatus("");
+    setAssistantThreadId(null);
+    setAssistantMessages([]);
+    setAssistantStatus("הצ׳ט ייטען אחרי התחברות לענן.");
     setTaxonomyCloudReady(false);
     setTaxonomyStatus("נושאים ופעולות נשמרים מקומית עד להתחברות לענן.");
     setIsCloudReady(true);
@@ -2348,6 +2528,69 @@ export default function Home() {
                   </div>
                 </aside>
               </div>
+            </section>
+          )}
+        </>
+      )}
+
+      {cloudUser && (
+        <>
+          <button
+            className="assistant-floating-button"
+            onClick={() => setIsAssistantOpen((current) => !current)}
+            aria-label={isAssistantOpen ? "סגירת צ׳ט AI" : "פתיחת צ׳ט AI"}
+          >
+            AI
+          </button>
+
+          {isAssistantOpen && (
+            <section className="assistant-chat" aria-label="צ׳ט AI למשימות">
+              <div className="assistant-chat-header">
+                <div>
+                  <p className="eyebrow">עוזר משימות</p>
+                  <h2>צ׳ט AI</h2>
+                </div>
+                <button className="icon-button" onClick={() => setIsAssistantOpen(false)} aria-label="סגירת צ׳ט AI">×</button>
+              </div>
+
+              <div className="assistant-messages" aria-live="polite">
+                {assistantMessages.length === 0 ? (
+                  <div className="assistant-empty">
+                    <strong>אפשר להתחיל בשאלה קצרה</strong>
+                    <span>למשל: מה כדאי לעשות עכשיו? או תוסיף משימה להתקשר לרואה חשבון.</span>
+                  </div>
+                ) : assistantMessages.map((message) => (
+                  <article className={`assistant-message role-${message.role}`} key={message.id}>
+                    <p>{message.content}</p>
+                    {message.proposedAction && (
+                      <div className="assistant-action-card">
+                        <span>{assistantActionDescription(message.proposedAction)}</span>
+                        <button
+                          onClick={() => approveAssistantAction(message)}
+                          disabled={message.actionStatus === "done"}
+                        >
+                          {message.actionStatus === "done" ? "בוצע" : message.proposedAction.label}
+                        </button>
+                      </div>
+                    )}
+                  </article>
+                ))}
+              </div>
+
+              <p className="assistant-status">{assistantStatus}</p>
+
+              <form className="assistant-form" onSubmit={sendAssistantMessage}>
+                <input
+                  value={assistantInput}
+                  onChange={(event) => setAssistantInput(event.target.value)}
+                  placeholder="כתוב לעוזר המשימות..."
+                  aria-label="הודעה לצ׳ט AI"
+                  disabled={assistantIsSending || !assistantThreadId}
+                />
+                <button type="submit" disabled={assistantIsSending || !assistantInput.trim() || !assistantThreadId}>
+                  שליחה
+                </button>
+              </form>
             </section>
           )}
         </>
