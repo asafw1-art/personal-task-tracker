@@ -1,5 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-import type { AssistantResponse } from "@/lib/assistant";
+import type { AssistantProposedAction, AssistantResponse } from "@/lib/assistant";
 import type { Task } from "@/lib/tasks";
 
 export const runtime = "nodejs";
@@ -83,6 +83,10 @@ function buildTaskSnapshot(tasks: Task[]) {
 
 function buildSystemPrompt() {
   return [
+    "Safety policy: never propose deleting, cancelling, completing, or resetting all tasks or multiple tasks at once.",
+    "Bulk task deletion, bulk cancellation, and full task reset are allowed only through the app settings, not through the AI chat.",
+    "You may propose a destructive task action only for one explicitly identified existing task at a time, and it still requires user approval.",
+    "There is no delete_task action. Do not invent one.",
     "Decision policy: do not propose marking a task as done only because it is old, overdue, or has the earliest due date.",
     "Only propose status=done when the user explicitly says the work was completed, finished, closed, handled, or asks to close/complete it.",
     "For old or overdue open tasks, prefer suggesting a review, moving the task to in_progress, adding a follow-up subtask, or filtering/showing the relevant tasks.",
@@ -98,24 +102,66 @@ function buildSystemPrompt() {
     "{\"type\":\"add_subtask\",\"label\":\"אישור וביצוע\",\"taskId\":\"P20\",\"subtask\":{\"title\":\"...\",\"actionType\":\"...\"}}",
     "{\"type\":\"update_subtask_status\",\"label\":\"אישור וביצוע\",\"taskId\":\"P20\",\"subtaskNumber\":1,\"status\":\"open|done|cancelled\"}",
     "{\"type\":\"filter_tasks\",\"label\":\"הצג משימות\",\"filter\":{\"query\":\"...\",\"statusFilter\":\"active|overdue|subtasks_open|waiting|done|all\",\"prefixFilter\":\"P|W|all\",\"topicFilter\":\"...\",\"actionFilter\":\"...\"}}",
-    "אם המשתמש מבקש ניתוח או שאלה בלבד, אל תחזיר proposedAction.",
     "{\"type\":\"delete_assistant_history\",\"label\":\"אישור ומחיקת שיחות\"}",
     "If the user asks to delete, clear, reset, erase, or remove the AI chat history, return proposedAction type delete_assistant_history. Explain that it requires approval.",
+    "If the user asks to delete or clear all tasks, reply that this can only be done from settings and do not return proposedAction.",
+    "אם המשתמש מבקש ניתוח או שאלה בלבד, אל תחזיר proposedAction.",
   ].join("\n");
 }
 
-function extractJson(text: string): AssistantResponse {
+function isAssistantResponse(value: unknown): value is AssistantResponse {
+  return Boolean(value && typeof value === "object" && "reply" in value && typeof (value as { reply?: unknown }).reply === "string");
+}
+
+function parseAssistantResponse(text: string): AssistantResponse | null {
   try {
-    return JSON.parse(text) as AssistantResponse;
+    const parsed = JSON.parse(text) as unknown;
+    return isAssistantResponse(parsed) ? parsed : null;
   } catch {
     const match = text.match(/\{[\s\S]*\}/);
-    if (!match) return { reply: text.trim() || "לא הצלחתי לנסח תשובה כרגע." };
+    if (!match) return null;
     try {
-      return JSON.parse(match[0]) as AssistantResponse;
+      const parsed = JSON.parse(match[0]) as unknown;
+      return isAssistantResponse(parsed) ? parsed : null;
     } catch {
-      return { reply: text.trim() || "לא הצלחתי לנסח תשובה כרגע." };
+      return null;
     }
   }
+}
+
+function extractJson(text: string): AssistantResponse {
+  const response = parseAssistantResponse(text);
+  if (!response) return { reply: text.trim() || "לא הצלחתי לנסח תשובה כרגע." };
+
+  const nested = parseAssistantResponse(response.reply.trim());
+  if (nested) return nested;
+
+  return response;
+}
+
+function sanitizeAction(action: AssistantProposedAction | undefined, tasks: Task[], userMessage: string) {
+  if (!action) return undefined;
+
+  if (action.type === "delete_assistant_history") {
+    return /צ[׳']?ט|שיח|שיחה|שיחות|chat|conversation|history|היסטור/i.test(userMessage) ? action : undefined;
+  }
+
+  if (action.type === "update_task_status") {
+    const taskExists = tasks.some((task) => task.id === action.taskId);
+    if (!taskExists) return undefined;
+  }
+
+  if (action.type === "update_subtask_status" || action.type === "add_subtask") {
+    const taskExists = tasks.some((task) => task.id === action.taskId);
+    if (!taskExists) return undefined;
+  }
+
+  return action;
+}
+
+function sanitizeResponse(response: AssistantResponse, tasks: Task[], userMessage: string) {
+  const proposedAction = sanitizeAction(response.proposedAction, tasks, userMessage);
+  return proposedAction ? { ...response, proposedAction } : { reply: response.reply };
 }
 
 async function verifyUser(request: Request) {
@@ -240,7 +286,7 @@ export async function POST(request: Request) {
       }, 500);
     }
 
-    return jsonResponse(extractJson(content));
+    return jsonResponse(sanitizeResponse(extractJson(content), body.tasks ?? [], userMessage));
   } catch (error) {
     return jsonResponse({ error: error instanceof Error ? error.message : "שגיאה לא ידועה בצ׳ט." }, 500);
   }
