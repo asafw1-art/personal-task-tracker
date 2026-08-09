@@ -221,6 +221,8 @@ textarea { resize: vertical; min-height: 86px; }
 .stats-view, .data-view { display: grid; gap: 14px; }
 .metric-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
 .metric { padding: 16px; }
+.metric-button { color: inherit; cursor: pointer; font: inherit; text-align: right; }
+.metric-button:hover { border-color: #bfdbfe; transform: translateY(-1px); }
 .metric span { color: var(--muted); display: block; font-size: .9rem; }
 .metric strong { display: block; font-size: 2rem; margin-top: 6px; }
 .metric small { color: var(--muted); display: block; margin-top: 4px; }

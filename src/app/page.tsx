@@ -1630,6 +1630,17 @@ export default function Home() {
     setQuery(taskId);
     setStatusFilter("all");
     setPrefixFilter("all");
+    setActionFilter("all");
+    setTopicFilter("all");
+    setActiveView("tasks");
+  }
+
+  function showTaskList(filter: TaskFilter, options: AnalyticsInsight["action"] = {}) {
+    setQuery(options.query ?? "");
+    setStatusFilter(filter);
+    setPrefixFilter(options.prefixFilter ?? "all");
+    setActionFilter(options.actionFilter ?? "all");
+    setTopicFilter(options.topicFilter ?? "all");
     setActiveView("tasks");
   }
 
@@ -1639,21 +1650,11 @@ export default function Home() {
 
   function applyAnalyticsAction(action: AnalyticsInsight["action"]) {
     if (!action) return;
-    setQuery(action.query ?? "");
-    setStatusFilter(action.statusFilter ?? "active");
-    setPrefixFilter(action.prefixFilter ?? "all");
-    setActionFilter(action.actionFilter ?? "all");
-    setTopicFilter(action.topicFilter ?? "all");
-    setActiveView("tasks");
+    showTaskList(action.statusFilter ?? "active", action);
   }
 
   function applyNotificationAction(notification: AppNotification) {
-    setQuery("");
-    setStatusFilter(notification.action.statusFilter);
-    setPrefixFilter("all");
-    setActionFilter("all");
-    setTopicFilter("all");
-    setActiveView("tasks");
+    showTaskList(notification.action.statusFilter);
   }
 
   function updateNotificationPreference(key: NotificationPreferenceKey, value: boolean) {
@@ -2431,9 +2432,9 @@ export default function Home() {
       ) : (
         <>
           <section className="stats" aria-label="סיכום משימות">
-            <button onClick={() => { setStatusFilter("active"); setActiveView("tasks"); }}><strong>{counts.active}</strong><span>פעילות</span></button>
-            <button onClick={() => { setStatusFilter("waiting"); setActiveView("tasks"); }}><strong>{counts.waiting}</strong><span>ממתינות</span></button>
-            <button onClick={() => { setStatusFilter("done"); setActiveView("tasks"); }}><strong>{counts.done}</strong><span>הושלמו</span></button>
+            <button onClick={() => showTaskList("active")}><strong>{counts.active}</strong><span>פעילות</span></button>
+            <button onClick={() => showTaskList("waiting")}><strong>{counts.waiting}</strong><span>ממתינות</span></button>
+            <button onClick={() => showTaskList("done")}><strong>{counts.done}</strong><span>הושלמו</span></button>
           </section>
 
           {appNotifications.length > 0 && (
@@ -2639,15 +2640,15 @@ export default function Home() {
               </section>
 
               <div className="metric-grid analytics-metrics">
-                <div className="metric"><span>פעילות</span><strong>{statistics.active}</strong><small>פתוחות, בטיפול או ממתינות</small></div>
-                <div className="metric metric-danger"><span>באיחור</span><strong>{statistics.overdue}</strong><small>דורשות החלטה</small></div>
-                <div className="metric metric-warn"><span>ממתינות</span><strong>{analytics.waiting}</strong><small>תקועות על גורם חיצוני</small></div>
-                <div className="metric"><span>בלי תאריך יעד</span><strong>{statistics.withoutDueDate}</strong><small>כדאי למקד</small></div>
-                <div className="metric"><span>צעדים פתוחים</span><strong>{analytics.openSubtasks}</strong><small>{analytics.withOpenSubtasks} משימות</small></div>
-                <div className="metric metric-good"><span>צעדים נסגרו</span><strong>{analytics.completedSubtasksInRange}</strong><small>{analyticsRangeLabel()}</small></div>
+                <button type="button" className="metric metric-button" onClick={() => showTaskList("active")}><span>פעילות</span><strong>{statistics.active}</strong><small>פתוחות, בטיפול או ממתינות</small></button>
+                <button type="button" className="metric metric-button metric-danger" onClick={() => showTaskList("overdue")}><span>באיחור</span><strong>{statistics.overdue}</strong><small>דורשות החלטה</small></button>
+                <button type="button" className="metric metric-button metric-warn" onClick={() => showTaskList("waiting")}><span>ממתינות</span><strong>{analytics.waiting}</strong><small>תקועות על גורם חיצוני</small></button>
+                <button type="button" className="metric metric-button" onClick={() => showTaskList("no_due")}><span>בלי תאריך יעד</span><strong>{statistics.withoutDueDate}</strong><small>כדאי למקד</small></button>
+                <button type="button" className="metric metric-button" onClick={() => showTaskList("subtasks_open")}><span>צעדים פתוחים</span><strong>{analytics.openSubtasks}</strong><small>{analytics.withOpenSubtasks} משימות</small></button>
+                <button type="button" className="metric metric-button metric-good" onClick={() => showTaskList("subtasks_open")}><span>צעדים נסגרו</span><strong>{analytics.completedSubtasksInRange}</strong><small>{analyticsRangeLabel()}</small></button>
                 <div className="metric"><span>השלמת צעדים</span><strong>{analytics.subtaskCompletionRate}%</strong><small>{analytics.doneSubtasks}/{analytics.totalSubtasks} צעדים</small></div>
-                <div className="metric metric-good"><span>נסגרו בטווח</span><strong>{analytics.completedInRange}</strong><small>{analyticsRangeLabel()}</small></div>
-                <div className="metric"><span>כל המשימות</span><strong>{statistics.total}</strong><small>{statistics.done} הושלמו</small></div>
+                <button type="button" className="metric metric-button metric-good" onClick={() => showTaskList("done")}><span>נסגרו בטווח</span><strong>{analytics.completedInRange}</strong><small>{analyticsRangeLabel()}</small></button>
+                <button type="button" className="metric metric-button" onClick={() => showTaskList("all")}><span>כל המשימות</span><strong>{statistics.total}</strong><small>{statistics.done} הושלמו</small></button>
               </div>
 
               <div className="analytics-layout">
