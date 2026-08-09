@@ -44,7 +44,7 @@ function visibleEnvironmentKeys() {
 }
 
 function normalizeGeminiModel(model: string | undefined) {
-  if (!model || model === "gemini-2.5-flash") return "gemini-3.5-flash";
+  if (!model || model === "gemini-2.5-flash" || model === "gemini-3.5-flash") return "gemini-3.6-flash";
   return model;
 }
 
@@ -198,7 +198,6 @@ async function callGemini(prompt: string) {
         },
       ],
       generationConfig: {
-        temperature: 0.2,
         responseMimeType: "application/json",
       },
     }),
@@ -281,7 +280,7 @@ export async function POST(request: Request) {
 
     if (!content) {
       return jsonResponse({
-        error: `לא הוגדר מנוע AI פעיל. נדרשים GEMINI_API_KEY או AI_GATEWAY_API_KEY. משתנים גלויים: ${visibleEnvironmentKeys().join(", ") || "אין"}`,
+        error: `לא הוגדר מנוע AI פעיל. ל-Gemini נדרש GEMINI_API_KEY, ואפשר להגדיר GEMINI_MODEL. ברירת המחדל היא gemini-3.6-flash. לחלופין, ל-Vercel AI Gateway נדרשים AI_GATEWAY_API_KEY ו-ASSISTANT_MODEL. משתנים גלויים: ${visibleEnvironmentKeys().join(", ") || "אין"}`,
         visibleEnvironmentKeys: visibleEnvironmentKeys(),
       }, 500);
     }
