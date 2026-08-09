@@ -426,7 +426,7 @@ function normalizeDraftSubtasks(subtasks: TaskSubtask[], parentId: string) {
   const usedNumbers = new Set<number>();
 
   return subtasks
-    .filter((subtask) => subtask.title.trim() || subtask.status === "cancelled")
+    .filter((subtask) => subtask.title.trim() || subtask.status === "open")
     .map((subtask) => {
       let number = subtask.number;
       if (!Number.isInteger(number) || number <= 0 || usedNumbers.has(number)) {
@@ -2112,6 +2112,22 @@ export default function Home() {
     }));
   }
 
+  function deleteTaskSubtask(taskId: string, subtaskNumber: number) {
+    const task = tasks.find((item) => item.id === taskId);
+    const subtask = task?.subtasks?.find((item) => item.number === subtaskNumber);
+    const confirmed = window.confirm(`למחוק את צעד הטיפול${subtask?.title ? ` "${subtask.title}"` : ""}?`);
+    if (!confirmed) return;
+
+    setTasks((current) => current.map((currentTask) => (
+      currentTask.id === taskId
+        ? reconcileTaskStatus({
+          ...currentTask,
+          subtasks: (currentTask.subtasks ?? []).filter((item) => item.number !== subtaskNumber),
+        })
+        : currentTask
+    )));
+  }
+
   function addTaskSubtask(task: Task) {
     const subtasks = task.subtasks ?? [];
     const number = nextSubtaskNumber(subtasks);
@@ -2119,7 +2135,7 @@ export default function Home() {
     const newSubtask: TaskSubtask = {
       id: createSubtaskId(task.id, number),
       number,
-      title: "צעד טיפול חדש",
+      title: "",
       status: "open",
       createdAt,
       statusChangedAt: createdAt,
@@ -2388,6 +2404,13 @@ export default function Home() {
 
   function cancelDraftSubtask(number: number) {
     updateDraftSubtask(number, { status: "cancelled" });
+  }
+
+  function deleteDraftSubtask(number: number) {
+    const subtask = taskEditor?.draft.subtasks.find((item) => item.number === number);
+    const confirmed = window.confirm(`למחוק את צעד הטיפול${subtask?.title ? ` "${subtask.title}"` : ""}?`);
+    if (!confirmed) return;
+    updateTaskDraftSubtasks((subtasks) => subtasks.filter((item) => item.number !== number));
   }
 
   function closeTaskEditor() {
@@ -2771,12 +2794,13 @@ export default function Home() {
                   <input
                     value={subtask.title}
                     onChange={(event) => updateTaskSubtask(task.id, subtask.number, { title: event.target.value })}
-                    aria-label={`שם צעד טיפול ${subtask.title}`}
+                    placeholder="צעד טיפול חדש"
+                    aria-label={subtask.title ? `שם צעד טיפול ${subtask.title}` : "שם צעד טיפול חדש"}
                   />
                   <select
                     value={subtask.actionType ?? ""}
                     onChange={(event) => updateTaskSubtask(task.id, subtask.number, { actionType: event.target.value })}
-                    aria-label={`פעולה עבור ${subtask.title}`}
+                    aria-label={subtask.title ? `פעולה עבור ${subtask.title}` : "פעולה עבור צעד טיפול חדש"}
                   >
                     <option value="">ללא פעולה</option>
                     {actionOptions.map((action) => <option value={action} key={action}>{action}</option>)}
@@ -2784,10 +2808,19 @@ export default function Home() {
                   <select
                     value={subtask.status}
                     onChange={(event) => updateTaskSubtask(task.id, subtask.number, { status: event.target.value as TaskSubtaskStatus })}
-                    aria-label={`סטטוס עבור ${subtask.title}`}
+                    aria-label={subtask.title ? `סטטוס עבור ${subtask.title}` : "סטטוס עבור צעד טיפול חדש"}
                   >
                     {Object.entries(subtaskStatusLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
                   </select>
+                  <button
+                    type="button"
+                    className="subtask-delete"
+                    onClick={() => deleteTaskSubtask(task.id, subtask.number)}
+                    aria-label={subtask.title ? `מחיקת צעד טיפול ${subtask.title}` : "מחיקת צעד טיפול חדש"}
+                    title="מחיקה"
+                  >
+                    ×
+                  </button>
                 </li>
               ))}
             </ul>
@@ -3795,14 +3828,24 @@ export default function Home() {
                             {Object.entries(subtaskStatusLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
                           </select>
                         </label>
-                        <button
-                          type="button"
-                          className="subtask-cancel"
-                          onClick={() => cancelDraftSubtask(subtask.number)}
-                          disabled={subtask.status === "cancelled"}
-                        >
-                          ביטול
-                        </button>
+                        <div className="subtask-row-actions">
+                          <button
+                            type="button"
+                            className="subtask-cancel"
+                            onClick={() => cancelDraftSubtask(subtask.number)}
+                            disabled={subtask.status === "cancelled"}
+                          >
+                            ביטול
+                          </button>
+                          <button
+                            type="button"
+                            className="subtask-delete"
+                            onClick={() => deleteDraftSubtask(subtask.number)}
+                            aria-label={subtask.title ? `מחיקת צעד טיפול ${subtask.title}` : "מחיקת צעד טיפול חדש"}
+                          >
+                            מחיקה
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>

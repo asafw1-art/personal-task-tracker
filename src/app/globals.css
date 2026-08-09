@@ -181,7 +181,7 @@ textarea { resize: vertical; min-height: 86px; }
 .subtask-add-inline:hover { background: #dbeafe; }
 .subtask-add-inline span:first-child { align-items: center; background: var(--accent); border-radius: 999px; color: #fff; display: inline-flex; height: 20px; justify-content: center; line-height: 1; width: 20px; }
 .subtasks-preview-list { display: grid; gap: 6px; list-style: none; margin: 0; padding: 0; }
-.subtasks-preview-item { align-items: center; background: #f8fafc; border: 1px solid #edf2f7; border-radius: 10px; display: grid; gap: 8px; grid-template-columns: minmax(150px, 1fr) minmax(110px, .55fr) minmax(100px, .45fr); padding: 8px; }
+.subtasks-preview-item { align-items: center; background: #f8fafc; border: 1px solid #edf2f7; border-radius: 10px; display: grid; gap: 8px; grid-template-columns: minmax(150px, 1fr) minmax(110px, .55fr) minmax(100px, .45fr) 36px; padding: 8px; }
 .subtasks-preview-item input, .subtasks-preview-item select { padding: 8px 9px; }
 .subtasks-preview-item.status-open { border-right: 4px solid var(--accent); }
 .subtasks-preview-item.status-done { background: #f0fdf4; border-color: #bbf7d0; }
@@ -198,8 +198,11 @@ textarea { resize: vertical; min-height: 86px; }
 .subtask-row label { margin: 0; }
 .subtask-row.status-done { background: #f0fdf4; border-color: #bbf7d0; }
 .subtask-row.status-cancelled { background: #f8fafc; opacity: .72; }
-.subtask-cancel { background: #fff; border: 1px solid #fecaca; color: #b91c1c; }
-.subtask-cancel:hover { background: #fef2f2; color: #991b1b; }
+.subtask-row-actions { display: flex; gap: 6px; }
+.subtask-cancel, .subtask-delete { background: #fff; border: 1px solid #fecaca; border-radius: 10px; color: #b91c1c; font-weight: 800; padding: 10px 12px; white-space: nowrap; }
+.subtask-delete { align-items: center; display: inline-flex; justify-content: center; }
+.subtasks-preview-item .subtask-delete { height: 36px; padding: 0; width: 36px; }
+.subtask-cancel:hover, .subtask-delete:hover { background: #fef2f2; color: #991b1b; }
 .subtask-cancel:disabled { cursor: default; opacity: .55; }
 .taxonomy-panel { display: grid; gap: 14px; padding: 16px; }
 .appearance-panel, .notification-settings-panel { display: grid; gap: 14px; padding: 16px; }
@@ -406,6 +409,8 @@ textarea { resize: vertical; min-height: 86px; }
 [data-theme="dark"] .icon-button,
 [data-theme="dark"] .insight-card button,
 [data-theme="dark"] .secondary,
+[data-theme="dark"] .subtask-cancel,
+[data-theme="dark"] .subtask-delete,
 [data-theme="dark"] .taxonomy-edit-form .secondary-action,
 [data-theme="dark"] input,
 [data-theme="dark"] select,
@@ -550,9 +555,11 @@ textarea { resize: vertical; min-height: 86px; }
   .subtasks-editor-header { align-items: stretch; flex-direction: column; }
   .subtasks-editor-header button { width: 100%; }
   .subtasks-preview-item { grid-template-columns: 1fr; }
+  .subtasks-preview-item .subtask-delete { width: 100%; }
   .subtask-add-inline { justify-content: center; width: 100%; }
   .subtask-row { grid-template-columns: 1fr; }
-  .subtask-cancel { width: 100%; }
+  .subtask-row-actions { display: grid; grid-template-columns: 1fr; }
+  .subtask-cancel, .subtask-delete { width: 100%; }
   .taxonomy-form, .taxonomy-grid, .taxonomy-edit-form { grid-template-columns: 1fr; }
   .taxonomy-form button, .taxonomy-edit-form button { width: 100%; }
   .settings-tabs { grid-template-columns: 1fr; }
