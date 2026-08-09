@@ -27,6 +27,7 @@ export type Task = {
   completedAt?: string;
   statusChangedAt?: string;
   subtasks?: TaskSubtask[];
+  focused?: boolean;
   notes?: string;
 };
 

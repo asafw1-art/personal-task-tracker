@@ -15,6 +15,7 @@ type TaskRow = {
   completed_at: string | null;
   status_changed_at?: string | null;
   subtasks?: unknown;
+  focused?: boolean | null;
   created_at: string;
 };
 
@@ -22,32 +23,38 @@ type OptionalColumns = {
   actionType: boolean;
   statusChangedAt: boolean;
   subtasks: boolean;
+  focused: boolean;
 };
 
 const selectAttempts: { columns: string; optional: OptionalColumns }[] = [
   {
+    columns: "prefix, task_number, title, category, action_type, priority, status, notes, due_at, completed_at, status_changed_at, subtasks, focused, created_at",
+    optional: { actionType: true, statusChangedAt: true, subtasks: true, focused: true },
+  },
+  {
     columns: "prefix, task_number, title, category, action_type, priority, status, notes, due_at, completed_at, status_changed_at, subtasks, created_at",
-    optional: { actionType: true, statusChangedAt: true, subtasks: true },
+    optional: { actionType: true, statusChangedAt: true, subtasks: true, focused: false },
   },
   {
     columns: "prefix, task_number, title, category, action_type, priority, status, notes, due_at, completed_at, status_changed_at, created_at",
-    optional: { actionType: true, statusChangedAt: true, subtasks: false },
+    optional: { actionType: true, statusChangedAt: true, subtasks: false, focused: false },
   },
   {
     columns: "prefix, task_number, title, category, action_type, priority, status, notes, due_at, completed_at, created_at",
-    optional: { actionType: true, statusChangedAt: false, subtasks: false },
+    optional: { actionType: true, statusChangedAt: false, subtasks: false, focused: false },
   },
   {
     columns: "prefix, task_number, title, category, priority, status, notes, due_at, completed_at, created_at",
-    optional: { actionType: false, statusChangedAt: false, subtasks: false },
+    optional: { actionType: false, statusChangedAt: false, subtasks: false, focused: false },
   },
 ];
 
 const upsertAttempts: OptionalColumns[] = [
-  { actionType: true, statusChangedAt: true, subtasks: true },
-  { actionType: true, statusChangedAt: true, subtasks: false },
-  { actionType: true, statusChangedAt: false, subtasks: false },
-  { actionType: false, statusChangedAt: false, subtasks: false },
+  { actionType: true, statusChangedAt: true, subtasks: true, focused: true },
+  { actionType: true, statusChangedAt: true, subtasks: true, focused: false },
+  { actionType: true, statusChangedAt: true, subtasks: false, focused: false },
+  { actionType: true, statusChangedAt: false, subtasks: false, focused: false },
+  { actionType: false, statusChangedAt: false, subtasks: false, focused: false },
 ];
 
 function dateOnly(value: string | null | undefined) {
@@ -107,6 +114,7 @@ function rowToTask(row: TaskRow): Task {
     completedAt: dateOnly(row.completed_at),
     statusChangedAt: row.status_changed_at ?? undefined,
     subtasks: normalizeSubtasks(row.subtasks),
+    focused: row.focused ?? undefined,
     createdAt: dateOnly(row.created_at),
   };
 }
@@ -131,6 +139,7 @@ function taskToUpsert(task: Task, user: User, optional: OptionalColumns) {
   if (optional.actionType) row.action_type = task.actionType ?? null;
   if (optional.statusChangedAt) row.status_changed_at = toTimestamp(task.statusChangedAt);
   if (optional.subtasks) row.subtasks = task.subtasks ?? [];
+  if (optional.focused) row.focused = task.focused ?? false;
 
   return row;
 }
@@ -190,7 +199,7 @@ export async function saveCloudTasks(tasks: Task[], user: User) {
 }
 
 function isOptionalColumnError(error: unknown) {
-  return ["subtasks", "status_changed_at", "action_type"].some((text) => errorMessageMentions(error, text));
+  return ["subtasks", "status_changed_at", "action_type", "focused"].some((text) => errorMessageMentions(error, text));
 }
 
 function errorMessageMentions(error: unknown, text: string) {

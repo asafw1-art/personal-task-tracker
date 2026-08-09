@@ -16,6 +16,7 @@ create table public.tasks (
   completed_at timestamptz,
   status_changed_at timestamptz not null default now(),
   subtasks jsonb not null default '[]'::jsonb,
+  focused boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   unique (user_id, prefix, task_number)
@@ -45,6 +46,19 @@ create policy "Users can read own devices" on public.user_devices for select usi
 create policy "Users can create own devices" on public.user_devices for insert with check (auth.uid() = user_id);
 create policy "Users can update own devices" on public.user_devices for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
 create policy "Users can delete own devices" on public.user_devices for delete using (auth.uid() = user_id);
+
+create table public.user_settings (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  display_name text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.user_settings enable row level security;
+create policy "Users can read own settings" on public.user_settings for select using (auth.uid() = user_id);
+create policy "Users can create own settings" on public.user_settings for insert with check (auth.uid() = user_id);
+create policy "Users can update own settings" on public.user_settings for update using (auth.uid() = user_id) with check (auth.uid() = user_id);
+create policy "Users can delete own settings" on public.user_settings for delete using (auth.uid() = user_id);
 
 create table public.task_taxonomy_items (
   id uuid primary key default gen_random_uuid(),

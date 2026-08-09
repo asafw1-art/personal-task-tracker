@@ -10,11 +10,13 @@ import { addAssistantMessage, fetchAssistantMessages, fetchDeletedAssistantThrea
 import { fetchUserDevices, registerCurrentDevice, type UserDevice } from "@/lib/supabaseDevices";
 import { countCloudTasks, fetchCloudTasks, saveCloudTasks } from "@/lib/supabaseTasks";
 import { fetchCloudTaxonomy, replaceCloudTaxonomy } from "@/lib/supabaseTaxonomy";
+import { fetchUserSettings, saveUserSettings } from "@/lib/supabaseUserSettings";
 
 const STORAGE_KEY = "asaf-task-tracker-v1";
 const TAXONOMY_STORAGE_KEY = "asaf-task-tracker-taxonomy-v1";
 const NOTIFICATION_PREFERENCES_STORAGE_KEY = "asaf-task-tracker-notification-preferences-v1";
 const ANALYTICS_PREFERENCES_STORAGE_KEY = "asaf-task-tracker-analytics-preferences-v1";
+const USER_SETTINGS_STORAGE_KEY = "asaf-task-tracker-user-settings-v1";
 const THEME_STORAGE_KEY = "asaf-task-tracker-theme-v1";
 const DEFAULT_STUCK_THRESHOLD_DAYS = 21;
 
@@ -89,7 +91,7 @@ type ImportSummary = {
   skipped: number;
 };
 
-type TaskFilter = TaskStatus | "active" | "all" | "overdue" | "today" | "week" | "no_due" | "high" | "subtasks_open";
+type TaskFilter = TaskStatus | "active" | "all" | "overdue" | "today" | "week" | "no_due" | "high" | "subtasks_open" | "focused";
 type AnalyticsRange = "week" | "month" | "all";
 type MainView = "tasks" | "stats" | "kanban";
 type TaxonomyMode = "topics" | "actions";
@@ -127,6 +129,7 @@ function taskFilterLabel(filter: TaskFilter) {
     no_due: "בלי יעד",
     high: "עדיפות גבוהה",
     subtasks_open: "צעדי טיפול פתוחים",
+    focused: "במיקוד",
   };
 
   return labels[filter];
@@ -322,6 +325,7 @@ function normalizeImportedTask(value: unknown): Task | null {
     completedAt: optionalString(task.completedAt),
     statusChangedAt: optionalString(task.statusChangedAt),
     subtasks: normalizeImportedSubtasks(task.subtasks, id),
+    focused: task.focused === true,
     notes: optionalString(task.notes),
   };
 }
@@ -344,7 +348,7 @@ function errorMessage(error: unknown) {
 
 function mergeUniqueTasks(tasks: Task[]) {
   return Array.from(new Map(tasks.map((task) => [task.id, task])).values())
-    .sort((a, b) => a.prefix.localeCompare(b.prefix) || a.number - b.number);
+    .sort((a, b) => Number(Boolean(b.focused)) - Number(Boolean(a.focused)) || a.prefix.localeCompare(b.prefix) || a.number - b.number);
 }
 
 function defaultTaskDraft(prefix: TaskPrefix = "P"): TaskDraft {
@@ -575,6 +579,40 @@ function parseStoredTheme(value: string | null): AppTheme {
   return value === "dark" ? "dark" : "light";
 }
 
+function userSettingsStorageKey(userId: string) {
+  return `${USER_SETTINGS_STORAGE_KEY}:${userId}`;
+}
+
+function displayNameFromUser(user: User | null) {
+  if (!user) return "";
+  const metadata = user.user_metadata as Record<string, unknown>;
+  const metadataName = [metadata.full_name, metadata.name, metadata.user_name]
+    .find((value) => typeof value === "string" && value.trim());
+  if (typeof metadataName === "string") return metadataName.trim();
+  return user.email?.split("@")[0]?.trim() ?? "";
+}
+
+function normalizeDisplayName(value: string) {
+  return value.trim().replace(/\s+/g, " ");
+}
+
+function hasDoneSubtasks(subtasks: TaskSubtask[] = []) {
+  return subtasks.some((subtask) => subtask.status === "done");
+}
+
+function effectiveTaskStatus(status: TaskStatus, subtasks: TaskSubtask[] = []) {
+  return status === "open" && hasDoneSubtasks(subtasks) ? "in_progress" : status;
+}
+
+function reconcileTaskStatus(task: Task) {
+  const status = effectiveTaskStatus(task.status, task.subtasks);
+  return status === task.status ? task : { ...task, status, statusChangedAt: nowIso() };
+}
+
+function sortTasks(tasks: Task[]) {
+  return [...tasks].sort((a, b) => Number(Boolean(b.focused)) - Number(Boolean(a.focused)) || a.prefix.localeCompare(b.prefix) || a.number - b.number);
+}
+
 export default function Home() {
   const [tasks, setTasks] = usePersistentTasks();
   const [query, setQuery] = useState("");
@@ -597,6 +635,9 @@ export default function Home() {
   const [notificationPreferencesLoaded, setNotificationPreferencesLoaded] = useState(false);
   const [stuckThresholdDays, setStuckThresholdDays] = useState(DEFAULT_STUCK_THRESHOLD_DAYS);
   const [analyticsPreferencesLoaded, setAnalyticsPreferencesLoaded] = useState(false);
+  const [displayName, setDisplayName] = useState("");
+  const [displayNameDraft, setDisplayNameDraft] = useState("");
+  const [userSettingsStatus, setUserSettingsStatus] = useState("");
   const [newTopicPrefix, setNewTopicPrefix] = useState<TaskPrefix>("P");
   const [newTopicName, setNewTopicName] = useState("");
   const [newActionName, setNewActionName] = useState("");
@@ -758,6 +799,45 @@ export default function Home() {
   }, [cloudUser, taxonomyLoaded]);
 
   useEffect(() => {
+    let cancelled = false;
+    const timeoutId = window.setTimeout(() => {
+      if (!cloudUser) {
+        setDisplayName("");
+        setDisplayNameDraft("");
+        setUserSettingsStatus("");
+        return;
+      }
+
+      const fallbackName = displayNameFromUser(cloudUser);
+      const storedName = normalizeDisplayName(window.localStorage.getItem(userSettingsStorageKey(cloudUser.id)) ?? "");
+      const initialName = storedName || fallbackName;
+
+      setDisplayName(initialName);
+      setDisplayNameDraft(initialName);
+      setUserSettingsStatus(initialName ? "שם התצוגה נטען." : "אפשר להגדיר שם שיופיע בכותרת.");
+
+      fetchUserSettings(cloudUser)
+        .then((settings) => {
+          if (cancelled) return;
+          const cloudName = normalizeDisplayName(settings.displayName ?? "");
+          if (!cloudName) return;
+          setDisplayName(cloudName);
+          setDisplayNameDraft(cloudName);
+          window.localStorage.setItem(userSettingsStorageKey(cloudUser.id), cloudName);
+          setUserSettingsStatus("שם התצוגה מסונכרן לענן.");
+        })
+        .catch((error: unknown) => {
+          if (!cancelled) setUserSettingsStatus(`לא הצלחתי לטעון את שם התצוגה מהענן: ${errorMessage(error)}`);
+        });
+    }, 0);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [cloudUser]);
+
+  useEffect(() => {
     if (!cloudUser || !isCloudReady) return;
 
     let cancelled = false;
@@ -913,17 +993,16 @@ export default function Home() {
     const today = todayIso();
     const weekEnd = addDaysIso(6);
     if (normalized) {
-      return tasks
-        .filter((task) => task.id === normalized)
-        .sort((a, b) => a.prefix.localeCompare(b.prefix) || a.number - b.number);
+      return sortTasks(tasks.filter((task) => task.id === normalized));
     }
-    return tasks
+    return sortTasks(tasks
       .filter((task) => prefixFilter === "all" || task.prefix === prefixFilter)
       .filter((task) => topicFilter === "all" || task.category === topicFilter)
       .filter((task) => actionFilter === "all" || (task.actionType ?? "") === actionFilter || (task.subtasks ?? []).some((subtask) => subtask.actionType === actionFilter))
       .filter((task) => {
         if (statusFilter === "all") return true;
         if (statusFilter === "active") return !["done", "cancelled"].includes(task.status);
+        if (statusFilter === "focused") return Boolean(task.focused) && !["done", "cancelled"].includes(task.status);
         if (statusFilter === "subtasks_open") return !["done", "cancelled"].includes(task.status) && subtaskProgress(task.subtasks).open > 0;
         if (statusFilter === "overdue") return Boolean(task.dueDate && task.dueDate < today && !["done", "cancelled"].includes(task.status));
         if (statusFilter === "today") return task.dueDate === today;
@@ -935,8 +1014,7 @@ export default function Home() {
       .filter((task) => {
         if (!query.trim()) return true;
         return `${task.id} ${task.title} ${task.category} ${task.actionType ?? ""} ${task.notes ?? ""}`.toLowerCase().includes(query.trim().toLowerCase());
-      })
-      .sort((a, b) => a.prefix.localeCompare(b.prefix) || a.number - b.number);
+      }));
   }, [tasks, query, statusFilter, prefixFilter, topicFilter, actionFilter]);
 
   const activeFilters = useMemo(() => {
@@ -1018,6 +1096,15 @@ export default function Home() {
       return {
         title: "אין משימות בעדיפות גבוהה",
         body: "לא נמצאו משימות פעילות שמסומנות בעדיפות גבוהה.",
+        actionLabel: "הצג פעילות",
+        action: clearTaskFilters,
+      };
+    }
+
+    if (statusFilter === "focused") {
+      return {
+        title: "אין משימות במיקוד",
+        body: "אפשר לסמן כוכב על משימה חשובה כדי להציף אותה בראש הרשימה.",
         actionLabel: "הצג פעילות",
         action: clearTaskFilters,
       };
@@ -1825,17 +1912,41 @@ export default function Home() {
     setStuckThresholdDays(clampStuckThresholdDays(Number(value)));
   }
 
+  async function saveDisplayName(event: FormEvent) {
+    event.preventDefault();
+    if (!cloudUser) return;
+    const nextName = normalizeDisplayName(displayNameDraft);
+    setDisplayName(nextName);
+    setDisplayNameDraft(nextName);
+    window.localStorage.setItem(userSettingsStorageKey(cloudUser.id), nextName);
+    setUserSettingsStatus("שומר את שם התצוגה...");
+
+    try {
+      await saveUserSettings(cloudUser, { displayName: nextName || undefined });
+      setUserSettingsStatus(nextName ? "שם התצוגה נשמר." : "שם התצוגה נוקה.");
+    } catch (error) {
+      setUserSettingsStatus(`שם התצוגה נשמר במכשיר הזה, אבל לא בענן: ${errorMessage(error)}`);
+    }
+  }
+
   function updateStatus(id: string, status: TaskStatus) {
     setTasks((current) => current.map((task) => {
       if (task.id !== id) return task;
-      const statusChangedAt = task.status === status ? task.statusChangedAt : nowIso();
+      const nextStatus = effectiveTaskStatus(status, task.subtasks);
+      const statusChangedAt = task.status === nextStatus ? task.statusChangedAt : nowIso();
       return {
         ...task,
-        status,
-        completedAt: status === "done" ? (task.status === "done" ? task.completedAt ?? todayIso() : todayIso()) : undefined,
+        status: nextStatus,
+        completedAt: nextStatus === "done" ? (task.status === "done" ? task.completedAt ?? todayIso() : todayIso()) : undefined,
         statusChangedAt,
       };
     }));
+  }
+
+  function toggleTaskFocus(id: string) {
+    setTasks((current) => current.map((task) => (
+      task.id === id ? { ...task, focused: !task.focused } : task
+    )));
   }
 
   function isOverdue(task: Task) {
@@ -1862,7 +1973,7 @@ export default function Home() {
   function updateTaskSubtask(taskId: string, subtaskNumber: number, updates: Partial<TaskSubtask>) {
     setTasks((current) => current.map((task) => {
       if (task.id !== taskId) return task;
-      return {
+      return reconcileTaskStatus({
         ...task,
         subtasks: (task.subtasks ?? []).map((subtask) => {
           if (subtask.number !== subtaskNumber) return subtask;
@@ -1874,7 +1985,7 @@ export default function Home() {
             statusChangedAt,
           };
         }),
-      };
+      });
     }));
   }
 
@@ -1893,7 +2004,7 @@ export default function Home() {
 
     setTasks((current) => current.map((currentTask) => (
       currentTask.id === task.id
-        ? { ...currentTask, subtasks: [...(currentTask.subtasks ?? []), newSubtask] }
+        ? reconcileTaskStatus({ ...currentTask, subtasks: [...(currentTask.subtasks ?? []), newSubtask] })
         : currentTask
     )));
     setExpandedSubtaskTaskIds((current) => new Set(current).add(task.id));
@@ -1936,7 +2047,7 @@ export default function Home() {
       const subtasks = task.subtasks ?? [];
       const number = nextSubtaskNumber(subtasks);
       const createdAt = nowIso();
-      return {
+      return reconcileTaskStatus({
         ...task,
         subtasks: [...subtasks, {
           id: createSubtaskId(task.id, number),
@@ -1947,7 +2058,7 @@ export default function Home() {
           createdAt,
           statusChangedAt: createdAt,
         }],
-      };
+      });
     }));
     setExpandedSubtaskTaskIds((current) => new Set(current).add(action.taskId));
   }
@@ -2100,17 +2211,24 @@ export default function Home() {
   }
 
   function updateTaskDraft(updates: Partial<TaskDraft>) {
-    setTaskEditor((current) => current ? { ...current, draft: { ...current.draft, ...updates } } : current);
+    setTaskEditor((current) => {
+      if (!current) return current;
+      const draft = { ...current.draft, ...updates };
+      return { ...current, draft: { ...draft, status: effectiveTaskStatus(draft.status, draft.subtasks) } };
+    });
   }
 
   function updateTaskDraftSubtasks(updater: (subtasks: TaskSubtask[], editor: Exclude<TaskEditorState, null>) => TaskSubtask[]) {
     setTaskEditor((current) => {
       if (!current) return current;
+      const subtasks = updater(current.draft.subtasks, current);
+      const status = effectiveTaskStatus(current.draft.status, subtasks);
       return {
         ...current,
         draft: {
           ...current.draft,
-          subtasks: updater(current.draft.subtasks, current),
+          status,
+          subtasks,
         },
       };
     });
@@ -2180,6 +2298,8 @@ export default function Home() {
         const taskId = `${draft.prefix}${nextNumber}`;
         const createdAt = todayIso();
         const statusChangedAt = nowIso();
+        const subtasks = normalizeDraftSubtasks(draft.subtasks, taskId);
+        const status = effectiveTaskStatus(draft.status, subtasks);
         return mergeUniqueTasks([...current, {
           id: taskId,
           prefix: draft.prefix,
@@ -2188,31 +2308,33 @@ export default function Home() {
           category,
           actionType: draft.actionType.trim() || undefined,
           priority: draft.priority,
-          status: draft.status,
+          status,
           dueDate: draft.dueDate || undefined,
           notes: draft.notes.trim() || undefined,
           createdAt,
-          completedAt: draft.status === "done" ? createdAt : undefined,
+          completedAt: status === "done" ? createdAt : undefined,
           statusChangedAt,
-          subtasks: normalizeDraftSubtasks(draft.subtasks, taskId),
+          subtasks,
         }]);
       }
 
       return current.map((task) => {
         if (task.id !== taskEditor.taskId) return task;
-        const statusChangedAt = task.status === draft.status ? task.statusChangedAt : nowIso();
+        const subtasks = normalizeDraftSubtasks(draft.subtasks, task.id);
+        const status = effectiveTaskStatus(draft.status, subtasks);
+        const statusChangedAt = task.status === status ? task.statusChangedAt : nowIso();
         return {
           ...task,
           title,
           category,
           actionType: draft.actionType.trim() || undefined,
           priority: draft.priority,
-          status: draft.status,
+          status,
           dueDate: draft.dueDate || undefined,
           notes: draft.notes.trim() || undefined,
-          completedAt: draft.status === "done" ? (task.status === "done" ? task.completedAt ?? todayIso() : todayIso()) : undefined,
+          completedAt: status === "done" ? (task.status === "done" ? task.completedAt ?? todayIso() : todayIso()) : undefined,
           statusChangedAt,
-          subtasks: normalizeDraftSubtasks(draft.subtasks, task.id),
+          subtasks,
         };
       });
     });
@@ -2541,12 +2663,14 @@ export default function Home() {
     );
   }
 
+  const pageTitle = displayName ? `המשימות של ${displayName}` : "המשימות שלי";
+
   return (
     <main className={activeView === "kanban" ? "kanban-main" : undefined}>
       <header className="hero">
         <div>
           <p className="eyebrow">מעקב משימות אישי</p>
-          <h1>המשימות שלי</h1>
+          <h1>{pageTitle}</h1>
           <p className="subtitle">ניהול פשוט, עקבי ונגיש מכל מכשיר</p>
         </div>
         {cloudUser && (
@@ -2591,6 +2715,21 @@ export default function Home() {
             <button onClick={() => showTaskList("done")}><strong>{counts.done}</strong><span>הושלמו</span></button>
           </section>
 
+          {cloudUser && !displayName && (
+            <section className="app-notifications" aria-label="השלמת פרופיל">
+              <article className="app-notification notification-neutral">
+                <div>
+                  <strong>איך לקרוא לך בכותרת?</strong>
+                  <span>אפשר להגדיר שם קצר, למשל ויצמן, כדי שהכותרת תהיה אישית יותר.</span>
+                </div>
+                <button onClick={() => {
+                  setSettingsTab("appearance");
+                  setIsSettingsOpen(true);
+                }}>הגדרת שם</button>
+              </article>
+            </section>
+          )}
+
           {appNotifications.length > 0 && (
             <section className="app-notifications" aria-label="התראות פעילות" aria-live="polite">
               {appNotifications.map((notification) => (
@@ -2620,6 +2759,7 @@ export default function Home() {
                   <option value="open">פתוחות</option>
                   <option value="in_progress">בטיפול</option>
                   <option value="waiting">ממתינות</option>
+                  <option value="focused">במיקוד</option>
                   <option value="done">בוצעו</option>
                   <option value="cancelled">בוטלו</option>
                   <option value="all">הכול</option>
@@ -2660,6 +2800,7 @@ export default function Home() {
                 <button className={statusFilter === "overdue" ? "active" : ""} onClick={() => setStatusFilter("overdue")}>באיחור</button>
                 <button className={statusFilter === "no_due" ? "active" : ""} onClick={() => setStatusFilter("no_due")}>בלי יעד</button>
                 <button className={statusFilter === "high" ? "active" : ""} onClick={() => setStatusFilter("high")}>גבוהה</button>
+                <button className={statusFilter === "focused" ? "active" : ""} onClick={() => setStatusFilter("focused")}>במיקוד</button>
                 <button className={statusFilter === "subtasks_open" ? "active" : ""} onClick={() => setStatusFilter("subtasks_open")}>צעדים פתוחים</button>
               </section>
 
@@ -2673,6 +2814,15 @@ export default function Home() {
                 )}
                 {filteredTasks.map((task) => (
                   <article className={`task-card status-${task.status}${isOverdue(task) ? " is-overdue" : ""}${subtaskProgress(task.subtasks).open >= 3 ? " has-open-subtasks" : ""}`} key={task.id}>
+                    <button
+                      className={`focus-button${task.focused ? " active" : ""}`}
+                      aria-label={task.focused ? `הסרת ${task.title} ממיקוד` : `סימון ${task.title} במיקוד`}
+                      aria-pressed={Boolean(task.focused)}
+                      onClick={() => toggleTaskFocus(task.id)}
+                      title={task.focused ? "הסרה ממיקוד" : "סימון במיקוד"}
+                    >
+                      ★
+                    </button>
                     <button className="check" aria-label={`סימון ${task.title} כבוצעה`} onClick={() => updateStatus(task.id, task.status === "done" ? "open" : "done")}>
                       {task.status === "done" ? "✓" : ""}
                     </button>
@@ -2736,6 +2886,15 @@ export default function Home() {
                           <p className="kanban-empty">אין משימות</p>
                         ) : columnTasks.map((task) => (
                           <article className={`kanban-card status-${task.status}${isOverdue(task) ? " is-overdue" : ""}${subtaskProgress(task.subtasks).open >= 3 ? " has-open-subtasks" : ""}`} key={task.id}>
+                            <button
+                              className={`focus-button kanban-focus${task.focused ? " active" : ""}`}
+                              aria-label={task.focused ? `הסרת ${task.title} ממיקוד` : `סימון ${task.title} במיקוד`}
+                              aria-pressed={Boolean(task.focused)}
+                              onClick={() => toggleTaskFocus(task.id)}
+                              title={task.focused ? "הסרה ממיקוד" : "סימון במיקוד"}
+                            >
+                              ★
+                            </button>
                             <div className="task-heading">
                               <span className="task-id">{task.id}</span>
                               <h3>{task.title}</h3>
@@ -3063,6 +3222,19 @@ export default function Home() {
                     <small>רקע כהה ונעים יותר לעבודה בלילה.</small>
                   </button>
                 </div>
+                <form className="profile-settings-form" onSubmit={saveDisplayName}>
+                  <label>
+                    <span>שם שיופיע בכותרת</span>
+                    <input
+                      value={displayNameDraft}
+                      onChange={(event) => setDisplayNameDraft(event.target.value)}
+                      placeholder={displayNameFromUser(cloudUser) || "לדוגמה: ויצמן"}
+                      aria-label="שם שיופיע בכותרת הראשית"
+                    />
+                  </label>
+                  <button type="submit">שמירת שם</button>
+                  <p>{userSettingsStatus}</p>
+                </form>
               </section>
               ) : settingsTab === "taxonomy" ? (
               <section className="panel taxonomy-panel">
@@ -3417,7 +3589,12 @@ export default function Home() {
               </label>
               <label>
                 <span>תאריך יעד</span>
-                <input type="date" value={taskEditor.draft.dueDate} onChange={(event) => updateTaskDraft({ dueDate: event.target.value })} />
+                <input
+                  type="date"
+                  value={taskEditor.draft.dueDate}
+                  min={taskEditor.draft.dueDate && taskEditor.draft.dueDate < todayIso() ? taskEditor.draft.dueDate : todayIso()}
+                  onChange={(event) => updateTaskDraft({ dueDate: event.target.value })}
+                />
               </label>
               <label className="notes-field">
                 <span>הערות</span>
