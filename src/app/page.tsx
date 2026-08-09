@@ -901,7 +901,18 @@ export default function Home() {
         .then((settings) => {
           if (cancelled) return;
           const cloudName = normalizeDisplayName(settings.displayName ?? "");
-          if (!cloudName) return;
+          if (!cloudName) {
+            if (storedName) {
+              saveUserSettings(cloudUser, { displayName: storedName })
+                .then(() => {
+                  if (!cancelled) setUserSettingsStatus("שם התצוגה המקומי סונכרן לענן.");
+                })
+                .catch((error: unknown) => {
+                  if (!cancelled) setUserSettingsStatus(`שמירת שם התצוגה לענן נכשלה: ${errorMessage(error)}`);
+                });
+            }
+            return;
+          }
           setDisplayName(cloudName);
           setDisplayNameDraft(cloudName);
           window.localStorage.setItem(userSettingsStorageKey(cloudUser.id), cloudName);
