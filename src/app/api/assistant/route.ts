@@ -14,13 +14,32 @@ type AssistantRequestBody = {
   recentMessages?: { role: "user" | "assistant"; content: string }[];
 };
 
+type GeminiResponse = {
+  candidates?: {
+    content?: {
+      parts?: { text?: string }[];
+    };
+  }[];
+  error?: {
+    message?: string;
+  };
+};
+
+type GatewayResponse = {
+  choices?: {
+    message?: {
+      content?: string;
+    };
+  }[];
+};
+
 function jsonResponse(body: unknown, status = 200) {
   return Response.json(body, { status });
 }
 
 function visibleEnvironmentKeys() {
   return Object.keys(process.env)
-    .filter((key) => key.includes("AI") || key.includes("GATEWAY") || key.includes("ASSISTANT"))
+    .filter((key) => key.includes("AI") || key.includes("GATEWAY") || key.includes("ASSISTANT") || key.includes("GEMINI"))
     .sort();
 }
 
@@ -57,6 +76,23 @@ function buildTaskSnapshot(tasks: Task[]) {
   };
 }
 
+function buildSystemPrompt() {
+  return [
+    "אתה עוזר משימות אישי בתוך אפליקציה בעברית ובכיוון RTL.",
+    "ענה בעברית קצרה, תכליתית ומעשית.",
+    "מותר לך להציע פעולה אחת בלבד בכל תשובה, והאפליקציה תבצע אותה רק אחרי אישור המשתמש.",
+    "אל תמציא מזהי משימות. אם הפעולה מתייחסת למשימה קיימת, השתמש רק במזהה שקיים בנתונים.",
+    "החזר JSON בלבד במבנה: {\"reply\":\"...\",\"proposedAction\": optional}.",
+    "proposedAction יכול להיות אחד מ:",
+    "{\"type\":\"create_task\",\"label\":\"אישור וביצוע\",\"task\":{\"prefix\":\"P|W\",\"title\":\"...\",\"category\":\"...\",\"actionType\":\"...\",\"priority\":\"high|important|normal|low\",\"dueDate\":\"YYYY-MM-DD\",\"notes\":\"...\"}}",
+    "{\"type\":\"update_task_status\",\"label\":\"אישור וביצוע\",\"taskId\":\"P20\",\"status\":\"open|in_progress|waiting|done|cancelled\"}",
+    "{\"type\":\"add_subtask\",\"label\":\"אישור וביצוע\",\"taskId\":\"P20\",\"subtask\":{\"title\":\"...\",\"actionType\":\"...\"}}",
+    "{\"type\":\"update_subtask_status\",\"label\":\"אישור וביצוע\",\"taskId\":\"P20\",\"subtaskNumber\":1,\"status\":\"open|done|cancelled\"}",
+    "{\"type\":\"filter_tasks\",\"label\":\"הצג משימות\",\"filter\":{\"query\":\"...\",\"statusFilter\":\"active|overdue|subtasks_open|waiting|done|all\",\"prefixFilter\":\"P|W|all\",\"topicFilter\":\"...\",\"actionFilter\":\"...\"}}",
+    "אם המשתמש מבקש ניתוח או שאלה בלבד, אל תחזיר proposedAction.",
+  ].join("\n");
+}
+
 function extractJson(text: string): AssistantResponse {
   try {
     return JSON.parse(text) as AssistantResponse;
@@ -85,85 +121,113 @@ async function verifyUser(request: Request) {
   return data.user;
 }
 
+async function callGemini(prompt: string) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  const model = process.env.GEMINI_MODEL ?? "gemini-2.5-flash";
+
+  if (!apiKey) return null;
+
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": apiKey,
+    },
+    body: JSON.stringify({
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: prompt }],
+        },
+      ],
+      generationConfig: {
+        temperature: 0.2,
+        responseMimeType: "application/json",
+      },
+    }),
+  });
+
+  const data = await response.json() as GeminiResponse;
+  if (!response.ok) throw new Error(`Gemini החזיר שגיאה: ${data.error?.message ?? JSON.stringify(data)}`);
+
+  const content = data.candidates?.[0]?.content?.parts?.map((part) => part.text ?? "").join("").trim();
+  if (!content) throw new Error("לא התקבלה תשובה מ-Gemini.");
+  return content;
+}
+
+async function callVercelGateway(systemPrompt: string, userPayload: unknown, recentMessages: AssistantRequestBody["recentMessages"]) {
+  const apiKey = process.env.AI_GATEWAY_API_KEY ?? process.env.VERCEL_AI_GATEWAY_API_KEY;
+  const model = process.env.ASSISTANT_MODEL;
+
+  if (!apiKey || !model) return null;
+
+  const response = await fetch("https://ai-gateway.vercel.sh/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      stream: false,
+      temperature: 0.2,
+      messages: [
+        { role: "system", content: systemPrompt },
+        ...(recentMessages ?? []).slice(-8).map((message) => ({
+          role: message.role,
+          content: message.content,
+        })),
+        {
+          role: "user",
+          content: JSON.stringify(userPayload),
+        },
+      ],
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`AI Gateway החזיר שגיאה: ${errorText}`);
+  }
+
+  const data = await response.json() as GatewayResponse;
+  const content = data.choices?.[0]?.message?.content;
+  if (!content) throw new Error("לא התקבלה תשובה מהמודל.");
+  return content;
+}
+
 export async function POST(request: Request) {
   try {
     await verifyUser(request);
-
-    const apiKey = process.env.AI_GATEWAY_API_KEY ?? process.env.VERCEL_AI_GATEWAY_API_KEY;
-    const model = process.env.ASSISTANT_MODEL;
-
-    if (!apiKey) {
-      return jsonResponse({
-        error: `AI_GATEWAY_API_KEY חסר בשרת. משתנים גלויים: ${visibleEnvironmentKeys().join(", ") || "אין"}`,
-        visibleEnvironmentKeys: visibleEnvironmentKeys(),
-      }, 500);
-    }
-    if (!model) {
-      return jsonResponse({
-        error: `ASSISTANT_MODEL חסר בשרת. משתנים גלויים: ${visibleEnvironmentKeys().join(", ") || "אין"}`,
-        visibleEnvironmentKeys: visibleEnvironmentKeys(),
-      }, 500);
-    }
-
-    if (!apiKey) return jsonResponse({ error: "AI_GATEWAY_API_KEY חסר בשרת." }, 500);
-    if (!model) return jsonResponse({ error: "ASSISTANT_MODEL חסר בשרת." }, 500);
 
     const body = await request.json() as AssistantRequestBody;
     const userMessage = body.message?.trim();
     if (!userMessage) return jsonResponse({ error: "חסרה הודעת משתמש." }, 400);
 
-    const response = await fetch("https://ai-gateway.vercel.sh/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model,
-        stream: false,
-        temperature: 0.2,
-        messages: [
-          {
-            role: "system",
-            content: [
-              "אתה עוזר משימות אישי בתוך אפליקציה בעברית ו-RTL.",
-              "ענה בעברית קצרה, תכליתית ומעשית.",
-              "מותר לך להציע פעולה אחת בלבד בכל תשובה, והאפליקציה תבצע אותה רק אחרי אישור המשתמש.",
-              "אל תמציא מזהי משימות. אם הפעולה מתייחסת למשימה קיימת, השתמש רק במזהה שקיים בנתונים.",
-              "החזר JSON בלבד במבנה: {\"reply\":\"...\",\"proposedAction\": optional}.",
-              "proposedAction יכול להיות אחד מ:",
-              "{\"type\":\"create_task\",\"label\":\"אישור וביצוע\",\"task\":{\"prefix\":\"P|W\",\"title\":\"...\",\"category\":\"...\",\"actionType\":\"...\",\"priority\":\"high|important|normal|low\",\"dueDate\":\"YYYY-MM-DD\",\"notes\":\"...\"}}",
-              "{\"type\":\"update_task_status\",\"label\":\"אישור וביצוע\",\"taskId\":\"P20\",\"status\":\"open|in_progress|waiting|done|cancelled\"}",
-              "{\"type\":\"add_subtask\",\"label\":\"אישור וביצוע\",\"taskId\":\"P20\",\"subtask\":{\"title\":\"...\",\"actionType\":\"...\"}}",
-              "{\"type\":\"update_subtask_status\",\"label\":\"אישור וביצוע\",\"taskId\":\"P20\",\"subtaskNumber\":1,\"status\":\"open|done|cancelled\"}",
-              "{\"type\":\"filter_tasks\",\"label\":\"הצג משימות\",\"filter\":{\"query\":\"...\",\"statusFilter\":\"active|overdue|subtasks_open|waiting|done|all\",\"prefixFilter\":\"P|W|all\",\"topicFilter\":\"...\",\"actionFilter\":\"...\"}}",
-              "אם המשתמש מבקש ניתוח או שאלה בלבד, אל תחזיר proposedAction.",
-            ].join("\n"),
-          },
-          ...(body.recentMessages ?? []).slice(-8).map((message) => ({
-            role: message.role,
-            content: message.content,
-          })),
-          {
-            role: "user",
-            content: JSON.stringify({
-              userMessage,
-              taskSnapshot: buildTaskSnapshot(body.tasks ?? []),
-              taxonomy: body.taxonomy ?? {},
-            }),
-          },
-        ],
-      }),
-    });
+    const systemPrompt = buildSystemPrompt();
+    const userPayload = {
+      userMessage,
+      taskSnapshot: buildTaskSnapshot(body.tasks ?? []),
+      taxonomy: body.taxonomy ?? {},
+    };
+    const geminiPrompt = [
+      systemPrompt,
+      "הודעות אחרונות:",
+      JSON.stringify((body.recentMessages ?? []).slice(-8)),
+      "נתוני הבקשה:",
+      JSON.stringify(userPayload),
+    ].join("\n\n");
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      return jsonResponse({ error: `AI Gateway החזיר שגיאה: ${errorText}` }, 502);
+    const content =
+      await callGemini(geminiPrompt) ??
+      await callVercelGateway(systemPrompt, userPayload, body.recentMessages);
+
+    if (!content) {
+      return jsonResponse({
+        error: `לא הוגדר מנוע AI פעיל. נדרשים GEMINI_API_KEY או AI_GATEWAY_API_KEY. משתנים גלויים: ${visibleEnvironmentKeys().join(", ") || "אין"}`,
+        visibleEnvironmentKeys: visibleEnvironmentKeys(),
+      }, 500);
     }
-
-    const data = await response.json() as { choices?: { message?: { content?: string } }[] };
-    const content = data.choices?.[0]?.message?.content;
-    if (!content) return jsonResponse({ error: "לא התקבלה תשובה מהמודל." }, 502);
 
     return jsonResponse(extractJson(content));
   } catch (error) {
