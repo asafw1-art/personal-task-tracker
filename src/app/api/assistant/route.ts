@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import type { AssistantProposedAction, AssistantResponse } from "@/lib/assistant";
-import type { Task } from "@/lib/tasks";
+import { canonicalTaskId, type Task, type TaskPrefix, type TaskPriority, type TaskStatus, type TaskSubtaskStatus } from "@/lib/tasks";
 
 export const runtime = "nodejs";
 
@@ -35,12 +35,6 @@ type GatewayResponse = {
 
 function jsonResponse(body: unknown, status = 200) {
   return Response.json(body, { status });
-}
-
-function visibleEnvironmentKeys() {
-  return Object.keys(process.env)
-    .filter((key) => key.includes("AI") || key.includes("GATEWAY") || key.includes("ASSISTANT") || key.includes("GEMINI"))
-    .sort();
 }
 
 function normalizeGeminiModel(model: string | undefined) {
@@ -139,24 +133,126 @@ function extractJson(text: string): AssistantResponse {
   return response;
 }
 
-function sanitizeAction(action: AssistantProposedAction | undefined, tasks: Task[], userMessage: string) {
+const taskStatuses = new Set<TaskStatus>(["open", "in_progress", "waiting", "done", "cancelled"]);
+const subtaskStatuses = new Set<TaskSubtaskStatus>(["open", "done", "cancelled"]);
+const taskPriorities = new Set<TaskPriority>(["high", "important", "normal", "low"]);
+const taskPrefixes = new Set<TaskPrefix>(["P", "W"]);
+const taskFilters = new Set(["active", "overdue", "subtasks_open", "waiting", "done", "all", "open", "in_progress", "cancelled", "focused", "today", "week", "no_due", "high"]);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function cleanText(value: unknown, maxLength: number) {
+  return typeof value === "string" ? value.trim().slice(0, maxLength) : "";
+}
+
+function cleanOptionalText(value: unknown, maxLength: number) {
+  const text = cleanText(value, maxLength);
+  return text || undefined;
+}
+
+function cleanDate(value: unknown) {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : undefined;
+}
+
+function findTask(tasks: Task[], taskId: unknown) {
+  if (typeof taskId !== "string") return undefined;
+  const id = canonicalTaskId(taskId);
+  return id ? tasks.find((task) => task.id === id) : undefined;
+}
+
+function sanitizeAction(action: AssistantProposedAction | undefined, tasks: Task[], userMessage: string): AssistantProposedAction | undefined {
   if (!action) return undefined;
+  if (!isRecord(action) || typeof action.type !== "string") return undefined;
 
   if (action.type === "delete_assistant_history") {
-    return /צ[׳']?ט|שיח|שיחה|שיחות|chat|conversation|history|היסטור/i.test(userMessage) ? action : undefined;
+    return /צ[׳']?ט|שיח|שיחה|שיחות|chat|conversation|history|היסטור/i.test(userMessage)
+      ? { type: "delete_assistant_history", label: "אישור והעברה לשחזור" }
+      : undefined;
+  }
+
+  if (action.type === "create_task") {
+    const task = isRecord(action.task) ? action.task : null;
+    const title = cleanText(task?.title, 160);
+    if (!title) return undefined;
+    const prefix = taskPrefixes.has(task?.prefix as TaskPrefix) ? task?.prefix as TaskPrefix : "P";
+    const priority = taskPriorities.has(task?.priority as TaskPriority) ? task?.priority as TaskPriority : "normal";
+
+    return {
+      type: "create_task",
+      label: "אישור וביצוע",
+      task: {
+        prefix,
+        title,
+        category: cleanOptionalText(task?.category, 80),
+        actionType: cleanOptionalText(task?.actionType, 80),
+        priority,
+        dueDate: cleanDate(task?.dueDate),
+        notes: cleanOptionalText(task?.notes, 500),
+      },
+    };
   }
 
   if (action.type === "update_task_status") {
-    const taskExists = tasks.some((task) => task.id === action.taskId);
-    if (!taskExists) return undefined;
+    const task = findTask(tasks, action.taskId);
+    if (!task || !taskStatuses.has(action.status)) return undefined;
+    return {
+      type: "update_task_status",
+      label: "אישור וביצוע",
+      taskId: task.id,
+      status: action.status,
+    };
   }
 
-  if (action.type === "update_subtask_status" || action.type === "add_subtask") {
-    const taskExists = tasks.some((task) => task.id === action.taskId);
-    if (!taskExists) return undefined;
+  if (action.type === "add_subtask") {
+    const task = findTask(tasks, action.taskId);
+    const subtask = isRecord(action.subtask) ? action.subtask : null;
+    const title = cleanText(subtask?.title, 160);
+    if (!task || !title) return undefined;
+    return {
+      type: "add_subtask",
+      label: "אישור וביצוע",
+      taskId: task.id,
+      subtask: {
+        title,
+        actionType: cleanOptionalText(subtask?.actionType, 80),
+      },
+    };
   }
 
-  return action;
+  if (action.type === "update_subtask_status") {
+    const task = findTask(tasks, action.taskId);
+    const subtaskNumber = Number(action.subtaskNumber);
+    const subtaskExists = task?.subtasks?.some((subtask) => subtask.number === subtaskNumber);
+    if (!task || !Number.isInteger(subtaskNumber) || !subtaskExists || !subtaskStatuses.has(action.status)) return undefined;
+    return {
+      type: "update_subtask_status",
+      label: "אישור וביצוע",
+      taskId: task.id,
+      subtaskNumber,
+      status: action.status,
+    };
+  }
+
+  if (action.type === "filter_tasks") {
+    const filter = isRecord(action.filter) ? action.filter : {};
+    const statusFilter = typeof filter.statusFilter === "string" && taskFilters.has(filter.statusFilter) ? filter.statusFilter : "active";
+    const prefixFilter = filter.prefixFilter === "P" || filter.prefixFilter === "W" || filter.prefixFilter === "all" ? filter.prefixFilter : "all";
+    return {
+      type: "filter_tasks",
+      label: "הצג משימות",
+      filter: {
+        query: cleanOptionalText(filter.query, 80),
+        statusFilter,
+        prefixFilter,
+        topicFilter: cleanOptionalText(filter.topicFilter, 80),
+        actionFilter: cleanOptionalText(filter.actionFilter, 80),
+      },
+    };
+  }
+
+  return undefined;
 }
 
 function sanitizeResponse(response: AssistantResponse, tasks: Task[], userMessage: string) {
@@ -280,8 +376,7 @@ export async function POST(request: Request) {
 
     if (!content) {
       return jsonResponse({
-        error: `לא הוגדר מנוע AI פעיל. ל-Gemini נדרש GEMINI_API_KEY, ואפשר להגדיר GEMINI_MODEL. ברירת המחדל היא gemini-3.6-flash. לחלופין, ל-Vercel AI Gateway נדרשים AI_GATEWAY_API_KEY ו-ASSISTANT_MODEL. משתנים גלויים: ${visibleEnvironmentKeys().join(", ") || "אין"}`,
-        visibleEnvironmentKeys: visibleEnvironmentKeys(),
+        error: "לא הוגדר מנוע AI פעיל בשרת. בדוק שהוגדר מפתח Gemini או Vercel AI Gateway בסביבת Production ובצע Redeploy.",
       }, 500);
     }
 
