@@ -24,10 +24,15 @@
   --waiting: #f59e0b;
   --shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
 }
-* { box-sizing: border-box; }
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  font-family: var(--font-app);
+}
 html { font-family: var(--font-app); }
 body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--font-app); }
-button, input, select, textarea, option { font-family: var(--font-app); font-size: inherit; }
+button, input, select, textarea, option { font-family: var(--font-app) !important; font-size: inherit; }
 button { cursor: pointer; }
 main { width: min(980px, calc(100% - 28px)); margin: 0 auto; padding: 28px 0 64px; }
 .kanban-main { width: min(1320px, calc(100% - 28px)); }
