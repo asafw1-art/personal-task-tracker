@@ -423,16 +423,27 @@ function subtaskProgressLabel(subtasks: TaskSubtask[] = []) {
 }
 
 function normalizeDraftSubtasks(subtasks: TaskSubtask[], parentId: string) {
+  const usedNumbers = new Set<number>();
+
   return subtasks
     .filter((subtask) => subtask.title.trim() || subtask.status === "cancelled")
-    .map((subtask) => ({
-      ...subtask,
-      id: createSubtaskId(parentId, subtask.number),
-      title: subtask.title.trim(),
-      actionType: subtask.actionType?.trim() || undefined,
-      createdAt: subtask.createdAt ?? nowIso(),
-      statusChangedAt: subtask.statusChangedAt ?? subtask.createdAt ?? nowIso(),
-    }))
+    .map((subtask) => {
+      let number = subtask.number;
+      if (!Number.isInteger(number) || number <= 0 || usedNumbers.has(number)) {
+        number = Math.max(0, ...usedNumbers) + 1;
+      }
+      usedNumbers.add(number);
+
+      return {
+        ...subtask,
+        id: createSubtaskId(parentId, number),
+        number,
+        title: subtask.title.trim(),
+        actionType: subtask.actionType?.trim() || undefined,
+        createdAt: subtask.createdAt ?? nowIso(),
+        statusChangedAt: subtask.statusChangedAt ?? subtask.createdAt ?? nowIso(),
+      };
+    })
     .sort((a, b) => a.number - b.number);
 }
 
@@ -494,7 +505,7 @@ function parseStoredTasks(raw: string | null, fallbackTasks: Task[]) {
     const imported = getImportTasks(parsed).map(normalizeImportedTask);
     if (imported.length === 0 && Array.isArray(parsed)) return [];
     if (imported.some((task) => !task)) return fallbackTasks;
-    return mergeUniqueTasks(imported as Task[]);
+    return normalizeTasksForStorage(imported as Task[]);
   } catch {
     return fallbackTasks;
   }
@@ -526,9 +537,10 @@ function subscribeTasks(listener: () => void) {
 }
 
 function writeTasks(nextTasks: Task[]) {
-  const raw = JSON.stringify(nextTasks);
+  const safeTasks = normalizeTasksForStorage(nextTasks);
+  const raw = JSON.stringify(safeTasks);
   cachedTasksRaw = raw;
-  cachedTasks = nextTasks;
+  cachedTasks = safeTasks;
   window.localStorage.setItem(activeTaskStorageKey, raw);
   taskStoreListeners.forEach((listener) => listener());
 }
@@ -648,6 +660,25 @@ function effectiveTaskStatus(status: TaskStatus, subtasks: TaskSubtask[] = []) {
 function reconcileTaskStatus(task: Task) {
   const status = effectiveTaskStatus(task.status, task.subtasks);
   return status === task.status ? task : { ...task, status, statusChangedAt: nowIso() };
+}
+
+function normalizeTaskForStorage(task: Task) {
+  const subtasks = normalizeDraftSubtasks(task.subtasks ?? [], task.id);
+  const normalizedTask = {
+    ...task,
+    title: task.title.trim(),
+    category: task.category.trim(),
+    actionType: task.actionType?.trim() || undefined,
+    notes: task.notes?.trim() || undefined,
+    dueDate: task.dueDate && /^\d{4}-\d{2}-\d{2}$/.test(task.dueDate) ? task.dueDate : undefined,
+    createdAt: task.createdAt,
+    subtasks,
+  };
+  return reconcileTaskStatus(normalizedTask);
+}
+
+function normalizeTasksForStorage(tasks: Task[]) {
+  return mergeUniqueTasks(tasks.map(normalizeTaskForStorage));
 }
 
 function sortTasks(tasks: Task[]) {
@@ -2067,6 +2098,7 @@ export default function Home() {
   function createTaskFromAssistant(action: Extract<AssistantProposedAction, { type: "create_task" }>) {
     const prefix = action.task.prefix ?? "P";
     const title = action.task.title.trim();
+    const dueDate = action.task.dueDate && action.task.dueDate >= todayIso() ? action.task.dueDate : undefined;
     if (!title) throw new Error("הפעולה לא כוללת שם משימה.");
 
     setTasks((current) => {
@@ -2083,7 +2115,7 @@ export default function Home() {
         actionType: action.task.actionType?.trim() || undefined,
         priority: action.task.priority ?? "normal",
         status: "open",
-        dueDate: action.task.dueDate || undefined,
+        dueDate,
         notes: action.task.notes?.trim() || undefined,
         createdAt,
         statusChangedAt,
@@ -2343,6 +2375,10 @@ export default function Home() {
     const incompleteSubtask = draft.subtasks.find((subtask) => subtask.status !== "cancelled" && !subtask.title.trim());
     if (incompleteSubtask) {
       setTaskEditorError("יש למלא שם לכל צעד טיפול פעיל, או לבטל אותו.");
+      return;
+    }
+    if (taskEditor.mode === "create" && draft.dueDate && draft.dueDate < todayIso()) {
+      setTaskEditorError("תאריך יעד למשימה חדשה לא יכול להיות בעבר.");
       return;
     }
 
