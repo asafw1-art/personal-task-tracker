@@ -18,6 +18,12 @@ function jsonResponse(body: unknown, status = 200) {
   return Response.json(body, { status });
 }
 
+function visibleEnvironmentKeys() {
+  return Object.keys(process.env)
+    .filter((key) => key.includes("AI") || key.includes("GATEWAY") || key.includes("ASSISTANT"))
+    .sort();
+}
+
 function compactTask(task: Task) {
   return {
     id: task.id,
@@ -83,8 +89,21 @@ export async function POST(request: Request) {
   try {
     await verifyUser(request);
 
-    const apiKey = process.env.AI_GATEWAY_API_KEY;
+    const apiKey = process.env.AI_GATEWAY_API_KEY ?? process.env.VERCEL_AI_GATEWAY_API_KEY;
     const model = process.env.ASSISTANT_MODEL;
+
+    if (!apiKey) {
+      return jsonResponse({
+        error: `AI_GATEWAY_API_KEY חסר בשרת. משתנים גלויים: ${visibleEnvironmentKeys().join(", ") || "אין"}`,
+        visibleEnvironmentKeys: visibleEnvironmentKeys(),
+      }, 500);
+    }
+    if (!model) {
+      return jsonResponse({
+        error: `ASSISTANT_MODEL חסר בשרת. משתנים גלויים: ${visibleEnvironmentKeys().join(", ") || "אין"}`,
+        visibleEnvironmentKeys: visibleEnvironmentKeys(),
+      }, 500);
+    }
 
     if (!apiKey) return jsonResponse({ error: "AI_GATEWAY_API_KEY חסר בשרת." }, 500);
     if (!model) return jsonResponse({ error: "ASSISTANT_MODEL חסר בשרת." }, 500);

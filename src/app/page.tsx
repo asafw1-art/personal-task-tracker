@@ -1683,7 +1683,12 @@ export default function Home() {
         }),
       });
 
-      const data = await response.json() as { reply?: string; proposedAction?: AssistantProposedAction; error?: string };
+      const data = await response.json() as {
+        reply?: string;
+        proposedAction?: AssistantProposedAction;
+        error?: string;
+        visibleEnvironmentKeys?: string[];
+      };
       if (!response.ok || data.error) throw new Error(data.error ?? "העוזר החזיר שגיאה.");
 
       const assistantMessage = await addAssistantMessage(
