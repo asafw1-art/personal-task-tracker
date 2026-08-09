@@ -33,6 +33,12 @@ type GatewayResponse = {
   }[];
 };
 
+type AssistantProviderResult = {
+  content?: string;
+  provider?: string;
+  error?: string;
+};
+
 const MAX_ASSISTANT_MESSAGE_LENGTH = 1_500;
 const MAX_ASSISTANT_TASKS = 160;
 const MAX_ASSISTANT_RECENT_MESSAGES = 8;
@@ -48,6 +54,12 @@ class HttpError extends Error {
   }
 }
 
+class AiProviderError extends Error {
+  constructor(message: string, readonly provider: string) {
+    super(message);
+  }
+}
+
 function jsonResponse(body: unknown, status = 200) {
   return Response.json(body, {
     status,
@@ -58,8 +70,17 @@ function jsonResponse(body: unknown, status = 200) {
 }
 
 function normalizeGeminiModel(model: string | undefined) {
-  if (!model || model === "gemini-2.5-flash" || model === "gemini-3.5-flash") return "gemini-3.6-flash";
-  return model;
+  const normalized = model?.trim().replace(/^models\//, "");
+  if (!normalized || normalized === "3.6") return "gemini-3.6-flash";
+  if (normalized === "3.5") return "gemini-3.5-flash";
+  if (
+    normalized === "gemini-2.0-flash" ||
+    normalized === "gemini-2.5-flash" ||
+    normalized === "gemini-3-flash-preview"
+  ) {
+    return "gemini-3.6-flash";
+  }
+  return normalized;
 }
 
 function compactTask(task: Task) {
@@ -93,6 +114,97 @@ function buildTaskSnapshot(tasks: Task[]) {
     active: active.slice(0, 80).map(compactTask),
     recentCompleted: completed.map(compactTask),
   };
+}
+
+function taskDisplay(task: Task) {
+  return `${task.id} - ${task.title}`;
+}
+
+function isTaskActive(task: Task) {
+  return !["done", "cancelled"].includes(task.status);
+}
+
+function isTaskOverdue(task: Task, today: string) {
+  const dueDate = task.dueDate;
+  if (!dueDate) return false;
+  return isTaskActive(task) && dueDate < today;
+}
+
+function countOpenSubtasks(task: Task) {
+  return (task.subtasks ?? []).filter((subtask) => subtask.status === "open").length;
+}
+
+function listPreview(tasks: Task[]) {
+  if (tasks.length === 0) return "";
+  return tasks.slice(0, 5).map(taskDisplay).join("\n");
+}
+
+function localAssistantResponse(message: string, tasks: Task[]): AssistantResponse | null {
+  const normalized = message.toLowerCase();
+  const today = new Date().toISOString().slice(0, 10);
+
+  if (/צ[׳']?ט|שיח|שיחה|שיחות|chat|conversation|history|היסטור/i.test(message) && /מחק|מחיקה|נקה|אפס|delete|clear|reset/i.test(message)) {
+    return {
+      reply: "אפשר למחוק את שיחת ה-AI הפעילה. היא תוסתר עכשיו ותישמר לשחזור אישי למשך 30 יום.",
+      proposedAction: { type: "delete_assistant_history", label: "אישור והעברה לשחזור" },
+    };
+  }
+
+  if (/כל המשימות|איפוס|reset all|delete all|מחק הכל|לבטל הכל/i.test(message)) {
+    return {
+      reply: "מחיקה, ביטול או איפוס של כל המשימות אפשריים רק דרך ההגדרות, ולא דרך צ׳ט ה-AI.",
+    };
+  }
+
+  if (/באיחור|איחור|overdue/i.test(normalized)) {
+    const overdue = tasks.filter((task) => isTaskOverdue(task, today));
+    return {
+      reply: overdue.length
+        ? `יש ${overdue.length} משימות באיחור:\n${listPreview(overdue)}`
+        : "אין כרגע משימות באיחור.",
+      proposedAction: { type: "filter_tasks", label: "הצג באיחור", filter: { statusFilter: "overdue", prefixFilter: "all" } },
+    };
+  }
+
+  if (/צעדי טיפול|צעדים|תתי|subtasks/i.test(normalized) && /פתוח|פתוחים|open/i.test(normalized)) {
+    const withOpenSubtasks = tasks.filter((task) => isTaskActive(task) && countOpenSubtasks(task) > 0);
+    const openSubtasks = withOpenSubtasks.reduce((sum, task) => sum + countOpenSubtasks(task), 0);
+    return {
+      reply: openSubtasks
+        ? `יש ${openSubtasks} צעדי טיפול פתוחים בתוך ${withOpenSubtasks.length} משימות:\n${listPreview(withOpenSubtasks)}`
+        : "אין כרגע צעדי טיפול פתוחים.",
+      proposedAction: { type: "filter_tasks", label: "הצג צעדים פתוחים", filter: { statusFilter: "subtasks_open", prefixFilter: "all" } },
+    };
+  }
+
+  if (/ממתינ|waiting/i.test(normalized)) {
+    const waiting = tasks.filter((task) => task.status === "waiting");
+    return {
+      reply: waiting.length ? `יש ${waiting.length} משימות ממתינות:\n${listPreview(waiting)}` : "אין כרגע משימות ממתינות.",
+      proposedAction: { type: "filter_tasks", label: "הצג ממתינות", filter: { statusFilter: "waiting", prefixFilter: "all" } },
+    };
+  }
+
+  if (/פתוח|פתוחות|פעילות|active|open/i.test(normalized)) {
+    const active = tasks.filter(isTaskActive);
+    return {
+      reply: active.length ? `יש ${active.length} משימות פעילות:\n${listPreview(active)}` : "אין כרגע משימות פעילות.",
+      proposedAction: { type: "filter_tasks", label: "הצג פעילות", filter: { statusFilter: "active", prefixFilter: "all" } },
+    };
+  }
+
+  if (/כמה|סיכום|מצב|תמונה|status|summary/i.test(normalized)) {
+    const active = tasks.filter(isTaskActive).length;
+    const overdue = tasks.filter((task) => isTaskOverdue(task, today)).length;
+    const waiting = tasks.filter((task) => task.status === "waiting").length;
+    const done = tasks.filter((task) => task.status === "done").length;
+    const openSubtasks = tasks.reduce((sum, task) => sum + countOpenSubtasks(task), 0);
+    return {
+      reply: `תמונת מצב קצרה:\n${active} משימות פעילות\n${overdue} משימות באיחור\n${waiting} משימות ממתינות\n${openSubtasks} צעדי טיפול פתוחים\n${done} משימות הושלמו`,
+    };
+  }
+
+  return null;
 }
 
 function buildSystemPrompt() {
@@ -361,10 +473,10 @@ async function callGemini(prompt: string) {
   });
 
   const data = await response.json() as GeminiResponse;
-  if (!response.ok) throw new Error(`Gemini החזיר שגיאה: ${data.error?.message ?? JSON.stringify(data)}`);
+  if (!response.ok) throw new AiProviderError(data.error?.message ?? "Gemini request failed", "Gemini");
 
   const content = data.candidates?.[0]?.content?.parts?.map((part) => part.text ?? "").join("").trim();
-  if (!content) throw new Error("לא התקבלה תשובה מ-Gemini.");
+  if (!content) throw new AiProviderError("No Gemini response content", "Gemini");
   return content;
 }
 
@@ -400,13 +512,45 @@ async function callVercelGateway(systemPrompt: string, userPayload: unknown, rec
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`AI Gateway החזיר שגיאה: ${errorText}`);
+    throw new AiProviderError(errorText, "AI Gateway");
   }
 
   const data = await response.json() as GatewayResponse;
   const content = data.choices?.[0]?.message?.content;
-  if (!content) throw new Error("לא התקבלה תשובה מהמודל.");
+  if (!content) throw new AiProviderError("No gateway response content", "AI Gateway");
   return content;
+}
+
+function errorMessageForLog(error: unknown) {
+  return error instanceof Error ? error.message : "Unknown provider error";
+}
+
+async function callAssistantProvider(systemPrompt: string, geminiPrompt: string, userPayload: unknown, recentMessages: AssistantRequestBody["recentMessages"]): Promise<AssistantProviderResult> {
+  const errors: string[] = [];
+
+  try {
+    const content = await callGemini(geminiPrompt);
+    if (content) return { content, provider: "Gemini" };
+  } catch (error) {
+    errors.push(error instanceof AiProviderError ? `${error.provider}: ${error.message}` : errorMessageForLog(error));
+  }
+
+  try {
+    const content = await callVercelGateway(systemPrompt, userPayload, recentMessages);
+    if (content) return { content, provider: "AI Gateway" };
+  } catch (error) {
+    errors.push(error instanceof AiProviderError ? `${error.provider}: ${error.message}` : errorMessageForLog(error));
+  }
+
+  const error = errors.join(" | ") || "No AI provider configured";
+  console.error("Assistant provider unavailable", error);
+  return {
+    content: JSON.stringify({
+      reply: "העוזר החכם לא זמין כרגע. אפשר עדיין לשאול שאלות פשוטות כמו: מה המשימות הפתוחות שלי, מה באיחור, או כמה צעדי טיפול פתוחים יש.",
+      fallback: true,
+    }),
+    error,
+  };
 }
 
 export async function POST(request: Request) {
@@ -424,6 +568,10 @@ export async function POST(request: Request) {
       taskSnapshot: buildTaskSnapshot(body.tasks),
       taxonomy: body.taxonomy,
     };
+
+    const localResponse = localAssistantResponse(userMessage, body.tasks);
+    if (localResponse) return jsonResponse(sanitizeResponse(localResponse, body.tasks, userMessage));
+
     const geminiPrompt = [
       systemPrompt,
       "הודעות אחרונות:",
@@ -432,9 +580,8 @@ export async function POST(request: Request) {
       JSON.stringify(userPayload),
     ].join("\n\n");
 
-    const content =
-      await callGemini(geminiPrompt) ??
-      await callVercelGateway(systemPrompt, userPayload, body.recentMessages);
+    const providerResult = await callAssistantProvider(systemPrompt, geminiPrompt, userPayload, body.recentMessages);
+    const content = providerResult.content;
 
     if (!content) {
       return jsonResponse({
