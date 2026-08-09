@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ChangeEvent, Dispatch, FormEvent, SetStateAction } from "react";
 import type { User } from "@supabase/supabase-js";
 import type { AssistantMessage, AssistantProposedAction } from "@/lib/assistant";
@@ -560,6 +560,7 @@ export default function Home() {
   const [assistantInput, setAssistantInput] = useState("");
   const [assistantStatus, setAssistantStatus] = useState("הצ׳ט ייטען אחרי התחברות לענן.");
   const [assistantIsSending, setAssistantIsSending] = useState(false);
+  const assistantMessagesRef = useRef<HTMLDivElement | null>(null);
   const [cloudStatus, setCloudStatus] = useState(
     isSupabaseConfigured ? "בודק חיבור ל-Supabase..." : "Supabase עדיין לא מוגדר. עובדים במצב מקומי."
   );
@@ -609,6 +610,16 @@ export default function Home() {
     if (!themeLoaded) return;
     window.localStorage.setItem(THEME_STORAGE_KEY, theme);
   }, [theme, themeLoaded]);
+
+  useEffect(() => {
+    if (!isAssistantOpen) return;
+    const timeoutId = window.setTimeout(() => {
+      const messagesElement = assistantMessagesRef.current;
+      if (!messagesElement) return;
+      messagesElement.scrollTop = messagesElement.scrollHeight;
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
+  }, [assistantMessages.length, isAssistantOpen]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -2603,7 +2614,7 @@ export default function Home() {
                 <button className="icon-button" onClick={() => setIsAssistantOpen(false)} aria-label="סגירת צ׳ט AI">×</button>
               </div>
 
-              <div className="assistant-messages" aria-live="polite">
+              <div className="assistant-messages" aria-live="polite" ref={assistantMessagesRef}>
                 {assistantMessages.length === 0 ? (
                   <div className="assistant-empty">
                     <strong>אפשר להתחיל בשאלה קצרה</strong>
