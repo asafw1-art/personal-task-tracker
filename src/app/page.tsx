@@ -14,6 +14,7 @@ import { fetchCloudTaxonomy, replaceCloudTaxonomy } from "@/lib/supabaseTaxonomy
 const STORAGE_KEY = "asaf-task-tracker-v1";
 const TAXONOMY_STORAGE_KEY = "asaf-task-tracker-taxonomy-v1";
 const NOTIFICATION_PREFERENCES_STORAGE_KEY = "asaf-task-tracker-notification-preferences-v1";
+const THEME_STORAGE_KEY = "asaf-task-tracker-theme-v1";
 
 const statusLabels: Record<TaskStatus, string> = {
   open: "פתוחה",
@@ -90,7 +91,8 @@ type TaskFilter = TaskStatus | "active" | "all" | "overdue" | "today" | "week" |
 type AnalyticsRange = "week" | "month" | "all";
 type MainView = "tasks" | "stats" | "kanban";
 type TaxonomyMode = "topics" | "actions";
-type SettingsTab = "taxonomy" | "notifications" | "sync";
+type SettingsTab = "appearance" | "taxonomy" | "notifications" | "sync";
+type AppTheme = "light" | "dark";
 type NotificationPreferenceKey = "overdue" | "openSubtasks" | "noWeeklyClosures" | "waiting" | "dueSoon";
 type EditingTaxonomyItem =
   | { type: "topic"; prefix: TaskPrefix; name: string; value: string }
@@ -511,6 +513,10 @@ function isEmptyTaxonomy(taxonomy: TaskTaxonomy) {
   return taxonomy.topics.P.length === 0 && taxonomy.topics.W.length === 0 && taxonomy.actions.length === 0;
 }
 
+function parseStoredTheme(value: string | null): AppTheme {
+  return value === "dark" ? "dark" : "light";
+}
+
 export default function Home() {
   const [tasks, setTasks] = usePersistentTasks();
   const [query, setQuery] = useState("");
@@ -522,6 +528,8 @@ export default function Home() {
   const [analyticsRange, setAnalyticsRange] = useState<AnalyticsRange>("week");
   const [taxonomyMode, setTaxonomyMode] = useState<TaxonomyMode>("topics");
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("sync");
+  const [theme, setTheme] = useState<AppTheme>("light");
+  const [themeLoaded, setThemeLoaded] = useState(false);
   const [showClosedKanbanTasks, setShowClosedKanbanTasks] = useState(false);
   const [taxonomy, setTaxonomy] = useState<TaskTaxonomy>(defaultTaxonomy);
   const [taxonomyLoaded, setTaxonomyLoaded] = useState(false);
@@ -587,6 +595,20 @@ export default function Home() {
     if (!notificationPreferencesLoaded) return;
     window.localStorage.setItem(NOTIFICATION_PREFERENCES_STORAGE_KEY, JSON.stringify(notificationPreferences));
   }, [notificationPreferences, notificationPreferencesLoaded]);
+
+  useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setTheme(parseStoredTheme(window.localStorage.getItem(THEME_STORAGE_KEY)));
+      setThemeLoaded(true);
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
+  }, []);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    if (!themeLoaded) return;
+    window.localStorage.setItem(THEME_STORAGE_KEY, theme);
+  }, [theme, themeLoaded]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -2607,12 +2629,15 @@ export default function Home() {
             <div className="drawer-header">
               <div>
                 <p className="eyebrow">הגדרות</p>
-                <h2>{settingsTab === "taxonomy" ? "נושאים ופעולות" : settingsTab === "notifications" ? "התראות" : "חיבור, סנכרון וגיבוי"}</h2>
+                <h2>{settingsTab === "appearance" ? "תצוגה" : settingsTab === "taxonomy" ? "נושאים ופעולות" : settingsTab === "notifications" ? "התראות" : "חיבור, סנכרון וגיבוי"}</h2>
               </div>
               <button className="icon-button" onClick={() => setIsSettingsOpen(false)} aria-label="סגירת הגדרות">×</button>
             </div>
 
             <div className="settings-tabs" aria-label="אזורי הגדרות">
+              <button className={settingsTab === "appearance" ? "active" : ""} onClick={() => setSettingsTab("appearance")}>
+                תצוגה
+              </button>
               <button className={settingsTab === "taxonomy" ? "active" : ""} onClick={() => setSettingsTab("taxonomy")}>
                 נושאים ופעולות
               </button>
@@ -2625,7 +2650,40 @@ export default function Home() {
             </div>
 
             <section className="data-view" aria-label="גיבוי ושחזור נתונים">
-              {settingsTab === "taxonomy" ? (
+              {settingsTab === "appearance" ? (
+              <section className="panel appearance-panel">
+                <div className="panel-heading">
+                  <div>
+                    <h2>תצוגה</h2>
+                    <span>בחירת מצב צבעים לאפליקציה. הבחירה נשמרת במכשיר הזה.</span>
+                  </div>
+                </div>
+                <div className="theme-options" role="radiogroup" aria-label="בחירת מצב תצוגה">
+                  <button
+                    type="button"
+                    className={theme === "light" ? "active" : ""}
+                    onClick={() => setTheme("light")}
+                    role="radio"
+                    aria-checked={theme === "light"}
+                  >
+                    <span aria-hidden="true">☀</span>
+                    <strong>מצב בהיר</strong>
+                    <small>רקע בהיר וניגודיות רגילה לעבודה ביום.</small>
+                  </button>
+                  <button
+                    type="button"
+                    className={theme === "dark" ? "active" : ""}
+                    onClick={() => setTheme("dark")}
+                    role="radio"
+                    aria-checked={theme === "dark"}
+                  >
+                    <span aria-hidden="true">◐</span>
+                    <strong>מצב כהה</strong>
+                    <small>רקע כהה ונעים יותר לעבודה בלילה.</small>
+                  </button>
+                </div>
+              </section>
+              ) : settingsTab === "taxonomy" ? (
               <section className="panel taxonomy-panel">
                 <div className="panel-heading">
                   <div>

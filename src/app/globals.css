@@ -10,6 +10,19 @@
   --waiting: #b45309;
   --shadow: 0 10px 30px rgba(23, 32, 51, 0.07);
 }
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0f172a;
+  --surface: #172033;
+  --text: #f8fafc;
+  --muted: #b6c2d7;
+  --border: #334155;
+  --accent: #60a5fa;
+  --accent-dark: #93c5fd;
+  --success: #4ade80;
+  --waiting: #f59e0b;
+  --shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
+}
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--text); font-family: Arial, "Noto Sans Hebrew", sans-serif; }
 button, input, select, textarea { font: inherit; }
@@ -111,7 +124,7 @@ textarea { resize: vertical; min-height: 86px; }
 .drawer-header h2 { margin: 0; }
 .icon-button { align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; color: var(--muted); display: flex; font-size: 1.35rem; font-weight: 700; height: 40px; justify-content: center; line-height: 1; width: 40px; }
 .icon-button:hover { background: #f8fafc; color: var(--text); }
-.settings-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; background: #e9eef7; border: 1px solid var(--border); border-radius: 12px; margin-bottom: 14px; padding: 4px; }
+.settings-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; background: #e9eef7; border: 1px solid var(--border); border-radius: 12px; margin-bottom: 14px; padding: 4px; }
 .settings-tabs button { background: transparent; border: 0; border-radius: 9px; color: var(--muted); font-weight: 700; padding: 10px 16px; }
 .settings-tabs button.active { background: var(--surface); box-shadow: 0 4px 12px rgba(23, 32, 51, 0.08); color: var(--accent-dark); }
 .task-editor-form { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; padding: 16px; }
@@ -149,7 +162,13 @@ textarea { resize: vertical; min-height: 86px; }
 .subtask-cancel:hover { background: #fef2f2; color: #991b1b; }
 .subtask-cancel:disabled { cursor: default; opacity: .55; }
 .taxonomy-panel { display: grid; gap: 14px; padding: 16px; }
-.notification-settings-panel { display: grid; gap: 14px; padding: 16px; }
+.appearance-panel, .notification-settings-panel { display: grid; gap: 14px; padding: 16px; }
+.theme-options { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.theme-options button { align-items: start; background: #f8fafc; border: 1px solid var(--border); border-radius: 12px; color: var(--text); display: grid; gap: 6px; padding: 14px; text-align: right; }
+.theme-options button.active { background: #eef4ff; border-color: #bfdbfe; box-shadow: inset 0 0 0 2px rgba(37, 99, 235, .18); }
+.theme-options button > span { align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: 999px; color: var(--accent-dark); display: inline-flex; font-size: 1.1rem; height: 34px; justify-content: center; width: 34px; }
+.theme-options strong { color: var(--text); }
+.theme-options small { color: var(--muted); line-height: 1.45; }
 .notification-settings-list { display: grid; gap: 10px; }
 .notification-setting { align-items: center; background: #f8fafc; border: 1px solid var(--border); border-radius: 12px; cursor: pointer; display: grid; gap: 12px; grid-template-columns: auto 1fr; padding: 12px; }
 .notification-setting:hover { border-color: #bfdbfe; }
@@ -309,6 +328,99 @@ textarea { resize: vertical; min-height: 86px; }
 .import-message { background: #eef7f0; border: 1px solid #c8e6d0; border-radius: 12px; color: var(--success); padding: 12px 14px; }
 .danger-panel { border-color: #fecaca; }
 .danger-panel button { border: 1px solid #fecaca; border-radius: 10px; background: #fff; color: #b91c1c; font-weight: 700; padding: 11px 14px; white-space: nowrap; }
+
+[data-theme="dark"] .app-notification,
+[data-theme="dark"] .assistant-chat,
+[data-theme="dark"] .empty,
+[data-theme="dark"] .kanban-card,
+[data-theme="dark"] .kanban-toolbar,
+[data-theme="dark"] .metric,
+[data-theme="dark"] .panel,
+[data-theme="dark"] .stats button,
+[data-theme="dark"] .task-card,
+[data-theme="dark"] .task-editor-form {
+  background: var(--surface);
+}
+[data-theme="dark"] .app-notification button,
+[data-theme="dark"] .check,
+[data-theme="dark"] .cloud-actions .secondary-action,
+[data-theme="dark"] .danger-panel button,
+[data-theme="dark"] .drawer-actions .secondary-action,
+[data-theme="dark"] .icon-button,
+[data-theme="dark"] .insight-card button,
+[data-theme="dark"] .secondary,
+[data-theme="dark"] .taxonomy-edit-form .secondary-action,
+[data-theme="dark"] input,
+[data-theme="dark"] select,
+[data-theme="dark"] textarea {
+  background: #111827;
+  color: var(--text);
+}
+[data-theme="dark"] .kanban-column,
+[data-theme="dark"] .kanban-column-header,
+[data-theme="dark"] .range-tabs,
+[data-theme="dark"] .settings-tabs,
+[data-theme="dark"] .view-tabs {
+  background: #111827;
+}
+[data-theme="dark"] .assistant-message.role-user,
+[data-theme="dark"] .attention-tag,
+[data-theme="dark"] .auth-status,
+[data-theme="dark"] .cloud-panel code,
+[data-theme="dark"] .quick-filters button.active,
+[data-theme="dark"] .subtask-add-inline,
+[data-theme="dark"] .subtasks-toggle,
+[data-theme="dark"] .sync-counters span,
+[data-theme="dark"] .task-id,
+[data-theme="dark"] .taxonomy-chip,
+[data-theme="dark"] .taxonomy-status,
+[data-theme="dark"] .theme-options button.active {
+  background: #1e3a5f;
+  border-color: #315f95;
+  color: var(--accent-dark);
+}
+[data-theme="dark"] .assistant-empty,
+[data-theme="dark"] .assistant-message.role-assistant,
+[data-theme="dark"] .chart-empty-state,
+[data-theme="dark"] .insight-card,
+[data-theme="dark"] .notification-setting,
+[data-theme="dark"] .subtask-load-row,
+[data-theme="dark"] .subtask-row.status-cancelled,
+[data-theme="dark"] .subtasks-preview-item,
+[data-theme="dark"] .subtasks-preview-item.status-cancelled,
+[data-theme="dark"] .taxonomy-edit-form,
+[data-theme="dark"] .theme-options button {
+  background: #111827;
+}
+[data-theme="dark"] .assistant-action-card {
+  background: #0f172a;
+  border-color: #315f95;
+}
+[data-theme="dark"] .bar-track,
+[data-theme="dark"] .vertical-track {
+  background: #24324a;
+}
+[data-theme="dark"] .kanban-empty {
+  background: rgba(15, 23, 42, .55);
+}
+[data-theme="dark"] .subtask-row.status-done,
+[data-theme="dark"] .subtasks-preview-item.status-done {
+  background: #12351f;
+  border-color: #166534;
+}
+[data-theme="dark"] .current-device,
+[data-theme="dark"] .import-message {
+  background: #12351f;
+  border-color: #166534;
+}
+[data-theme="dark"] .editor-error {
+  background: #3b1010;
+  border-color: #7f1d1d;
+  color: #fecaca;
+}
+[data-theme="dark"] .modal-backdrop {
+  background: rgba(2, 6, 23, .72);
+}
 @media (max-width: 700px) {
   main { width: min(100% - 20px, 980px); padding: 18px 0 86px; }
   .hero { align-items: stretch; flex-direction: column; }
