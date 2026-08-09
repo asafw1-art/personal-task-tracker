@@ -33,8 +33,28 @@ type GatewayResponse = {
   }[];
 };
 
+const MAX_ASSISTANT_MESSAGE_LENGTH = 1_500;
+const MAX_ASSISTANT_TASKS = 160;
+const MAX_ASSISTANT_RECENT_MESSAGES = 8;
+const MAX_ASSISTANT_PAYLOAD_BYTES = 120_000;
+const ASSISTANT_RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
+const ASSISTANT_RATE_LIMIT_MAX_REQUESTS = 25;
+
+const assistantRateLimits = new Map<string, { count: number; resetAt: number }>();
+
+class HttpError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
+}
+
 function jsonResponse(body: unknown, status = 200) {
-  return Response.json(body, { status });
+  return Response.json(body, {
+    status,
+    headers: {
+      "Cache-Control": "no-store",
+    },
+  });
 }
 
 function normalizeGeminiModel(model: string | undefined) {
@@ -265,13 +285,54 @@ async function verifyUser(request: Request) {
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
   const token = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
 
-  if (!supabaseUrl || !supabaseKey) throw new Error("Supabase is not configured");
-  if (!token) throw new Error("Missing session token");
+  if (!supabaseUrl || !supabaseKey) throw new HttpError("Supabase is not configured", 500);
+  if (!token) throw new HttpError("Missing session token", 401);
 
   const client = createClient(supabaseUrl, supabaseKey);
   const { data, error } = await client.auth.getUser(token);
-  if (error || !data.user) throw new Error("Invalid session token");
+  if (error || !data.user) throw new HttpError("Invalid session token", 401);
   return data.user;
+}
+
+function checkRequestSize(request: Request) {
+  const contentLength = Number(request.headers.get("content-length") ?? 0);
+  if (contentLength > MAX_ASSISTANT_PAYLOAD_BYTES) {
+    throw new HttpError("הבקשה גדולה מדי. נסה לשלוח הודעה קצרה יותר.", 413);
+  }
+}
+
+function checkRateLimit(userId: string) {
+  const now = Date.now();
+  const current = assistantRateLimits.get(userId);
+
+  if (!current || current.resetAt <= now) {
+    assistantRateLimits.set(userId, { count: 1, resetAt: now + ASSISTANT_RATE_LIMIT_WINDOW_MS });
+    return;
+  }
+
+  if (current.count >= ASSISTANT_RATE_LIMIT_MAX_REQUESTS) {
+    const seconds = Math.max(1, Math.ceil((current.resetAt - now) / 1000));
+    throw new HttpError(`יותר מדי בקשות לצ׳ט. נסה שוב בעוד ${seconds} שניות.`, 429);
+  }
+
+  current.count += 1;
+}
+
+function normalizeAssistantRequestBody(body: AssistantRequestBody): Required<AssistantRequestBody> {
+  const message = body.message?.trim() ?? "";
+  if (!message) throw new HttpError("חסרה הודעת משתמש.", 400);
+  if (message.length > MAX_ASSISTANT_MESSAGE_LENGTH) {
+    throw new HttpError("ההודעה ארוכה מדי. נסה לקצר אותה.", 400);
+  }
+
+  return {
+    message,
+    tasks: Array.isArray(body.tasks) ? body.tasks.slice(0, MAX_ASSISTANT_TASKS) : [],
+    taxonomy: body.taxonomy ?? {},
+    recentMessages: Array.isArray(body.recentMessages)
+      ? body.recentMessages.slice(-MAX_ASSISTANT_RECENT_MESSAGES)
+      : [],
+  };
 }
 
 async function callGemini(prompt: string) {
@@ -350,22 +411,23 @@ async function callVercelGateway(systemPrompt: string, userPayload: unknown, rec
 
 export async function POST(request: Request) {
   try {
-    await verifyUser(request);
+    checkRequestSize(request);
+    const user = await verifyUser(request);
+    checkRateLimit(user.id);
 
-    const body = await request.json() as AssistantRequestBody;
-    const userMessage = body.message?.trim();
-    if (!userMessage) return jsonResponse({ error: "חסרה הודעת משתמש." }, 400);
+    const body = normalizeAssistantRequestBody(await request.json() as AssistantRequestBody);
+    const userMessage = body.message;
 
     const systemPrompt = buildSystemPrompt();
     const userPayload = {
       userMessage,
-      taskSnapshot: buildTaskSnapshot(body.tasks ?? []),
-      taxonomy: body.taxonomy ?? {},
+      taskSnapshot: buildTaskSnapshot(body.tasks),
+      taxonomy: body.taxonomy,
     };
     const geminiPrompt = [
       systemPrompt,
       "הודעות אחרונות:",
-      JSON.stringify((body.recentMessages ?? []).slice(-8)),
+      JSON.stringify(body.recentMessages),
       "נתוני הבקשה:",
       JSON.stringify(userPayload),
     ].join("\n\n");
@@ -380,8 +442,9 @@ export async function POST(request: Request) {
       }, 500);
     }
 
-    return jsonResponse(sanitizeResponse(extractJson(content), body.tasks ?? [], userMessage));
+    return jsonResponse(sanitizeResponse(extractJson(content), body.tasks, userMessage));
   } catch (error) {
-    return jsonResponse({ error: error instanceof Error ? error.message : "שגיאה לא ידועה בצ׳ט." }, 500);
+    const status = error instanceof HttpError ? error.status : 500;
+    return jsonResponse({ error: error instanceof Error ? error.message : "שגיאה לא ידועה בצ׳ט." }, status);
   }
 }

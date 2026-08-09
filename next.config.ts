@@ -12,8 +12,26 @@ const nextConfig: NextConfig = {
             value: "frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
           },
           {
+            key: "Content-Security-Policy-Report-Only",
+            value: [
+              "default-src 'self'",
+              "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+              "style-src 'self' 'unsafe-inline'",
+              "img-src 'self' data: blob:",
+              "font-src 'self' data:",
+              "connect-src 'self' https://*.supabase.co wss://*.supabase.co https://generativelanguage.googleapis.com https://ai-gateway.vercel.sh",
+              "base-uri 'self'",
+              "form-action 'self'",
+              "frame-ancestors 'none'",
+            ].join("; "),
+          },
+          {
             key: "Referrer-Policy",
             value: "strict-origin-when-cross-origin",
+          },
+          {
+            key: "X-DNS-Prefetch-Control",
+            value: "off",
           },
           {
             key: "X-Content-Type-Options",
@@ -22,6 +40,10 @@ const nextConfig: NextConfig = {
           {
             key: "X-Frame-Options",
             value: "DENY",
+          },
+          {
+            key: "Cross-Origin-Opener-Policy",
+            value: "same-origin",
           },
           {
             key: "Permissions-Policy",
