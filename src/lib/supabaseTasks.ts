@@ -199,7 +199,7 @@ export async function saveCloudTasks(tasks: Task[], user: User) {
 }
 
 function isOptionalColumnError(error: unknown) {
-  return ["subtasks", "status_changed_at", "action_type", "focused"].some((text) => errorMessageMentions(error, text));
+  return ["subtasks", "status_changed_at", "action_type"].some((text) => errorMessageMentions(error, text));
 }
 
 function errorMessageMentions(error: unknown, text: string) {

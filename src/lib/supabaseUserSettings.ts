@@ -23,6 +23,10 @@ function isMissingSettingsTable(error: unknown) {
   return message.includes("user_settings") || message.includes("schema cache");
 }
 
+function missingSettingsTableError() {
+  return new Error("חסרה טבלת user_settings בענן. יש להריץ ב-Supabase את supabase/add-focus-and-user-settings.sql.");
+}
+
 export async function fetchUserSettings(user: User): Promise<UserSettings> {
   const client = requireSupabase();
   const { data, error } = await client
@@ -32,7 +36,7 @@ export async function fetchUserSettings(user: User): Promise<UserSettings> {
     .maybeSingle();
 
   if (error) {
-    if (isMissingSettingsTable(error)) return {};
+    if (isMissingSettingsTable(error)) throw missingSettingsTableError();
     throw error;
   }
 
@@ -51,7 +55,7 @@ export async function saveUserSettings(user: User, settings: UserSettings) {
     }, { onConflict: "user_id" });
 
   if (error) {
-    if (isMissingSettingsTable(error)) return;
+    if (isMissingSettingsTable(error)) throw missingSettingsTableError();
     throw error;
   }
 }
