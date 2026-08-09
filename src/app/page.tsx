@@ -18,6 +18,7 @@ const NOTIFICATION_PREFERENCES_STORAGE_KEY = "asaf-task-tracker-notification-pre
 const ANALYTICS_PREFERENCES_STORAGE_KEY = "asaf-task-tracker-analytics-preferences-v1";
 const USER_SETTINGS_STORAGE_KEY = "asaf-task-tracker-user-settings-v1";
 const THEME_STORAGE_KEY = "asaf-task-tracker-theme-v1";
+const FOCUSED_TASKS_STORAGE_KEY = "asaf-task-tracker-focused-tasks-v1";
 const DEFAULT_STUCK_THRESHOLD_DAYS = 21;
 
 const statusLabels: Record<TaskStatus, string> = {
@@ -351,10 +352,14 @@ function mergeUniqueTasks(tasks: Task[]) {
 
   tasks.forEach((task) => {
     const existing = merged.get(task.id);
+    const focused = existing?.focused === true || task.focused === true
+      ? true
+      : task.focused ?? existing?.focused;
+
     merged.set(task.id, {
       ...existing,
       ...task,
-      focused: task.focused ?? existing?.focused,
+      focused,
     });
   });
 
@@ -455,6 +460,31 @@ const taskStoreListeners = new Set<() => void>();
 
 function userTaskStorageKey(userId: string) {
   return `${STORAGE_KEY}:${userId}`;
+}
+
+function userFocusedTasksStorageKey(userId: string) {
+  return `${FOCUSED_TASKS_STORAGE_KEY}:${userId}`;
+}
+
+function readLocalFocusedTaskIds(userId: string) {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(userFocusedTasksStorageKey(userId)) ?? "[]") as unknown;
+    if (!Array.isArray(parsed)) return new Set<string>();
+    return new Set(parsed.filter((id): id is string => typeof id === "string"));
+  } catch {
+    return new Set<string>();
+  }
+}
+
+function writeLocalFocusedTaskIds(userId: string, tasks: Task[]) {
+  const focusedIds = tasks.filter((task) => task.focused).map((task) => task.id);
+  window.localStorage.setItem(userFocusedTasksStorageKey(userId), JSON.stringify(focusedIds));
+}
+
+function applyLocalFocusedTasks(tasks: Task[], userId: string) {
+  const focusedIds = readLocalFocusedTaskIds(userId);
+  if (focusedIds.size === 0) return tasks;
+  return tasks.map((task) => focusedIds.has(task.id) ? { ...task, focused: true } : task);
 }
 
 function parseStoredTasks(raw: string | null, fallbackTasks: Task[]) {
@@ -682,9 +712,10 @@ export default function Home() {
 
   const mergeCloudTasksIntoLocal = useCallback((cloudTasks: Task[]) => {
     const current = getTasksSnapshot();
-    const merged = mergeUniqueTasks([...current, ...cloudTasks]);
+    const mergedTasks = mergeUniqueTasks([...current, ...cloudTasks]);
+    const merged = cloudUser ? applyLocalFocusedTasks(mergedTasks, cloudUser.id) : mergedTasks;
     if (JSON.stringify(merged) !== JSON.stringify(current)) setTasks(merged);
-  }, [setTasks]);
+  }, [cloudUser, setTasks]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -897,7 +928,7 @@ export default function Home() {
       .then((cloudTasks) => {
         if (cancelled) return;
         if (cloudTasks.length > 0) {
-          setTasks(mergeUniqueTasks(cloudTasks));
+          setTasks(applyLocalFocusedTasks(mergeUniqueTasks(cloudTasks), cloudUser.id));
           setCloudTaskCount(cloudTasks.length);
           setCloudSyncEnabled(true);
           setLastCloudPullAt(new Date().toISOString());
@@ -1955,9 +1986,21 @@ export default function Home() {
   }
 
   function toggleTaskFocus(id: string) {
-    setTasks((current) => current.map((task) => (
+    const nextTasks = getTasksSnapshot().map((task) => (
       task.id === id ? { ...task, focused: !task.focused } : task
-    )));
+    ));
+    setTasks(nextTasks);
+
+    if (cloudUser) writeLocalFocusedTaskIds(cloudUser.id, nextTasks);
+
+    if (cloudUser && cloudSyncEnabled && isCloudReady) {
+      saveCloudTasks(nextTasks, cloudUser)
+        .then(() => {
+          setCloudTaskCount(nextTasks.length);
+          setCloudStatus("׳”׳׳©׳™׳׳•׳× ׳׳¡׳•׳ ׳›׳¨׳ ׳•׳× ׳׳¢׳ ׳.");
+        })
+        .catch((error: unknown) => setCloudStatus(`׳©׳׳™׳¨׳× ׳”׳׳™׳§׳•׳“ ׳׳¢׳ ׳ ׳ ׳›׳©׳׳”: ${errorMessage(error)}`));
+    }
   }
 
   function isOverdue(task: Task) {
