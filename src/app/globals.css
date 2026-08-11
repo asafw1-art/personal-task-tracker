@@ -93,7 +93,7 @@ h1 { line-height: 1.05; margin: 0; font-size: clamp(2.5rem, 6vw, 4.2rem); }
 .subtitle { color: var(--muted); font-size: 1.02rem; margin: 12px 0 0; }
 .panel, .stats button, .task-card, .empty, .metric { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow); }
 .secondary { border: 1px solid var(--border); background: var(--surface); border-radius: var(--radius-md); padding: 10px 14px; color: var(--muted); }
-.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin: -42px 18px 18px; position: relative; z-index: 3; }
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin: 0 0 18px; position: relative; z-index: 3; }
 .stats button { min-height: 108px; overflow: hidden; padding: 18px 18px 16px; position: relative; text-align: right; }
 .stats button::before { background: linear-gradient(180deg, var(--accent), rgba(37, 99, 235, .36)); content: ""; inset: 0 0 0 auto; position: absolute; width: 5px; }
 .stats button:nth-child(2)::before { background: linear-gradient(180deg, var(--waiting), rgba(180, 83, 9, .34)); }
@@ -179,8 +179,8 @@ textarea { resize: vertical; min-height: 86px; }
 .meta span + span::before { content: "•"; margin-left: 8px; }
 .task-card .meta span + span::before { content: none !important; margin: 0; }
 .task-notes { margin: 10px 0 0; color: var(--muted); font-size: .92rem; line-height: 1.5; }
-.task-actions { align-self: stretch; display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr) 42px; }
-.task-actions select { min-height: 42px; }
+.task-actions { align-self: start; display: grid; gap: 8px; grid-template-columns: minmax(116px, 1fr) 42px; }
+.task-actions select { height: 42px; min-height: 42px; }
 .task-actions button, .settings-button, .auth-form button, .drawer-actions button { border: 0; border-radius: var(--radius-md); background: var(--accent); color: #fff; font-weight: 700; padding: 11px 14px; }
 .task-actions button:hover, .settings-button:hover, .auth-form button:hover, .drawer-actions button:hover { background: var(--accent-dark); }
 .edit-icon-button { align-items: center; display: inline-flex; font-size: 1.15rem; height: 42px; justify-content: center; line-height: 1; padding: 0 !important; width: 42px; }
@@ -640,7 +640,7 @@ textarea { resize: vertical; min-height: 86px; }
   .skeleton-stats { gap: 8px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .skeleton-card { height: 74px; }
   .skeleton-title { width: min(72%, 280px); }
-  .stats { gap: 8px; margin: -22px 8px 14px; }
+  .stats { gap: 8px; margin: 0 0 14px; }
   .stats button { padding: 12px; }
   .stats strong { font-size: 1.45rem; }
   .app-notification { align-items: stretch; flex-direction: column; }
@@ -673,7 +673,7 @@ textarea { resize: vertical; min-height: 86px; }
   .task-card > .check { grid-column: 2; grid-row: 1; }
   .task-main { grid-column: 3; grid-row: 1; }
   .task-card > .task-actions { grid-column: 1 / -1; grid-row: 2; }
-  .task-actions { grid-template-columns: minmax(0, 1fr) 44px; }
+  .task-actions { align-self: start; grid-template-columns: minmax(0, 1fr) 44px; }
   .profile-settings-form { align-items: stretch; grid-template-columns: 1fr; }
   .profile-settings-form button { width: 100%; }
   .edit-grid { grid-template-columns: 1fr; }
