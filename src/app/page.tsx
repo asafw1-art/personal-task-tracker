@@ -2794,6 +2794,7 @@ export default function Home() {
     if (subtasks.length === 0) return null;
 
     const expanded = expandedSubtaskTaskIds.has(task.id);
+    const progress = subtaskProgress(subtasks);
     return (
       <div className="subtasks-preview">
         <button
@@ -2808,6 +2809,11 @@ export default function Home() {
         </button>
         {expanded && (
           <div className="subtasks-preview-panel" id={`subtasks-preview-${task.id}`}>
+            <div className="subtasks-preview-summary" aria-label="סיכום צעדי טיפול">
+              <span>{progress.total} פעילים</span>
+              <span>{progress.done} בוצעו</span>
+              {progress.cancelled > 0 && <span>{progress.cancelled} בוטלו</span>}
+            </div>
             <button type="button" className="subtask-add-inline" onClick={() => addTaskSubtask(task)} aria-label={`הוספת צעד טיפול ל-${task.title}`}>
               <span aria-hidden="true">+</span>
               <span>צעד טיפול</span>
@@ -3327,6 +3333,7 @@ export default function Home() {
                 <div>
                   <p className="eyebrow">עוזר משימות</p>
                   <h2>צ׳ט AI</h2>
+                  <span>פעולות מוצעות בלבד, וכל שינוי דורש אישור שלך.</span>
                 </div>
                 <button className="icon-button" onClick={() => setIsAssistantOpen(false)} aria-label="סגירת צ׳ט AI">×</button>
               </div>
@@ -3339,6 +3346,7 @@ export default function Home() {
                   </div>
                 ) : assistantMessages.map((message) => (
                   <article className={`assistant-message role-${message.role}`} key={message.id}>
+                    <span className="assistant-message-meta">{message.role === "user" ? "אני" : "עוזר המשימות"}</span>
                     <p>{message.content}</p>
                     {message.proposedAction && (
                       <div className="assistant-action-card">
@@ -3759,54 +3767,62 @@ export default function Home() {
             </div>
 
             <form className="task-editor-form" onSubmit={saveTaskEditor}>
-              <label>
-                <span>סוג</span>
-                <select value={taskEditor.draft.prefix} onChange={(event) => {
-                  const nextPrefix = event.target.value as TaskPrefix;
-                  updateTaskDraft({ prefix: nextPrefix, category: topicOptions[nextPrefix][0] ?? (nextPrefix === "W" ? "עבודה" : "אישי") });
-                }} disabled={taskEditor.mode === "edit"} aria-label="סוג משימה">
-                  <option value="P">אישי</option>
-                  <option value="W">עבודה</option>
-                </select>
-              </label>
-              <label>
+              <div className="task-editor-meta">
+                <label>
+                  <span>סוג</span>
+                  <select value={taskEditor.draft.prefix} onChange={(event) => {
+                    const nextPrefix = event.target.value as TaskPrefix;
+                    updateTaskDraft({ prefix: nextPrefix, category: topicOptions[nextPrefix][0] ?? (nextPrefix === "W" ? "עבודה" : "אישי") });
+                  }} disabled={taskEditor.mode === "edit"} aria-label="סוג משימה">
+                    <option value="P">אישי</option>
+                    <option value="W">עבודה</option>
+                  </select>
+                </label>
+                <div className="task-editor-id" aria-label={taskEditor.mode === "create" ? "מספר המשימה יווצר אוטומטית" : `מזהה משימה ${taskEditor.taskId}`}>
+                  <span>מזהה</span>
+                  <strong>{taskEditor.mode === "create" ? "אוטומטי" : taskEditor.taskId}</strong>
+                </div>
+              </div>
+              <label className="task-title-field">
                 <span>שם משימה</span>
                 <input value={taskEditor.draft.title} onChange={(event) => updateTaskDraft({ title: event.target.value })} placeholder="מה צריך לעשות?" autoFocus />
               </label>
-              <label>
-                <span>נושא</span>
-                <select value={taskEditor.draft.category} onChange={(event) => updateTaskDraft({ category: event.target.value })}>
-                  {topicOptions[taskEditor.draft.prefix].map((topic) => <option value={topic} key={topic}>{topic}</option>)}
-                </select>
-              </label>
-              <label>
-                <span>פעולה</span>
-                <select value={taskEditor.draft.actionType} onChange={(event) => updateTaskDraft({ actionType: event.target.value })}>
-                  <option value="">ללא פעולה</option>
-                  {actionOptions.map((action) => <option value={action} key={action}>{action}</option>)}
-                </select>
-              </label>
-              <label>
-                <span>סטטוס</span>
-                <select value={taskEditor.draft.status} onChange={(event) => updateTaskDraft({ status: event.target.value as TaskStatus })}>
-                  {Object.entries(statusLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
-                </select>
-              </label>
-              <label>
-                <span>עדיפות</span>
-                <select value={taskEditor.draft.priority} onChange={(event) => updateTaskDraft({ priority: event.target.value as TaskPriority })}>
-                  {Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
-                </select>
-              </label>
-              <label>
-                <span>תאריך יעד</span>
-                <input
-                  type="date"
-                  value={taskEditor.draft.dueDate}
-                  min={taskEditor.draft.dueDate && taskEditor.draft.dueDate < todayIso() ? taskEditor.draft.dueDate : todayIso()}
-                  onChange={(event) => updateTaskDraft({ dueDate: event.target.value })}
-                />
-              </label>
+              <div className="edit-grid">
+                <label>
+                  <span>נושא</span>
+                  <select value={taskEditor.draft.category} onChange={(event) => updateTaskDraft({ category: event.target.value })}>
+                    {topicOptions[taskEditor.draft.prefix].map((topic) => <option value={topic} key={topic}>{topic}</option>)}
+                  </select>
+                </label>
+                <label>
+                  <span>פעולה</span>
+                  <select value={taskEditor.draft.actionType} onChange={(event) => updateTaskDraft({ actionType: event.target.value })}>
+                    <option value="">ללא פעולה</option>
+                    {actionOptions.map((action) => <option value={action} key={action}>{action}</option>)}
+                  </select>
+                </label>
+                <label>
+                  <span>סטטוס</span>
+                  <select value={taskEditor.draft.status} onChange={(event) => updateTaskDraft({ status: event.target.value as TaskStatus })}>
+                    {Object.entries(statusLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
+                  </select>
+                </label>
+                <label>
+                  <span>עדיפות</span>
+                  <select value={taskEditor.draft.priority} onChange={(event) => updateTaskDraft({ priority: event.target.value as TaskPriority })}>
+                    {Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
+                  </select>
+                </label>
+                <label>
+                  <span>תאריך יעד</span>
+                  <input
+                    type="date"
+                    value={taskEditor.draft.dueDate}
+                    min={taskEditor.draft.dueDate && taskEditor.draft.dueDate < todayIso() ? taskEditor.draft.dueDate : todayIso()}
+                    onChange={(event) => updateTaskDraft({ dueDate: event.target.value })}
+                  />
+                </label>
+              </div>
               <label className="notes-field">
                 <span>הערות</span>
                 <textarea value={taskEditor.draft.notes} onChange={(event) => updateTaskDraft({ notes: event.target.value })} rows={5} />
@@ -3817,6 +3833,12 @@ export default function Home() {
                     <h3>צעדי טיפול</h3>
                     <p>פירוק פנימי של המשימה לפעולות קטנות. המספור נשמר ברקע ולא מוצג ברשימה.</p>
                   </div>
+                  {taskEditor.draft.subtasks.length > 0 && (
+                    <div className="subtasks-editor-progress" aria-label="התקדמות צעדי טיפול">
+                      <span>{subtaskProgress(taskEditor.draft.subtasks).done}</span>
+                      <small>בוצעו מתוך {subtaskProgress(taskEditor.draft.subtasks).total}</small>
+                    </div>
+                  )}
                   <button type="button" onClick={addDraftSubtask}>הוספת צעד</button>
                 </div>
                 {taskEditor.draft.subtasks.length === 0 ? (

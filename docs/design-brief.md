@@ -16,6 +16,12 @@ Core product goals:
 - Status tracking with subtasks / treatment steps.
 - Analytics, insights, notifications, and AI assistant support.
 
+## Design Reference Files
+
+- This document is the product and UX source of truth.
+- `docs/stitch-design-export.html` is the high-fidelity visual reference exported from Stitch.
+- `docs/stitch-design-export-notes.md` explains how to translate the Stitch export into the existing app without replacing working product logic.
+
 ## Future i18n Requirement
 
 The UI should be ready for future language switching.
