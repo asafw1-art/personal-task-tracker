@@ -744,6 +744,7 @@ export default function Home() {
   const [taskEditor, setTaskEditor] = useState<TaskEditorState>(null);
   const [taskEditorError, setTaskEditorError] = useState("");
   const [expandedSubtaskTaskIds, setExpandedSubtaskTaskIds] = useState<Set<string>>(() => new Set());
+  const [inlineSubtaskDrafts, setInlineSubtaskDrafts] = useState<Record<string, string>>({});
   const [isAssistantOpen, setIsAssistantOpen] = useState(false);
   const [assistantThreadId, setAssistantThreadId] = useState<string | null>(null);
   const [assistantMessages, setAssistantMessages] = useState<AssistantMessage[]>([]);
@@ -2144,6 +2145,26 @@ export default function Home() {
     }));
   }
 
+  function inlineSubtaskDraftKey(taskId: string, subtaskNumber: number) {
+    return `${taskId}:${subtaskNumber}`;
+  }
+
+  function updateInlineSubtaskDraft(taskId: string, subtaskNumber: number, value: string) {
+    setInlineSubtaskDrafts((current) => ({ ...current, [inlineSubtaskDraftKey(taskId, subtaskNumber)]: value }));
+  }
+
+  function commitInlineSubtaskDraft(taskId: string, subtaskNumber: number, fallbackTitle: string) {
+    const key = inlineSubtaskDraftKey(taskId, subtaskNumber);
+    const nextTitle = inlineSubtaskDrafts[key];
+    if (nextTitle === undefined || nextTitle === fallbackTitle) return;
+    updateTaskSubtask(taskId, subtaskNumber, { title: nextTitle });
+    setInlineSubtaskDrafts((current) => {
+      const next = { ...current };
+      delete next[key];
+      return next;
+    });
+  }
+
   function deleteTaskSubtask(taskId: string, subtaskNumber: number) {
     const task = tasks.find((item) => item.id === taskId);
     const subtask = task?.subtasks?.find((item) => item.number === subtaskNumber);
@@ -2831,8 +2852,15 @@ export default function Home() {
                 <li className={`subtasks-preview-item status-${subtask.status}`} key={subtask.id}>
                   <input
                     {...freeTextInputProps}
-                    value={subtask.title}
-                    onChange={(event) => updateTaskSubtask(task.id, subtask.number, { title: event.target.value })}
+                    value={inlineSubtaskDrafts[inlineSubtaskDraftKey(task.id, subtask.number)] ?? subtask.title}
+                    onChange={(event) => updateInlineSubtaskDraft(task.id, subtask.number, event.target.value)}
+                    onBlur={() => commitInlineSubtaskDraft(task.id, subtask.number, subtask.title)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        commitInlineSubtaskDraft(task.id, subtask.number, subtask.title);
+                        event.currentTarget.blur();
+                      }
+                    }}
                     placeholder="צעד טיפול חדש"
                     aria-label={subtask.title ? `שם צעד טיפול ${subtask.title}` : "שם צעד טיפול חדש"}
                   />
