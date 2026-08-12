@@ -758,24 +758,6 @@ export default function Home() {
     isSupabaseConfigured ? "בודק חיבור ל-Supabase..." : "Supabase עדיין לא מוגדר. עובדים במצב מקומי."
   );
 
-  useEffect(() => {
-    if (activeView !== "kanban") return;
-
-    const mobileKanbanQuery = window.matchMedia("(max-width: 700px)");
-    const switchToTasksOnMobile = () => {
-      if (mobileKanbanQuery.matches) {
-        setActiveView("tasks");
-      }
-    };
-
-    switchToTasksOnMobile();
-    mobileKanbanQuery.addEventListener("change", switchToTasksOnMobile);
-
-    return () => {
-      mobileKanbanQuery.removeEventListener("change", switchToTasksOnMobile);
-    };
-  }, [activeView]);
-
   const mergeCloudTasksIntoLocal = useCallback((cloudTasks: Task[]) => {
     const current = getTasksSnapshot();
     const mergedTasks = mergeUniqueTasks([...current, ...cloudTasks]);
@@ -3001,7 +2983,6 @@ export default function Home() {
 
           <nav className="view-tabs" aria-label="מעבר בין תצוגות">
             <button className={activeView === "tasks" ? "active" : ""} onClick={() => setActiveView("tasks")}>משימות</button>
-            <button className={`kanban-view-tab ${activeView === "kanban" ? "active" : ""}`} onClick={() => setActiveView("kanban")}>לוח Kanban</button>
             <button className={activeView === "stats" ? "active" : ""} onClick={() => setActiveView("stats")}>סטטיסטיקות</button>
           </nav>
 
