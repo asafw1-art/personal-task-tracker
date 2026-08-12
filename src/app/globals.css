@@ -677,6 +677,7 @@ textarea { resize: vertical; min-height: 86px; }
   .hero .secondary { align-self: flex-start; }
   .settings-button { align-self: flex-start; }
   .view-tabs { display: grid; grid-template-columns: 1fr; width: 100%; }
+  .view-tabs .kanban-view-tab { display: none; }
   .controls { grid-template-columns: 1fr; }
   .quick-add { align-items: stretch; grid-template-columns: 1fr; }
   .quick-add button { width: 100%; }
