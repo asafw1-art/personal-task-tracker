@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ChangeEvent, Dispatch, FormEvent, SetStateAction } from "react";
@@ -117,6 +117,14 @@ const defaultNotificationPreferences: NotificationPreferences = {
   noWeeklyClosures: true,
   waiting: false,
   dueSoon: false,
+};
+
+const freeTextInputProps = {
+  dir: "auto" as const,
+  inputMode: "text" as const,
+  autoCapitalize: "sentences",
+  autoCorrect: "on",
+  spellCheck: true,
 };
 
 function taskFilterLabel(filter: TaskFilter) {
@@ -2822,6 +2830,7 @@ export default function Home() {
               {subtasks.map((subtask) => (
                 <li className={`subtasks-preview-item status-${subtask.status}`} key={subtask.id}>
                   <input
+                    {...freeTextInputProps}
                     value={subtask.title}
                     onChange={(event) => updateTaskSubtask(task.id, subtask.number, { title: event.target.value })}
                     placeholder="צעד טיפול חדש"
@@ -2956,6 +2965,7 @@ export default function Home() {
                 <div>
                   <label htmlFor="quick-add-title">הוספה מהירה</label>
                   <input
+                    {...freeTextInputProps}
                     id="quick-add-title"
                     value={quickAddTitle}
                     onChange={(event) => setQuickAddTitle(event.target.value)}
@@ -2970,7 +2980,7 @@ export default function Home() {
               </form>
 
               <section className="panel controls">
-                <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="חיפוש משימה או מזהה, למשל P19" aria-label="חיפוש" />
+                <input {...freeTextInputProps} value={query} onChange={(e) => setQuery(e.target.value)} placeholder="חיפוש משימה או מזהה, למשל P19" aria-label="חיפוש" />
                 <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)} aria-label="סינון סטטוס">
                   <option value="active">משימות פעילות</option>
                   <option value="open">פתוחות</option>
@@ -3367,6 +3377,7 @@ export default function Home() {
 
               <form className="assistant-form" onSubmit={sendAssistantMessage}>
                 <input
+                  {...freeTextInputProps}
                   value={assistantInput}
                   onChange={(event) => setAssistantInput(event.target.value)}
                   placeholder="כתוב לעוזר המשימות..."
@@ -3445,6 +3456,7 @@ export default function Home() {
                   <label>
                     <span>שם שיופיע בכותרת</span>
                     <input
+                      {...freeTextInputProps}
                       value={displayNameDraft}
                       onChange={(event) => setDisplayNameDraft(event.target.value)}
                       placeholder={displayNameFromUser(cloudUser) || "לדוגמה: ויצמן"}
@@ -3476,6 +3488,7 @@ export default function Home() {
                     <label>
                       <span>{editingTaxonomyItem.type === "topic" ? "עריכת נושא" : "עריכת פעולה"}</span>
                       <input
+                        {...freeTextInputProps}
                         value={editingTaxonomyItem.value}
                         onChange={(event) => updateEditingTaxonomyValue(event.target.value)}
                         aria-label={editingTaxonomyItem.type === "topic" ? "שם נושא חדש" : "שם פעולה חדש"}
@@ -3494,7 +3507,7 @@ export default function Home() {
                         <option value="P">אישי</option>
                         <option value="W">עבודה</option>
                       </select>
-                      <input value={newTopicName} onChange={(event) => setNewTopicName(event.target.value)} placeholder="שם נושא חדש" aria-label="שם נושא חדש" />
+                      <input {...freeTextInputProps} value={newTopicName} onChange={(event) => setNewTopicName(event.target.value)} placeholder="שם נושא חדש" aria-label="שם נושא חדש" />
                       <button type="submit">הוספת נושא</button>
                     </form>
                     <div className="taxonomy-grid">
@@ -3517,7 +3530,7 @@ export default function Home() {
                 ) : (
                   <div className="taxonomy-manager">
                     <form className="taxonomy-form" onSubmit={addAction}>
-                      <input value={newActionName} onChange={(event) => setNewActionName(event.target.value)} placeholder="שם פעולה חדשה" aria-label="שם פעולה חדשה" />
+                      <input {...freeTextInputProps} value={newActionName} onChange={(event) => setNewActionName(event.target.value)} placeholder="שם פעולה חדשה" aria-label="שם פעולה חדשה" />
                       <button type="submit">הוספת פעולה</button>
                     </form>
                     <div className="taxonomy-chips">
@@ -3785,7 +3798,7 @@ export default function Home() {
               </div>
               <label className="task-title-field">
                 <span>שם משימה</span>
-                <input value={taskEditor.draft.title} onChange={(event) => updateTaskDraft({ title: event.target.value })} placeholder="מה צריך לעשות?" autoFocus />
+                <input {...freeTextInputProps} value={taskEditor.draft.title} onChange={(event) => updateTaskDraft({ title: event.target.value })} placeholder="מה צריך לעשות?" autoFocus />
               </label>
               <div className="edit-grid">
                 <label>
@@ -3825,7 +3838,7 @@ export default function Home() {
               </div>
               <label className="notes-field">
                 <span>הערות</span>
-                <textarea value={taskEditor.draft.notes} onChange={(event) => updateTaskDraft({ notes: event.target.value })} rows={5} />
+                <textarea {...freeTextInputProps} value={taskEditor.draft.notes} onChange={(event) => updateTaskDraft({ notes: event.target.value })} rows={5} />
               </label>
               <section className="subtasks-editor">
                 <div className="subtasks-editor-header">
@@ -3850,6 +3863,7 @@ export default function Home() {
                         <label>
                           <span>צעד טיפול</span>
                           <input
+                            {...freeTextInputProps}
                             value={subtask.title}
                             onChange={(event) => updateDraftSubtask(subtask.number, { title: event.target.value })}
                             placeholder="לדוגמה: לתאם פגישה"
@@ -3912,3 +3926,4 @@ export default function Home() {
     </main>
   );
 }
+
