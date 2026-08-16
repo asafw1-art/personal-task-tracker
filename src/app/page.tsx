@@ -755,6 +755,12 @@ export default function Home() {
   const [assistantRestoreStatus, setAssistantRestoreStatus] = useState("");
   const [activeNotificationId, setActiveNotificationId] = useState("");
   const [notificationModalDismissed, setNotificationModalDismissed] = useState(false);
+  const [analyticsTaskModal, setAnalyticsTaskModal] = useState<{
+    title: string;
+    body: string;
+    tone: AnalyticsInsight["tone"];
+    action: NonNullable<AnalyticsInsight["action"]>;
+  } | null>(null);
   const assistantMessagesRef = useRef<HTMLDivElement | null>(null);
   const [cloudStatus, setCloudStatus] = useState(
     isSupabaseConfigured ? "בודק חיבור ל-Supabase..." : "Supabase עדיין לא מוגדר. עובדים במצב מקומי."
@@ -1394,6 +1400,36 @@ export default function Home() {
   const primaryNotificationTasks = primaryAppNotification
     ? tasksForNotificationFilter(primaryAppNotification.action.statusFilter)
     : [];
+
+  function tasksForAnalyticsAction(action: NonNullable<AnalyticsInsight["action"]>) {
+    const normalized = canonicalTaskId(action.query ?? "");
+    const today = todayIso();
+    const weekEnd = addDaysIso(6);
+    const filter = action.statusFilter ?? "active";
+
+    if (normalized) {
+      return sortTasks(tasks.filter((task) => task.id === normalized));
+    }
+
+    return sortTasks(tasks
+      .filter((task) => !action.prefixFilter || action.prefixFilter === "all" || task.prefix === action.prefixFilter)
+      .filter((task) => !action.topicFilter || action.topicFilter === "all" || task.category === action.topicFilter)
+      .filter((task) => !action.actionFilter || action.actionFilter === "all" || (task.actionType ?? "") === action.actionFilter || (task.subtasks ?? []).some((subtask) => subtask.actionType === action.actionFilter))
+      .filter((task) => {
+        if (filter === "all") return true;
+        if (filter === "active") return !["done", "cancelled"].includes(task.status);
+        if (filter === "focused") return Boolean(task.focused) && !["done", "cancelled"].includes(task.status);
+        if (filter === "subtasks_open") return !["done", "cancelled"].includes(task.status) && subtaskProgress(task.subtasks).open > 0;
+        if (filter === "overdue") return Boolean(task.dueDate && task.dueDate < today && !["done", "cancelled"].includes(task.status));
+        if (filter === "today") return task.dueDate === today;
+        if (filter === "week") return Boolean(task.dueDate && task.dueDate >= today && task.dueDate <= weekEnd);
+        if (filter === "no_due") return !task.dueDate && !["done", "cancelled"].includes(task.status);
+        if (filter === "high") return task.priority === "high" && !["done", "cancelled"].includes(task.status);
+        return task.status === filter;
+      }));
+  }
+
+  const analyticsModalTasks = analyticsTaskModal ? tasksForAnalyticsAction(analyticsTaskModal.action) : [];
 
   const statistics = useMemo(() => {
     const today = todayIso();
@@ -2064,12 +2100,23 @@ export default function Home() {
   }
 
   function applyInsightAction(insight: AnalyticsInsight) {
-    applyAnalyticsAction(insight.action);
+    if (!insight.action) return;
+    setAnalyticsTaskModal({
+      title: insight.title,
+      body: insight.body,
+      tone: insight.tone,
+      action: insight.action,
+    });
   }
 
   function applyAnalyticsAction(action: AnalyticsInsight["action"]) {
     if (!action) return;
-    showTaskList(action.statusFilter ?? "active", action);
+    setAnalyticsTaskModal({
+      title: "משימות רלוונטיות",
+      body: "רשימת המשימות שמתאימה לסיכום שבחרת.",
+      tone: "neutral",
+      action,
+    });
   }
 
   function applyNotificationAction(notification: AppNotification) {
@@ -3070,6 +3117,61 @@ export default function Home() {
                   ))}
                   {primaryNotificationTasks.length > 8 && (
                     <p className="notification-modal-empty">מוצגות 8 מתוך {primaryNotificationTasks.length} משימות. אפשר לפתוח את ההתראה שוב מהכרטיסים במסך.</p>
+                  )}
+                </div>
+              </article>
+            </section>
+          )}
+
+          {analyticsTaskModal && (
+            <section className="notification-modal-backdrop" aria-label="משימות מתוך תובנה">
+              <article
+                className={`notification-modal notification-${analyticsTaskModal.tone === "good" ? "neutral" : analyticsTaskModal.tone}`}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="analytics-task-modal-title"
+              >
+                <button
+                  type="button"
+                  className="icon-button"
+                  onClick={() => setAnalyticsTaskModal(null)}
+                  aria-label="סגירת חלונית משימות"
+                >
+                  ×
+                </button>
+                <div>
+                  <span className="notification-modal-kicker">משימות מתוך תובנה</span>
+                  <h2 id="analytics-task-modal-title">{analyticsTaskModal.title}</h2>
+                  <p>{analyticsTaskModal.body}</p>
+                </div>
+                <div className="notification-modal-list" aria-label="משימות רלוונטיות">
+                  {analyticsModalTasks.length === 0 ? (
+                    <p className="notification-modal-empty">אין משימות רלוונטיות להצגה כרגע.</p>
+                  ) : analyticsModalTasks.slice(0, 12).map((task) => (
+                    <article className={`notification-task status-${task.status}${isOverdue(task) ? " is-overdue" : ""}`} key={task.id}>
+                      <div>
+                        <span className="task-id">{task.id}</span>
+                        <strong>{task.title}</strong>
+                        <small>
+                          {statusLabels[task.status]} · {task.category}
+                          {task.actionType ? ` · ${task.actionType}` : ""}
+                          {task.dueDate ? ` · יעד ${formatDate(task.dueDate)}` : ""}
+                          {subtaskProgressLabel(task.subtasks) ? ` · ${subtaskProgressLabel(task.subtasks)}` : ""}
+                        </small>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAnalyticsTaskModal(null);
+                          openEditTask(task);
+                        }}
+                      >
+                        פתיחה
+                      </button>
+                    </article>
+                  ))}
+                  {analyticsModalTasks.length > 12 && (
+                    <p className="notification-modal-empty">מוצגות 12 מתוך {analyticsModalTasks.length} משימות.</p>
                   )}
                 </div>
               </article>
