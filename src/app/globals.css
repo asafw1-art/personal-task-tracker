@@ -111,8 +111,8 @@ h1 { line-height: 1.05; margin: 0; font-size: clamp(2.5rem, 6vw, 4.2rem); overfl
 .app-notification span { color: var(--muted); font-size: .9rem; line-height: 1.45; }
 .app-notification button { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); color: var(--accent-dark); font-weight: 700; padding: 9px 12px; white-space: nowrap; }
 .app-notification button:hover { background: var(--accent-soft); border-color: #bfdbfe; }
-.notification-modal-backdrop { align-items: start; display: grid; inset: 0; justify-items: center; padding: 18px; pointer-events: none; position: fixed; z-index: 40; }
-.notification-modal { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; box-shadow: 0 24px 70px rgba(15, 23, 42, .22); display: grid; gap: 14px; max-width: min(520px, calc(100vw - 36px)); padding: 18px; pointer-events: auto; position: relative; width: 100%; }
+.notification-modal-backdrop { align-items: start; background: rgba(15, 23, 42, .18); display: grid; inset: 0; justify-items: center; overflow-y: auto; padding: 18px; pointer-events: auto; position: fixed; z-index: 40; }
+.notification-modal { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; box-shadow: 0 24px 70px rgba(15, 23, 42, .22); display: grid; gap: 14px; max-height: calc(100vh - 36px); max-width: min(760px, calc(100vw - 36px)); overflow: auto; padding: 18px; pointer-events: auto; position: relative; width: 100%; }
 .notification-modal::before { border-radius: 0 18px 18px 0; content: ""; inset: 0 0 0 auto; position: absolute; width: 5px; }
 .notification-modal.notification-danger::before { background: var(--danger); }
 .notification-modal.notification-warn::before { background: var(--waiting); }
@@ -121,8 +121,19 @@ h1 { line-height: 1.05; margin: 0; font-size: clamp(2.5rem, 6vw, 4.2rem); overfl
 .notification-modal-kicker { color: var(--accent-dark); font-size: .86rem; font-weight: 900; }
 .notification-modal h2 { font-size: 1.35rem; margin: 4px 0 6px; padding-left: 46px; }
 .notification-modal p { color: var(--muted); line-height: 1.55; margin: 0; }
-.notification-modal > button:last-child { background: var(--accent); border: 0; border-radius: var(--radius-md); color: #fff; font-weight: 800; padding: 12px 16px; }
-.notification-modal > button:last-child:hover { background: var(--accent-dark); }
+.notification-modal-list { display: grid; gap: 10px; }
+.notification-task { align-items: center; background: var(--surface-soft); border: 1px solid var(--border); border-radius: var(--radius-md); display: grid; gap: 12px; grid-template-columns: 1fr auto; padding: 12px; position: relative; }
+.notification-task::before { border-radius: 0 var(--radius-md) var(--radius-md) 0; content: ""; inset: 0 0 0 auto; position: absolute; width: 4px; }
+.notification-task.status-open::before { background: var(--accent); }
+.notification-task.status-in_progress::before { background: var(--waiting); }
+.notification-task.status-waiting::before { background: var(--waiting); }
+.notification-task.is-overdue::before { background: var(--danger); }
+.notification-task div { display: grid; gap: 6px; min-width: 0; padding-inline-start: 8px; }
+.notification-task strong { overflow-wrap: anywhere; }
+.notification-task small { color: var(--muted); line-height: 1.45; }
+.notification-task button { background: var(--accent); border: 0; border-radius: var(--radius-md); color: #fff; font-weight: 800; padding: 10px 14px; white-space: nowrap; }
+.notification-task button:hover { background: var(--accent-dark); }
+.notification-modal-empty { background: var(--surface-soft); border: 1px dashed var(--border); border-radius: var(--radius-md); color: var(--muted); padding: 14px; text-align: center; }
 .notification-danger { border-right: 5px solid var(--danger); }
 .notification-warn { border-right: 5px solid var(--waiting); }
 .notification-neutral { border-right: 5px solid var(--accent); }
@@ -536,6 +547,7 @@ textarea { resize: vertical; min-height: 86px; }
 
 [data-theme="dark"] .app-notification,
 [data-theme="dark"] .notification-modal,
+[data-theme="dark"] .notification-task,
 [data-theme="dark"] .assistant-chat,
 [data-theme="dark"] .empty,
 [data-theme="dark"] .kanban-card,
@@ -711,6 +723,10 @@ textarea { resize: vertical; min-height: 86px; }
   .stats strong { font-size: 1.45rem; }
   .app-notification { align-items: stretch; flex-direction: column; }
   .app-notification button { width: 100%; }
+  .notification-modal-backdrop { padding: 10px; }
+  .notification-modal { max-height: calc(100vh - 20px); max-width: calc(100vw - 20px); padding: 16px; }
+  .notification-task { align-items: stretch; grid-template-columns: 1fr; }
+  .notification-task button { width: 100%; }
   .metric-grid, .chart-grid, .timeline-stats, .analytics-layout { grid-template-columns: 1fr; }
   .analytics-header { align-items: stretch; flex-direction: column; }
   .period-summary-panel { align-items: stretch; grid-template-columns: 1fr; }

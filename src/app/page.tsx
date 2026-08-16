@@ -753,7 +753,8 @@ export default function Home() {
   const [assistantIsSending, setAssistantIsSending] = useState(false);
   const [deletedAssistantThreads, setDeletedAssistantThreads] = useState<AssistantThread[]>([]);
   const [assistantRestoreStatus, setAssistantRestoreStatus] = useState("");
-  const [dismissedNotificationId, setDismissedNotificationId] = useState("");
+  const [activeNotificationId, setActiveNotificationId] = useState("");
+  const [notificationModalDismissed, setNotificationModalDismissed] = useState(false);
   const assistantMessagesRef = useRef<HTMLDivElement | null>(null);
   const [cloudStatus, setCloudStatus] = useState(
     isSupabaseConfigured ? "בודק חיבור ל-Supabase..." : "Supabase עדיין לא מוגדר. עובדים במצב מקומי."
@@ -1370,7 +1371,29 @@ export default function Home() {
     return notifications;
   }, [notificationPreferences, tasks]);
 
-  const primaryAppNotification = appNotifications.find((notification) => notification.id !== dismissedNotificationId);
+  function tasksForNotificationFilter(filter: TaskFilter) {
+    const today = todayIso();
+    const weekEnd = addDaysIso(6);
+
+    return sortTasks(tasks.filter((task) => {
+      if (filter === "all") return true;
+      if (filter === "active") return !["done", "cancelled"].includes(task.status);
+      if (filter === "focused") return Boolean(task.focused) && !["done", "cancelled"].includes(task.status);
+      if (filter === "subtasks_open") return !["done", "cancelled"].includes(task.status) && subtaskProgress(task.subtasks).open > 0;
+      if (filter === "overdue") return Boolean(task.dueDate && task.dueDate < today && !["done", "cancelled"].includes(task.status));
+      if (filter === "today") return task.dueDate === today;
+      if (filter === "week") return Boolean(task.dueDate && task.dueDate >= today && task.dueDate <= weekEnd);
+      if (filter === "no_due") return !task.dueDate && !["done", "cancelled"].includes(task.status);
+      if (filter === "high") return task.priority === "high" && !["done", "cancelled"].includes(task.status);
+      return task.status === filter;
+    }));
+  }
+
+  const selectedAppNotification = appNotifications.find((notification) => notification.id === activeNotificationId);
+  const primaryAppNotification = selectedAppNotification ?? (!notificationModalDismissed ? appNotifications[0] : undefined);
+  const primaryNotificationTasks = primaryAppNotification
+    ? tasksForNotificationFilter(primaryAppNotification.action.statusFilter)
+    : [];
 
   const statistics = useMemo(() => {
     const today = todayIso();
@@ -2048,8 +2071,8 @@ export default function Home() {
   }
 
   function applyNotificationAction(notification: AppNotification) {
-    setDismissedNotificationId(notification.id);
-    showTaskList(notification.action.statusFilter);
+    setNotificationModalDismissed(false);
+    setActiveNotificationId(notification.id);
   }
 
   function updateNotificationPreference(key: NotificationPreferenceKey, value: boolean) {
@@ -2990,11 +3013,14 @@ export default function Home() {
 
           {primaryAppNotification && (
             <section className="notification-modal-backdrop" aria-label="התראה חשובה">
-              <article className={`notification-modal notification-${primaryAppNotification.tone}`} role="dialog" aria-modal="false" aria-labelledby="primary-notification-title">
+              <article className={`notification-modal notification-${primaryAppNotification.tone}`} role="dialog" aria-modal="true" aria-labelledby="primary-notification-title">
                 <button
                   type="button"
                   className="icon-button"
-                  onClick={() => setDismissedNotificationId(primaryAppNotification.id)}
+                  onClick={() => {
+                    setNotificationModalDismissed(true);
+                    setActiveNotificationId("");
+                  }}
                   aria-label="סגירת התראה"
                 >
                   ×
@@ -3004,9 +3030,36 @@ export default function Home() {
                   <h2 id="primary-notification-title">{primaryAppNotification.title}</h2>
                   <p>{primaryAppNotification.body}</p>
                 </div>
-                <button type="button" onClick={() => applyNotificationAction(primaryAppNotification)}>
-                  {primaryAppNotification.actionLabel}
-                </button>
+                <div className="notification-modal-list" aria-label="משימות בהתראה">
+                  {primaryNotificationTasks.length === 0 ? (
+                    <p className="notification-modal-empty">אין משימות רלוונטיות להצגה כרגע.</p>
+                  ) : primaryNotificationTasks.slice(0, 8).map((task) => (
+                    <article className={`notification-task status-${task.status}${isOverdue(task) ? " is-overdue" : ""}`} key={task.id}>
+                      <div>
+                        <span className="task-id">{task.id}</span>
+                        <strong>{task.title}</strong>
+                        <small>
+                          {statusLabels[task.status]} · {task.category}
+                          {task.dueDate ? ` · יעד ${formatDate(task.dueDate)}` : ""}
+                          {subtaskProgressLabel(task.subtasks) ? ` · ${subtaskProgressLabel(task.subtasks)}` : ""}
+                        </small>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNotificationModalDismissed(true);
+                          setActiveNotificationId("");
+                          openEditTask(task);
+                        }}
+                      >
+                        פתיחה
+                      </button>
+                    </article>
+                  ))}
+                  {primaryNotificationTasks.length > 8 && (
+                    <p className="notification-modal-empty">מוצגות 8 מתוך {primaryNotificationTasks.length} משימות. אפשר לפתוח את ההתראה שוב מהכרטיסים במסך.</p>
+                  )}
+                </div>
               </article>
             </section>
           )}
