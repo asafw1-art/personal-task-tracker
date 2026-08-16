@@ -141,6 +141,8 @@ h1 { line-height: 1.05; margin: 0; font-size: clamp(2.5rem, 6vw, 4.2rem); overfl
 .view-tabs button { border: 0; border-radius: 12px; background: transparent; color: var(--muted); padding: 12px 16px; font-weight: 800; }
 .view-tabs button.active { background: var(--surface); color: var(--accent-dark); box-shadow: 0 8px 18px rgba(23, 32, 51, 0.10); }
 .controls { display: grid; grid-template-columns: 1fr 160px 140px 150px 150px; gap: 10px; padding: 14px; margin-bottom: 14px; }
+.advanced-filters { display: contents; }
+.mobile-filter-toggle { display: none; }
 .quick-add { align-items: end; border-radius: 18px; display: grid; gap: 14px; grid-template-columns: 1fr auto; margin-bottom: 14px; padding: 18px; }
 .quick-add div { display: grid; gap: 6px; }
 .quick-add label { color: var(--text); font-size: .92rem; font-weight: 800; }
@@ -680,6 +682,7 @@ textarea { resize: vertical; min-height: 86px; }
 }
 [data-theme="dark"] .active-filters button,
 [data-theme="dark"] .focus-button,
+[data-theme="dark"] .mobile-filter-toggle,
 [data-theme="dark"] .smart-empty {
   background: #111827;
 }
@@ -714,8 +717,11 @@ textarea { resize: vertical; min-height: 86px; }
   .settings-button { align-self: flex-start; font-size: 0; gap: 0; padding: 11px; position: absolute; left: 18px; top: 30px; }
   .settings-button span { font-size: 1.12rem; }
   .view-tabs { display: grid; grid-template-columns: 1fr; width: 100%; }
-  .controls { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .controls input { grid-column: 1 / -1; }
+  .controls { grid-template-columns: minmax(0, 1fr) auto; }
+  .controls input { grid-column: 1; }
+  .mobile-filter-toggle { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); color: var(--accent-dark); display: inline-flex; font-weight: 800; justify-content: center; padding: 11px 14px; white-space: nowrap; }
+  .advanced-filters { display: none; grid-column: 1 / -1; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .advanced-filters.open { display: grid; }
   .quick-add { align-items: stretch; grid-template-columns: 1fr; }
   .quick-add button { width: 100%; }
   .active-filters { align-items: stretch; grid-template-columns: 1fr auto; }
@@ -755,12 +761,12 @@ textarea { resize: vertical; min-height: 86px; }
   .bar-row { grid-template-columns: 82px 1fr 28px; }
   .subtask-load-row { grid-template-columns: auto 1fr; }
   .subtask-load-row > span:last-child { grid-column: 1 / -1; }
-  .task-card { grid-template-columns: 38px 40px minmax(0, 1fr); padding: 14px; }
+  .task-card { gap: 10px; grid-template-columns: minmax(0, 1fr) 40px 38px; padding: 14px 16px; }
   .task-card:hover { transform: none; }
   .task-card > .focus-button { grid-column: 1; grid-row: 1; }
   .task-card > .check { grid-column: 2; grid-row: 1; }
   .task-main { grid-column: 1 / -1; grid-row: 2; }
-  .task-card > .task-actions { grid-column: 1 / -1; grid-row: 3; }
+  .task-card > .task-actions { grid-column: 3; grid-row: 1; }
   .task-actions { align-self: start; grid-template-columns: minmax(0, 1fr) 44px; }
   .profile-settings-form { align-items: stretch; grid-template-columns: 1fr; }
   .profile-settings-form button { width: 100%; }
@@ -768,15 +774,15 @@ textarea { resize: vertical; min-height: 86px; }
   .task-editor-meta { align-items: stretch; grid-template-columns: 1fr; }
   .task-editor-id { justify-items: stretch; }
   .task-heading { align-items: flex-start; flex-direction: column; gap: 6px; }
-  .meta { gap: 5px; }
+  .meta { gap: 5px; max-height: 66px; overflow: hidden; }
   .meta span { font-size: .78rem; padding: 3px 7px; }
   .subtasks-editor-header { align-items: stretch; flex-direction: column; }
   .subtasks-editor-header button { width: 100%; }
   .subtasks-preview-panel { margin-top: 10px; }
-  .subtasks-preview-item { align-items: start; grid-template-columns: minmax(0, 1fr) 38px; }
+  .subtasks-preview-item { align-items: stretch; grid-template-columns: minmax(0, 1fr); }
   .subtasks-preview-item input { grid-column: 1; }
   .subtasks-preview-item select { grid-column: 1 / -1; }
-  .subtasks-preview-item .subtask-delete { grid-column: 2; grid-row: 1; width: 38px; }
+  .subtasks-preview-item .subtask-delete { grid-column: 1; grid-row: auto; width: 100%; }
   .subtask-add-inline { justify-content: center; width: 100%; }
   .subtask-row { grid-template-columns: 1fr; }
   .subtask-row-actions { display: grid; grid-template-columns: 1fr; }

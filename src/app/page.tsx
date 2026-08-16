@@ -741,6 +741,7 @@ export default function Home() {
   const [devicesStatus, setDevicesStatus] = useState("");
   const [isCloudReady, setIsCloudReady] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
   const [taskEditor, setTaskEditor] = useState<TaskEditorState>(null);
   const [taskEditorError, setTaskEditorError] = useState("");
   const [expandedSubtaskTaskIds, setExpandedSubtaskTaskIds] = useState<Set<string>>(() => new Set());
@@ -3205,29 +3206,39 @@ export default function Home() {
 
               <section className="panel controls">
                 <input {...freeTextInputProps} value={query} onChange={(e) => setQuery(e.target.value)} placeholder="חיפוש משימה או מזהה, למשל P19" aria-label="חיפוש" />
-                <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)} aria-label="סינון סטטוס">
-                  <option value="active">משימות פעילות</option>
-                  <option value="open">פתוחות</option>
-                  <option value="in_progress">בטיפול</option>
-                  <option value="waiting">ממתינות</option>
-                  <option value="focused">במיקוד</option>
-                  <option value="done">בוצעו</option>
-                  <option value="cancelled">בוטלו</option>
-                  <option value="all">הכול</option>
-                </select>
-                <select value={prefixFilter} onChange={(e) => setPrefixFilter(e.target.value as typeof prefixFilter)} aria-label="סינון סוג">
-                  <option value="all">אישי ועבודה</option>
-                  <option value="P">אישי בלבד</option>
-                  <option value="W">עבודה בלבד</option>
-                </select>
-                <select value={topicFilter} onChange={(e) => setTopicFilter(e.target.value)} aria-label="סינון נושא">
-                  <option value="all">כל הנושאים</option>
-                  {uniqueSorted([...topicOptions.P, ...topicOptions.W]).map((topic) => <option value={topic} key={topic}>{topic}</option>)}
-                </select>
-                <select value={actionFilter} onChange={(e) => setActionFilter(e.target.value)} aria-label="סינון פעולה">
-                  <option value="all">כל הפעולות</option>
-                  {actionOptions.map((action) => <option value={action} key={action}>{action}</option>)}
-                </select>
+                <button
+                  type="button"
+                  className="mobile-filter-toggle"
+                  onClick={() => setIsMobileFiltersOpen((isOpen) => !isOpen)}
+                  aria-expanded={isMobileFiltersOpen}
+                >
+                  סינון
+                </button>
+                <div className={`advanced-filters${isMobileFiltersOpen ? " open" : ""}`}>
+                  <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)} aria-label="סינון סטטוס">
+                    <option value="active">משימות פעילות</option>
+                    <option value="open">פתוחות</option>
+                    <option value="in_progress">בטיפול</option>
+                    <option value="waiting">ממתינות</option>
+                    <option value="focused">במיקוד</option>
+                    <option value="done">בוצעו</option>
+                    <option value="cancelled">בוטלו</option>
+                    <option value="all">הכול</option>
+                  </select>
+                  <select value={prefixFilter} onChange={(e) => setPrefixFilter(e.target.value as typeof prefixFilter)} aria-label="סינון סוג">
+                    <option value="all">אישי ועבודה</option>
+                    <option value="P">אישי בלבד</option>
+                    <option value="W">עבודה בלבד</option>
+                  </select>
+                  <select value={topicFilter} onChange={(e) => setTopicFilter(e.target.value)} aria-label="סינון נושא">
+                    <option value="all">כל הנושאים</option>
+                    {uniqueSorted([...topicOptions.P, ...topicOptions.W]).map((topic) => <option value={topic} key={topic}>{topic}</option>)}
+                  </select>
+                  <select value={actionFilter} onChange={(e) => setActionFilter(e.target.value)} aria-label="סינון פעולה">
+                    <option value="all">כל הפעולות</option>
+                    {actionOptions.map((action) => <option value={action} key={action}>{action}</option>)}
+                  </select>
+                </div>
               </section>
 
               {activeFilters.length > 0 && (
