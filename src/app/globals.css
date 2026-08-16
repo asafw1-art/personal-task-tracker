@@ -72,7 +72,6 @@ button, select { min-height: 40px; }
 button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, a:focus-visible { outline: 3px solid rgba(37, 99, 235, .28); outline-offset: 2px; }
 button, .task-card, .kanban-card, .metric, .insight-card { -webkit-tap-highlight-color: transparent; }
 main { max-width: calc(100vw - 28px); width: min(1120px, calc(100% - 28px)); margin: 0 auto; padding: 28px 0 76px; }
-.kanban-main { width: min(1320px, calc(100% - 28px)); }
 .hero {
   align-items: flex-start;
   background:
@@ -715,11 +714,13 @@ textarea { resize: vertical; min-height: 86px; }
 }
 @media (max-width: 700px) {
   main { max-width: calc(100vw - 20px); width: calc(100vw - 20px); padding: 18px 0 86px; }
-  .hero { align-items: stretch; flex-direction: column; min-height: 0; padding: 22px; }
+  .hero { align-items: stretch; flex-direction: column; min-height: 0; padding: 20px 18px 18px; }
+  .hero h1 { padding-inline-start: 58px; }
+  .hero .subtitle { padding-inline-start: 58px; }
   .hero .secondary { align-self: flex-start; }
-  .settings-button { align-self: flex-start; font-size: 0; gap: 0; padding: 11px; position: absolute; left: 18px; top: 30px; }
+  .settings-button { align-self: flex-start; font-size: 0; gap: 0; padding: 10px; position: absolute; left: 18px; top: 28px; }
   .settings-button span { font-size: 1.12rem; }
-  .view-tabs { display: grid; grid-template-columns: 1fr; width: 100%; }
+  .view-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
   .controls { grid-template-columns: minmax(0, 1fr) auto; }
   .controls input { grid-column: 1; }
   .mobile-filter-toggle { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); color: var(--accent-dark); display: inline-flex; font-weight: 800; justify-content: center; padding: 11px 14px; white-space: nowrap; }
@@ -766,23 +767,23 @@ textarea { resize: vertical; min-height: 86px; }
   .bar-row { grid-template-columns: 82px 1fr 28px; }
   .subtask-load-row { grid-template-columns: auto 1fr; }
   .subtask-load-row > span:last-child { grid-column: 1 / -1; }
-  .task-card { gap: 10px; grid-template-columns: minmax(0, 1fr) 40px 38px; padding: 14px 16px; }
+  .task-card { gap: 10px; grid-template-columns: minmax(0, 1fr); padding: 14px 14px 14px 70px; }
   .task-card:hover { transform: none; }
-  .task-card > .focus-button { grid-column: 1; grid-row: 1; }
-  .task-card > .check { grid-column: 2; grid-row: 1; }
-  .task-main { grid-column: 1 / -1; grid-row: 2; }
-  .task-card > .task-actions { grid-column: 1 / -1; grid-row: 3; }
-  .task-actions { align-self: start; grid-template-columns: minmax(0, 1fr) 44px; }
+  .task-card > .focus-button { left: 14px; position: absolute; top: 14px; }
+  .task-card > .check { left: 52px; position: absolute; top: 14px; }
+  .task-main { grid-column: 1; grid-row: 1; }
+  .task-card > .task-actions { grid-column: 1; grid-row: 2; }
+  .task-actions { align-self: start; grid-template-columns: minmax(0, 1fr) 42px; }
   .profile-settings-form { align-items: stretch; grid-template-columns: 1fr; }
   .profile-settings-form button { width: 100%; }
   .edit-grid { grid-template-columns: 1fr; }
   .task-editor-meta { align-items: stretch; grid-template-columns: 1fr; }
   .task-editor-id { justify-items: stretch; }
   .task-heading { align-items: flex-start; flex-direction: column; gap: 6px; }
-  .meta { gap: 5px; max-height: 66px; overflow: hidden; }
-  .meta span { font-size: .78rem; padding: 3px 7px; }
-  .quick-filters { flex-wrap: nowrap; justify-content: flex-start; margin-inline: -10px; overflow-x: auto; padding: 0 10px 8px; scroll-snap-type: x proximity; }
-  .quick-filters button { flex: 0 0 auto; scroll-snap-align: start; }
+  .meta { gap: 5px; max-height: 58px; overflow: hidden; }
+  .meta span { font-size: .76rem; padding: 3px 7px; }
+  .quick-filters { display: grid; gap: 8px; grid-template-columns: repeat(3, minmax(0, 1fr)); justify-content: stretch; margin-inline: 0; overflow: visible; padding: 0 0 8px; }
+  .quick-filters button { min-height: 38px; min-width: 0; overflow: hidden; padding: 8px 8px; text-overflow: ellipsis; white-space: nowrap; }
   .subtasks-editor-header { align-items: stretch; flex-direction: column; }
   .subtasks-editor-header button { width: 100%; }
   .subtasks-preview-panel { margin-top: 10px; }
@@ -799,7 +800,6 @@ textarea { resize: vertical; min-height: 86px; }
   .settings-tabs { grid-template-columns: 1fr; position: static; }
   .kanban-toolbar { align-items: stretch; flex-direction: column; border-radius: 16px; padding: 16px; }
   .toggle-control { justify-content: space-between; width: 100%; }
-  .kanban-main { width: min(100% - 20px, 980px); }
   .kanban-board { display: flex; overflow-x: auto; padding-bottom: 12px; scroll-snap-type: x mandatory; }
   .kanban-column { flex: 0 0 min(86vw, 330px); max-height: calc(100vh - 260px); min-height: 360px; min-width: 0; scroll-snap-align: start; }
   .kanban-card:hover, .metric-button:hover { transform: none; }

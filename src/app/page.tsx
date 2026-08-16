@@ -50,9 +50,6 @@ const defaultTaxonomy: TaskTaxonomy = {
   actions: ["טלפון", "פגישה", "מסמך", "תשלום", "מעקב", "קנייה", "בדיקה", "אחר"],
 };
 
-const kanbanStatuses: TaskStatus[] = ["open", "in_progress", "waiting", "done", "cancelled"];
-const activeKanbanStatuses: TaskStatus[] = ["open", "in_progress", "waiting"];
-
 type StatRow = {
   key?: string;
   label: string;
@@ -95,7 +92,7 @@ type ImportSummary = {
 
 type TaskFilter = TaskStatus | "active" | "all" | "overdue" | "today" | "week" | "no_due" | "high" | "subtasks_open" | "focused";
 type AnalyticsRange = "week" | "month" | "all";
-type MainView = "tasks" | "stats" | "kanban";
+type MainView = "tasks" | "stats";
 type TaxonomyMode = "topics" | "actions";
 type SettingsTab = "appearance" | "taxonomy" | "notifications" | "sync";
 type AppTheme = "light" | "dark";
@@ -116,8 +113,8 @@ const defaultNotificationPreferences: NotificationPreferences = {
   overdue: true,
   openSubtasks: true,
   noWeeklyClosures: true,
-  waiting: false,
-  dueSoon: false,
+  waiting: true,
+  dueSoon: true,
 };
 
 const freeTextInputProps = {
@@ -714,7 +711,6 @@ export default function Home() {
   const [settingsTab, setSettingsTab] = useState<SettingsTab>("appearance");
   const [theme, setTheme] = useState<AppTheme>("light");
   const [themeLoaded, setThemeLoaded] = useState(false);
-  const [showClosedKanbanTasks, setShowClosedKanbanTasks] = useState(false);
   const [taxonomy, setTaxonomy] = useState<TaskTaxonomy>(defaultTaxonomy);
   const [taxonomyLoaded, setTaxonomyLoaded] = useState(false);
   const [taxonomyCloudReady, setTaxonomyCloudReady] = useState(false);
@@ -1619,7 +1615,7 @@ export default function Home() {
         body: `במשימה "${topTask.task.title}" יש ${topTask.value} צעדי טיפול פתוחים. זה מקום טוב להתחיל בו כדי לפרק עומס.`,
         tone: "warn",
         priority: 87,
-        actionLabel: "פתח משימה",
+        actionLabel: "הצג משימות",
         action: { query: topTask.task.id, statusFilter: "all" },
       });
     }
@@ -1632,7 +1628,7 @@ export default function Home() {
         body: `${topAction.value} צעדי טיפול פתוחים משויכים לפעולה הזו. אפשר לרכז טיפול מסוג אחד ולסגור כמה צעדים ברצף.`,
         tone: "neutral",
         priority: topAction.value >= 6 ? 83 : 66,
-        actionLabel: topAction.label === "ללא פעולה" ? "הצג צעדים" : "פתח פעולה",
+        actionLabel: topAction.label === "ללא פעולה" ? "הצג צעדים" : "הצג פעולה",
         action: {
           statusFilter: "subtasks_open",
           actionFilter: topAction.label === "ללא פעולה" ? "all" : topAction.label,
@@ -1721,7 +1717,7 @@ export default function Home() {
         body: `${topCategory.value} משימות פעילות מרוכזות שם. זה כנראה המקום שבו מיקוד קצר ייתן הכי הרבה ערך.`,
         tone: "warn",
         priority: topCategory.value >= 6 ? 88 : 70,
-        actionLabel: "פתח נושא",
+        actionLabel: "הצג נושא",
         action: { statusFilter: "active", topicFilter: topCategory.label },
       });
     }
@@ -1733,7 +1729,7 @@ export default function Home() {
         body: `${topAction.value} משימות פעילות משויכות לאותה פעולה. זה יכול לעזור לבחור מצב עבודה אחד ולסגור כמה פריטים ברצף.`,
         tone: topAction.value >= 6 ? "warn" : "neutral",
         priority: topAction.value >= 6 ? 85 : 64,
-        actionLabel: topAction.label === "ללא פעולה" ? "הצג פעילות" : "פתח פעולה",
+        actionLabel: topAction.label === "ללא פעולה" ? "הצג פעילות" : "הצג פעולה",
         action: {
           statusFilter: "active",
           actionFilter: topAction.label === "ללא פעולה" ? "all" : topAction.label,
@@ -3002,7 +2998,7 @@ export default function Home() {
     : todayIso();
 
   return (
-    <main className={activeView === "kanban" ? "kanban-main" : undefined}>
+    <main>
       <header className="hero">
         <div>
           <p className="eyebrow">מעקב משימות אישי</p>
@@ -3348,75 +3344,6 @@ export default function Home() {
                 ))}
               </section>
 
-              <button className="floating-add" onClick={openCreateTask} aria-label="הוספת משימה חדשה">+</button>
-            </>
-          ) : activeView === "kanban" ? (
-            <>
-              <div className="kanban-toolbar">
-                <div>
-                  <h2>לוח עבודה פעיל</h2>
-                  <p>כברירת מחדל מוצגות רק משימות פתוחות, בטיפול או בהמתנה.</p>
-                </div>
-                <label className="toggle-control">
-                  <input
-                    type="checkbox"
-                    checked={showClosedKanbanTasks}
-                    onChange={(event) => setShowClosedKanbanTasks(event.target.checked)}
-                  />
-                  <span>הצג משימות סגורות</span>
-                </label>
-              </div>
-              <section className="kanban-board" aria-label="לוח Kanban">
-                {(showClosedKanbanTasks ? kanbanStatuses : activeKanbanStatuses).map((status) => {
-                  const columnTasks = filteredTasks.filter((task) => task.status === status);
-                  return (
-                    <section className="kanban-column" key={status}>
-                      <div className="kanban-column-header">
-                        <h2>{statusLabels[status]}</h2>
-                        <span>{columnTasks.length}</span>
-                      </div>
-                      <div className="kanban-list">
-                        {columnTasks.length === 0 ? (
-                          <p className="kanban-empty">אין משימות</p>
-                        ) : columnTasks.map((task) => (
-                          <article className={`kanban-card status-${task.status}${isOverdue(task) ? " is-overdue" : ""}${subtaskProgress(task.subtasks).open >= 3 ? " has-open-subtasks" : ""}`} key={task.id}>
-                            <button
-                              className={`focus-button kanban-focus${task.focused ? " active" : ""}`}
-                              aria-label={task.focused ? `הסרת ${task.title} ממיקוד` : `סימון ${task.title} במיקוד`}
-                              aria-pressed={Boolean(task.focused)}
-                              onClick={() => toggleTaskFocus(task.id)}
-                              title={task.focused ? "הסרה ממיקוד" : "סימון במיקוד"}
-                            >
-                              ★
-                            </button>
-                            <div className="task-heading">
-                              <span className="task-id">{task.id}</span>
-                              <h3>{task.title}</h3>
-                            </div>
-                            <div className="meta">
-                              <span>נושא {task.category}</span>
-                              {task.actionType && <span>פעולה {task.actionType}</span>}
-                              <span>עדיפות {priorityLabels[task.priority]}</span>
-                              {task.dueDate && <span>יעד {formatDate(task.dueDate)}</span>}
-                              {taskStatusTimestampLabel(task) && <span className="status-timestamp">{taskStatusTimestampLabel(task)}</span>}
-                              {subtaskProgressLabel(task.subtasks) && <span className="subtask-progress">{subtaskProgressLabel(task.subtasks)}</span>}
-                            </div>
-                            {renderSubtasksPreview(task)}
-                            <div className="kanban-actions">
-                              <select value={task.status} onChange={(event) => updateStatus(task.id, event.target.value as TaskStatus)} aria-label={`סטטוס ${task.title}`}>
-                                {Object.entries(statusLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
-                              </select>
-                              <button className="edit-icon-button" onClick={() => openEditTask(task)} aria-label={`עריכת ${task.title}`} title="עריכה">
-                                <span aria-hidden="true">✎</span>
-                              </button>
-                            </div>
-                          </article>
-                        ))}
-                      </div>
-                    </section>
-                  );
-                })}
-              </section>
               <button className="floating-add" onClick={openCreateTask} aria-label="הוספת משימה חדשה">+</button>
             </>
           ) : (
