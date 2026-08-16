@@ -121,6 +121,8 @@ h1 { line-height: 1.05; margin: 0; font-size: clamp(2.5rem, 6vw, 4.2rem); overfl
 .notification-modal-kicker { color: var(--accent-dark); font-size: .86rem; font-weight: 900; }
 .notification-modal h2 { font-size: 1.35rem; margin: 4px 0 6px; padding-left: 46px; }
 .notification-modal p { color: var(--muted); line-height: 1.55; margin: 0; }
+.modal-task-tools { align-items: center; display: grid; gap: 10px; grid-template-columns: 1fr auto; }
+.modal-task-tools span { background: var(--accent-soft); border: 1px solid #dbeafe; border-radius: var(--radius-pill); color: var(--accent-dark); font-size: .82rem; font-weight: 800; padding: 7px 10px; white-space: nowrap; }
 .notification-modal-list { display: grid; gap: 10px; }
 .notification-task { align-items: center; background: var(--surface-soft); border: 1px solid var(--border); border-radius: var(--radius-md); display: grid; gap: 12px; grid-template-columns: 1fr auto; padding: 12px; position: relative; }
 .notification-task::before { border-radius: 0 var(--radius-md) var(--radius-md) 0; content: ""; inset: 0 0 0 auto; position: absolute; width: 4px; }
@@ -623,6 +625,7 @@ textarea { resize: vertical; min-height: 86px; }
 [data-theme="dark"] .attention-tag,
 [data-theme="dark"] .auth-status,
 [data-theme="dark"] .cloud-panel code,
+[data-theme="dark"] .modal-task-tools span,
 [data-theme="dark"] .quick-filters button.active,
 [data-theme="dark"] .subtask-add-inline,
 [data-theme="dark"] .subtasks-toggle,
@@ -737,6 +740,8 @@ textarea { resize: vertical; min-height: 86px; }
   .app-notification button { width: 100%; }
   .notification-modal-backdrop { padding: 10px; }
   .notification-modal { max-height: calc(100vh - 20px); max-width: calc(100vw - 20px); padding: 16px; }
+  .modal-task-tools { grid-template-columns: 1fr; }
+  .modal-task-tools span { justify-self: start; }
   .notification-task { align-items: stretch; grid-template-columns: 1fr; }
   .notification-task button { width: 100%; }
   .metric-grid, .chart-grid, .timeline-stats, .analytics-layout { grid-template-columns: 1fr; }
@@ -766,7 +771,7 @@ textarea { resize: vertical; min-height: 86px; }
   .task-card > .focus-button { grid-column: 1; grid-row: 1; }
   .task-card > .check { grid-column: 2; grid-row: 1; }
   .task-main { grid-column: 1 / -1; grid-row: 2; }
-  .task-card > .task-actions { grid-column: 3; grid-row: 1; }
+  .task-card > .task-actions { grid-column: 1 / -1; grid-row: 3; }
   .task-actions { align-self: start; grid-template-columns: minmax(0, 1fr) 44px; }
   .profile-settings-form { align-items: stretch; grid-template-columns: 1fr; }
   .profile-settings-form button { width: 100%; }
@@ -776,6 +781,8 @@ textarea { resize: vertical; min-height: 86px; }
   .task-heading { align-items: flex-start; flex-direction: column; gap: 6px; }
   .meta { gap: 5px; max-height: 66px; overflow: hidden; }
   .meta span { font-size: .78rem; padding: 3px 7px; }
+  .quick-filters { flex-wrap: nowrap; justify-content: flex-start; margin-inline: -10px; overflow-x: auto; padding: 0 10px 8px; scroll-snap-type: x proximity; }
+  .quick-filters button { flex: 0 0 auto; scroll-snap-align: start; }
   .subtasks-editor-header { align-items: stretch; flex-direction: column; }
   .subtasks-editor-header button { width: 100%; }
   .subtasks-preview-panel { margin-top: 10px; }

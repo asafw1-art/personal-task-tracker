@@ -72,6 +72,7 @@ type AnalyticsInsight = {
     topicFilter?: string;
     actionFilter?: string;
     query?: string;
+    taskIds?: string[];
   };
 };
 
@@ -762,6 +763,7 @@ export default function Home() {
     tone: AnalyticsInsight["tone"];
     action: NonNullable<AnalyticsInsight["action"]>;
   } | null>(null);
+  const [modalTaskQuery, setModalTaskQuery] = useState("");
   const assistantMessagesRef = useRef<HTMLDivElement | null>(null);
   const [cloudStatus, setCloudStatus] = useState(
     isSupabaseConfigured ? "בודק חיבור ל-Supabase..." : "Supabase עדיין לא מוגדר. עובדים במצב מקומי."
@@ -1408,6 +1410,11 @@ export default function Home() {
     const weekEnd = addDaysIso(6);
     const filter = action.statusFilter ?? "active";
 
+    if (action.taskIds?.length) {
+      const taskIds = new Set(action.taskIds.map((id) => canonicalTaskId(id)));
+      return sortTasks(tasks.filter((task) => taskIds.has(task.id)));
+    }
+
     if (normalized) {
       return sortTasks(tasks.filter((task) => task.id === normalized));
     }
@@ -1430,7 +1437,17 @@ export default function Home() {
       }));
   }
 
+  function taskMatchesModalQuery(task: Task) {
+    const queryText = modalTaskQuery.trim().toLowerCase();
+    if (!queryText) return true;
+    const normalized = canonicalTaskId(queryText);
+    if (normalized && task.id === normalized) return true;
+    return `${task.id} ${task.title} ${task.category} ${task.actionType ?? ""} ${task.notes ?? ""}`.toLowerCase().includes(queryText);
+  }
+
   const analyticsModalTasks = analyticsTaskModal ? tasksForAnalyticsAction(analyticsTaskModal.action) : [];
+  const filteredAnalyticsModalTasks = analyticsModalTasks.filter(taskMatchesModalQuery);
+  const filteredNotificationTasks = primaryNotificationTasks.filter(taskMatchesModalQuery);
 
   const statistics = useMemo(() => {
     const today = todayIso();
@@ -1749,8 +1766,8 @@ export default function Home() {
         body: "יש משימות פעילות שכל צעדי הטיפול שלהן כבר סגורים. זה מקום טוב לבדוק אם אפשר לסגור את המשימה הראשית.",
         tone: "good",
         priority: 76,
-        actionLabel: "פתח ראשונה",
-        action: { query: activeWithAllSubtasksDone[0].id, statusFilter: "all" },
+        actionLabel: "הצג לבדיקה",
+        action: { taskIds: activeWithAllSubtasksDone.map((task) => task.id), statusFilter: "all" },
       });
     }
 
@@ -1761,8 +1778,8 @@ export default function Home() {
         body: "יש משימות שסומנו כבוצעו אבל נשארו בהן צעדי טיפול פתוחים. כדאי לבדוק אם הצעדים בוצעו, בוטלו או צריכים משימה חדשה.",
         tone: "warn",
         priority: 81,
-        actionLabel: "פתח לבדיקה",
-        action: { query: doneWithOpenSubtasks[0].id, statusFilter: "all" },
+        actionLabel: "הצג לבדיקה",
+        action: { taskIds: doneWithOpenSubtasks.map((task) => task.id), statusFilter: "all" },
       });
     }
 
@@ -1773,8 +1790,8 @@ export default function Home() {
         body: "משימות בטיפול בלי צעדים מקשות להבין מה ההתקדמות הבאה. כדאי להוסיף צעד טיפול אחד ברור למשימה המרכזית ביותר.",
         tone: "neutral",
         priority: inProgressWithoutSubtasks.length >= 3 ? 71 : 52,
-        actionLabel: "פתח ראשונה",
-        action: { query: inProgressWithoutSubtasks[0].id, statusFilter: "all" },
+        actionLabel: "הצג משימות",
+        action: { taskIds: inProgressWithoutSubtasks.map((task) => task.id), statusFilter: "all" },
       });
     }
 
@@ -1837,8 +1854,8 @@ export default function Home() {
         body: `${stuckTasks.length} משימות פעילות לא שינו סטטוס מעל ${stuckThresholdDays} יום. כדאי לבחור אחת ולהחליט: לקדם, לעדכן יעד, להעביר לממתינה או לסגור.`,
         tone: "danger",
         priority: 95,
-        actionLabel: "פתח ראשונה",
-        action: { query: stuckTasks[0].id, statusFilter: "all" },
+        actionLabel: "הצג תקועות",
+        action: { taskIds: stuckTasks.map((task) => task.id), statusFilter: "all" },
       });
     }
 
@@ -2102,6 +2119,7 @@ export default function Home() {
 
   function applyInsightAction(insight: AnalyticsInsight) {
     if (!insight.action) return;
+    setModalTaskQuery("");
     setAnalyticsTaskModal({
       title: insight.title,
       body: insight.body,
@@ -2112,6 +2130,7 @@ export default function Home() {
 
   function applyAnalyticsAction(action: AnalyticsInsight["action"]) {
     if (!action) return;
+    setModalTaskQuery("");
     setAnalyticsTaskModal({
       title: "משימות רלוונטיות",
       body: "רשימת המשימות שמתאימה לסיכום שבחרת.",
@@ -2121,6 +2140,7 @@ export default function Home() {
   }
 
   function applyNotificationAction(notification: AppNotification) {
+    setModalTaskQuery("");
     setNotificationModalDismissed(false);
     setActiveNotificationId(notification.id);
   }
@@ -3080,6 +3100,7 @@ export default function Home() {
                   onClick={() => {
                     setNotificationModalDismissed(true);
                     setActiveNotificationId("");
+                    setModalTaskQuery("");
                   }}
                   aria-label="סגירת התראה"
                 >
@@ -3090,10 +3111,20 @@ export default function Home() {
                   <h2 id="primary-notification-title">{primaryAppNotification.title}</h2>
                   <p>{primaryAppNotification.body}</p>
                 </div>
+                <div className="modal-task-tools">
+                  <input
+                    {...freeTextInputProps}
+                    value={modalTaskQuery}
+                    onChange={(event) => setModalTaskQuery(event.target.value)}
+                    placeholder="חיפוש בתוך המשימות בחלונית..."
+                    aria-label="חיפוש במשימות ההתראה"
+                  />
+                  <span>{filteredNotificationTasks.length} מתוך {primaryNotificationTasks.length}</span>
+                </div>
                 <div className="notification-modal-list" aria-label="משימות בהתראה">
-                  {primaryNotificationTasks.length === 0 ? (
+                  {filteredNotificationTasks.length === 0 ? (
                     <p className="notification-modal-empty">אין משימות רלוונטיות להצגה כרגע.</p>
-                  ) : primaryNotificationTasks.slice(0, 8).map((task) => (
+                  ) : filteredNotificationTasks.map((task) => (
                     <article className={`notification-task status-${task.status}${isOverdue(task) ? " is-overdue" : ""}`} key={task.id}>
                       <div>
                         <span className="task-id">{task.id}</span>
@@ -3109,6 +3140,7 @@ export default function Home() {
                         onClick={() => {
                           setNotificationModalDismissed(true);
                           setActiveNotificationId("");
+                          setModalTaskQuery("");
                           openEditTask(task);
                         }}
                       >
@@ -3116,9 +3148,6 @@ export default function Home() {
                       </button>
                     </article>
                   ))}
-                  {primaryNotificationTasks.length > 8 && (
-                    <p className="notification-modal-empty">מוצגות 8 מתוך {primaryNotificationTasks.length} משימות. אפשר לפתוח את ההתראה שוב מהכרטיסים במסך.</p>
-                  )}
                 </div>
               </article>
             </section>
@@ -3135,7 +3164,10 @@ export default function Home() {
                 <button
                   type="button"
                   className="icon-button"
-                  onClick={() => setAnalyticsTaskModal(null)}
+                  onClick={() => {
+                    setAnalyticsTaskModal(null);
+                    setModalTaskQuery("");
+                  }}
                   aria-label="סגירת חלונית משימות"
                 >
                   ×
@@ -3145,10 +3177,20 @@ export default function Home() {
                   <h2 id="analytics-task-modal-title">{analyticsTaskModal.title}</h2>
                   <p>{analyticsTaskModal.body}</p>
                 </div>
+                <div className="modal-task-tools">
+                  <input
+                    {...freeTextInputProps}
+                    value={modalTaskQuery}
+                    onChange={(event) => setModalTaskQuery(event.target.value)}
+                    placeholder="חיפוש בתוך המשימות בחלונית..."
+                    aria-label="חיפוש במשימות מתוך תובנה"
+                  />
+                  <span>{filteredAnalyticsModalTasks.length} מתוך {analyticsModalTasks.length}</span>
+                </div>
                 <div className="notification-modal-list" aria-label="משימות רלוונטיות">
-                  {analyticsModalTasks.length === 0 ? (
+                  {filteredAnalyticsModalTasks.length === 0 ? (
                     <p className="notification-modal-empty">אין משימות רלוונטיות להצגה כרגע.</p>
-                  ) : analyticsModalTasks.slice(0, 12).map((task) => (
+                  ) : filteredAnalyticsModalTasks.map((task) => (
                     <article className={`notification-task status-${task.status}${isOverdue(task) ? " is-overdue" : ""}`} key={task.id}>
                       <div>
                         <span className="task-id">{task.id}</span>
@@ -3164,6 +3206,7 @@ export default function Home() {
                         type="button"
                         onClick={() => {
                           setAnalyticsTaskModal(null);
+                          setModalTaskQuery("");
                           openEditTask(task);
                         }}
                       >
@@ -3171,9 +3214,6 @@ export default function Home() {
                       </button>
                     </article>
                   ))}
-                  {analyticsModalTasks.length > 12 && (
-                    <p className="notification-modal-empty">מוצגות 12 מתוך {analyticsModalTasks.length} משימות.</p>
-                  )}
                 </div>
               </article>
             </section>
