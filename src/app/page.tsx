@@ -710,7 +710,7 @@ export default function Home() {
   const [activeView, setActiveView] = useState<MainView>("tasks");
   const [analyticsRange, setAnalyticsRange] = useState<AnalyticsRange>("week");
   const [taxonomyMode, setTaxonomyMode] = useState<TaxonomyMode>("topics");
-  const [settingsTab, setSettingsTab] = useState<SettingsTab>("sync");
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("appearance");
   const [theme, setTheme] = useState<AppTheme>("light");
   const [themeLoaded, setThemeLoaded] = useState(false);
   const [showClosedKanbanTasks, setShowClosedKanbanTasks] = useState(false);
@@ -753,6 +753,7 @@ export default function Home() {
   const [assistantIsSending, setAssistantIsSending] = useState(false);
   const [deletedAssistantThreads, setDeletedAssistantThreads] = useState<AssistantThread[]>([]);
   const [assistantRestoreStatus, setAssistantRestoreStatus] = useState("");
+  const [dismissedNotificationId, setDismissedNotificationId] = useState("");
   const assistantMessagesRef = useRef<HTMLDivElement | null>(null);
   const [cloudStatus, setCloudStatus] = useState(
     isSupabaseConfigured ? "בודק חיבור ל-Supabase..." : "Supabase עדיין לא מוגדר. עובדים במצב מקומי."
@@ -1368,6 +1369,8 @@ export default function Home() {
 
     return notifications;
   }, [notificationPreferences, tasks]);
+
+  const primaryAppNotification = appNotifications.find((notification) => notification.id !== dismissedNotificationId);
 
   const statistics = useMemo(() => {
     const today = todayIso();
@@ -2045,6 +2048,7 @@ export default function Home() {
   }
 
   function applyNotificationAction(notification: AppNotification) {
+    setDismissedNotificationId(notification.id);
     showTaskList(notification.action.statusFilter);
   }
 
@@ -2911,7 +2915,10 @@ export default function Home() {
           <p className="subtitle">ניהול פשוט, עקבי ונגיש מכל מכשיר</p>
         </div>
         {cloudUser && (
-          <button className="settings-button" onClick={() => setIsSettingsOpen(true)} aria-label="פתיחת הגדרות">
+          <button className="settings-button" onClick={() => {
+            setSettingsTab("appearance");
+            setIsSettingsOpen(true);
+          }} aria-label="פתיחת הגדרות">
             <span aria-hidden="true">⚙</span>
             הגדרות
           </button>
@@ -2978,6 +2985,29 @@ export default function Home() {
                   <button onClick={() => applyNotificationAction(notification)}>{notification.actionLabel}</button>
                 </article>
               ))}
+            </section>
+          )}
+
+          {primaryAppNotification && (
+            <section className="notification-modal-backdrop" aria-label="התראה חשובה">
+              <article className={`notification-modal notification-${primaryAppNotification.tone}`} role="dialog" aria-modal="false" aria-labelledby="primary-notification-title">
+                <button
+                  type="button"
+                  className="icon-button"
+                  onClick={() => setDismissedNotificationId(primaryAppNotification.id)}
+                  aria-label="סגירת התראה"
+                >
+                  ×
+                </button>
+                <div>
+                  <span className="notification-modal-kicker">התראה פעילה</span>
+                  <h2 id="primary-notification-title">{primaryAppNotification.title}</h2>
+                  <p>{primaryAppNotification.body}</p>
+                </div>
+                <button type="button" onClick={() => applyNotificationAction(primaryAppNotification)}>
+                  {primaryAppNotification.actionLabel}
+                </button>
+              </article>
             </section>
           )}
 
@@ -3858,7 +3888,7 @@ export default function Home() {
                   <input
                     type="date"
                     value={taskEditor.draft.dueDate}
-                    min={taskEditor.draft.dueDate && taskEditor.draft.dueDate < todayIso() ? taskEditor.draft.dueDate : todayIso()}
+                    min={todayIso()}
                     onChange={(event) => updateTaskDraft({ dueDate: event.target.value })}
                   />
                 </label>
