@@ -1598,8 +1598,6 @@ export default function Home() {
         body: `זה סימן להתקדמות בתוך משימות, גם אם המשימה הראשית עדיין לא נסגרה. שיעור השלמת הצעדים הכולל עומד על ${subtaskCompletionRate}%.`,
         tone: "good",
         priority: 73,
-        actionLabel: "הצג צעדים פתוחים",
-        action: { statusFilter: "subtasks_open" },
       });
     } else if (openSubtasks > 0) {
       addInsight({
@@ -1671,8 +1669,6 @@ export default function Home() {
         body: `${completedLast7} סגירות השבוע לעומת ${completedPrevious7} בשבוע הקודם. כדאי לבחור משימה קטנה אחת ולסגור אותה כדי להחזיר תנופה.`,
         tone: "warn",
         priority: 92,
-        actionLabel: "הצג פעילות",
-        action: { statusFilter: "active" },
       });
     } else if (completedLast7 > completedPrevious7 && completedLast7 > 0) {
       addInsight({
@@ -1681,8 +1677,6 @@ export default function Home() {
         body: `${completedLast7} סגירות השבוע לעומת ${completedPrevious7} בשבוע הקודם. שווה לשמר את הקצב עם עוד משימה קצרה.`,
         tone: "good",
         priority: 55,
-        actionLabel: "הצג פעילות",
-        action: { statusFilter: "active" },
       });
     }
 
@@ -1843,8 +1837,6 @@ export default function Home() {
           : "השבוע עוד לא נסגרו משימות. אפשר לבחור משימה קטנה אחת ולייצר התקדמות מהירה.",
       tone: completedLast7 > 0 ? "good" : "neutral",
       priority: completedLast7 > 0 ? 50 : 72,
-      actionLabel: done.length > 0 ? "הצג הושלמו" : "הצג פעילות",
-      action: { statusFilter: done.length > 0 ? "done" : "active" },
     });
 
     if (stuckTasks.length > 0) {
@@ -2005,10 +1997,10 @@ export default function Home() {
     const sortedInsights = insights.sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
     const updateInsightIds = new Set(["completed-subtasks", "closure-slowdown", "closure-improved", "completion-rate", "no-overdue"]);
     const actionInsights = sortedInsights
-      .filter((insight) => insight.tone !== "good" && !updateInsightIds.has(insight.id))
+      .filter((insight) => insight.action && insight.actionLabel && insight.tone !== "good" && !updateInsightIds.has(insight.id))
       .slice(0, 4);
     const updateInsights = sortedInsights
-      .filter((insight) => insight.tone === "good" || updateInsightIds.has(insight.id))
+      .filter((insight) => !insight.action || insight.tone === "good" || updateInsightIds.has(insight.id))
       .slice(0, 3);
 
     return {

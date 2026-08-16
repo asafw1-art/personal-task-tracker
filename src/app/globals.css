@@ -400,8 +400,8 @@ textarea { resize: vertical; min-height: 86px; }
 .taxonomy-group h3 { font-size: 1rem; margin: 0 0 10px; }
 .taxonomy-chips { display: flex; flex-wrap: wrap; gap: 8px; }
 .taxonomy-chip { align-items: center; background: #eef4ff; border: 1px solid #dbe7ff; border-radius: 999px; color: var(--accent-dark); display: inline-flex; font-weight: 700; gap: 6px; padding: 6px 9px; }
-.taxonomy-chip button { align-items: center; background: #fff; border: 1px solid #bfdbfe; border-radius: 999px; color: #334155; display: inline-flex; font-weight: 900; height: 22px; justify-content: center; line-height: 1; width: 22px; }
-.taxonomy-chip button:hover { color: #b91c1c; }
+.taxonomy-chip button { align-items: center; background: #fff; border: 1px solid #93c5fd; border-radius: 999px; box-shadow: 0 1px 3px rgba(15, 23, 42, .14); color: #1e3a8a; display: inline-flex; font-weight: 900; height: 24px; justify-content: center; line-height: 1; width: 24px; }
+.taxonomy-chip button:hover { background: #eff6ff; border-color: #60a5fa; color: #b91c1c; }
 .kanban-toolbar { align-items: center; background: linear-gradient(135deg, var(--surface), var(--surface-muted)); border: 1px solid var(--border); border-radius: 18px; box-shadow: var(--shadow-soft); display: flex; justify-content: space-between; gap: 16px; margin-bottom: 14px; padding: 18px; }
 .kanban-toolbar h2 { font-size: 1rem; margin: 0 0 4px; }
 .kanban-toolbar p { color: var(--muted); margin: 0; }
@@ -666,9 +666,9 @@ textarea { resize: vertical; min-height: 86px; }
   border-color: #315f95;
 }
 [data-theme="dark"] .taxonomy-chip button {
-  background: #f8fafc;
-  border-color: #bfdbfe;
-  color: #1e293b;
+  background: #e0f2fe;
+  border-color: #93c5fd;
+  color: #0f172a;
 }
 [data-theme="dark"] .bar-track,
 [data-theme="dark"] .vertical-track {
