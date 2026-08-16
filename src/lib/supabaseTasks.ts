@@ -63,7 +63,8 @@ function dateOnly(value: string | null | undefined) {
 
 function toTimestamp(value: string | undefined) {
   if (!value) return null;
-  return new Date(value.includes("T") ? value : `${value}T00:00:00`).toISOString();
+  if (!value.includes("T")) return `${value}T12:00:00.000Z`;
+  return new Date(value).toISOString();
 }
 
 function isTaskSubtaskStatus(value: unknown): value is TaskSubtaskStatus {
