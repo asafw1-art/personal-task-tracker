@@ -1949,13 +1949,13 @@ export default function Home() {
           : { actionLabel: "הצג פעילות", action: { statusFilter: "active" as TaskFilter } };
 
     const sortedInsights = insights.sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
-    const positiveInsight = sortedInsights.find((insight) => insight.tone === "good");
-    const actionableInsights = sortedInsights
-      .filter((insight) => insight.tone !== "good")
-      .slice(0, positiveInsight ? 4 : 5);
-    const selectedInsights = positiveInsight
-      ? [...actionableInsights, positiveInsight].sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0))
-      : actionableInsights;
+    const updateInsightIds = new Set(["completed-subtasks", "closure-slowdown", "closure-improved", "completion-rate", "no-overdue"]);
+    const actionInsights = sortedInsights
+      .filter((insight) => insight.tone !== "good" && !updateInsightIds.has(insight.id))
+      .slice(0, 4);
+    const updateInsights = sortedInsights
+      .filter((insight) => insight.tone === "good" || updateInsightIds.has(insight.id))
+      .slice(0, 3);
 
     return {
       periodSummary: {
@@ -1980,7 +1980,9 @@ export default function Home() {
       tasksByOpenSubtasks: tasksByOpenSubtasks.slice(0, 5),
       byCategory: activeCategories,
       attention: Array.from(attentionMap.values()).slice(0, 8),
-      insights: selectedInsights,
+      actionInsights,
+      updateInsights,
+      insights: [...actionInsights, ...updateInsights],
     };
   }, [analyticsRange, stuckThresholdDays, tasks]);
 
@@ -3302,22 +3304,40 @@ export default function Home() {
                 <div className="panel-heading">
                   <div>
                     <h2>תובנות מרכזיות</h2>
-                    <span>מיידי, שבועי וכללי לפי מצב המשימות הנוכחי</span>
+                    <span>הפרדה בין דברים שדורשים פעולה לבין עדכונים ומגמות</span>
                   </div>
                 </div>
-                <div className="insights-grid">
-                  {analytics.insights.map((insight) => (
-                    <article className={`insight-card insight-${insight.tone}`} key={insight.id}>
-                      <div>
-                        <h3>{insight.title}</h3>
-                        <p>{insight.body}</p>
-                      </div>
-                      {insight.action && insight.actionLabel && (
-                        <button onClick={() => applyInsightAction(insight)}>{insight.actionLabel}</button>
-                      )}
-                    </article>
-                  ))}
+                <div className="insight-group">
+                  <h3>דורש פעולה</h3>
+                  <div className="insights-grid insights-grid-action">
+                    {analytics.actionInsights.map((insight) => (
+                      <article className={`insight-card insight-${insight.tone}`} key={insight.id}>
+                        <div>
+                          <h3>{insight.title}</h3>
+                          <p>{insight.body}</p>
+                        </div>
+                        {insight.action && insight.actionLabel && (
+                          <button onClick={() => applyInsightAction(insight)}>{insight.actionLabel}</button>
+                        )}
+                      </article>
+                    ))}
+                  </div>
                 </div>
+                {analytics.updateInsights.length > 0 && (
+                  <div className="insight-group insight-group-updates">
+                    <h3>עדכונים ומגמות</h3>
+                    <div className="insights-grid insights-grid-updates">
+                      {analytics.updateInsights.map((insight) => (
+                        <article className={`insight-card insight-${insight.tone}`} key={insight.id}>
+                          <div>
+                            <h3>{insight.title}</h3>
+                            <p>{insight.body}</p>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </section>
 
               <div className="metric-grid analytics-metrics">
