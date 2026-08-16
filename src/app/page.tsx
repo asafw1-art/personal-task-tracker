@@ -2518,8 +2518,11 @@ export default function Home() {
       setTaskEditorError("יש למלא שם לכל צעד טיפול פעיל, או לבטל אותו.");
       return;
     }
-    if (taskEditor.mode === "create" && draft.dueDate && draft.dueDate < todayIso()) {
-      setTaskEditorError("תאריך יעד למשימה חדשה לא יכול להיות בעבר.");
+    const originalTask = taskEditor.mode === "edit" ? tasks.find((task) => task.id === taskEditor.taskId) : undefined;
+    const originalDueDate = originalTask?.dueDate ?? "";
+    const dueDateChanged = draft.dueDate !== originalDueDate;
+    if (draft.dueDate && draft.dueDate < todayIso() && (taskEditor.mode === "create" || dueDateChanged)) {
+      setTaskEditorError(taskEditor.mode === "create" ? "תאריך יעד למשימה חדשה לא יכול להיות בעבר." : "לא ניתן לשנות תאריך יעד לתאריך שכבר עבר.");
       return;
     }
 
@@ -2928,6 +2931,13 @@ export default function Home() {
   const authStatusClassName = cloudStatus.includes("נכשלה") || cloudStatus.includes("שגיאה") || cloudStatus.includes("לא מוגדר")
     ? "auth-status auth-status-error"
     : "auth-status";
+
+  const taskEditorOriginalDueDate = taskEditor?.mode === "edit"
+    ? tasks.find((task) => task.id === taskEditor.taskId)?.dueDate ?? ""
+    : "";
+  const taskEditorMinDueDate = taskEditorOriginalDueDate && taskEditorOriginalDueDate < todayIso()
+    ? taskEditorOriginalDueDate
+    : todayIso();
 
   return (
     <main className={activeView === "kanban" ? "kanban-main" : undefined}>
@@ -3941,7 +3951,7 @@ export default function Home() {
                   <input
                     type="date"
                     value={taskEditor.draft.dueDate}
-                    min={todayIso()}
+                    min={taskEditorMinDueDate}
                     onChange={(event) => updateTaskDraft({ dueDate: event.target.value })}
                   />
                 </label>
