@@ -752,7 +752,7 @@ export default function Home() {
   const [deletedAssistantThreads, setDeletedAssistantThreads] = useState<AssistantThread[]>([]);
   const [assistantRestoreStatus, setAssistantRestoreStatus] = useState("");
   const [activeNotificationId, setActiveNotificationId] = useState("");
-  const [notificationModalDismissed, setNotificationModalDismissed] = useState(false);
+  const [dismissedNotificationIds, setDismissedNotificationIds] = useState<Set<string>>(() => new Set());
   const [analyticsTaskModal, setAnalyticsTaskModal] = useState<{
     title: string;
     body: string;
@@ -1394,8 +1394,12 @@ export default function Home() {
     }));
   }
 
+  const visibleDismissedNotificationIds = useMemo(() => {
+    const activeIds = new Set(appNotifications.map((notification) => notification.id));
+    return new Set([...dismissedNotificationIds].filter((id) => activeIds.has(id)));
+  }, [appNotifications, dismissedNotificationIds]);
   const selectedAppNotification = appNotifications.find((notification) => notification.id === activeNotificationId);
-  const primaryAppNotification = selectedAppNotification ?? (!notificationModalDismissed ? appNotifications[0] : undefined);
+  const primaryAppNotification = selectedAppNotification ?? appNotifications.find((notification) => !visibleDismissedNotificationIds.has(notification.id));
   const primaryNotificationTasks = primaryAppNotification
     ? tasksForNotificationFilter(primaryAppNotification.action.statusFilter)
     : [];
@@ -2129,7 +2133,11 @@ export default function Home() {
 
   function applyNotificationAction(notification: AppNotification) {
     setModalTaskQuery("");
-    setNotificationModalDismissed(false);
+    setDismissedNotificationIds((current) => {
+      const next = new Set(current);
+      next.delete(notification.id);
+      return next;
+    });
     setActiveNotificationId(notification.id);
   }
 
@@ -3086,7 +3094,7 @@ export default function Home() {
                   type="button"
                   className="icon-button"
                   onClick={() => {
-                    setNotificationModalDismissed(true);
+                    setDismissedNotificationIds((current) => new Set(current).add(primaryAppNotification.id));
                     setActiveNotificationId("");
                     setModalTaskQuery("");
                   }}
@@ -3126,7 +3134,7 @@ export default function Home() {
                       <button
                         type="button"
                         onClick={() => {
-                          setNotificationModalDismissed(true);
+                          setDismissedNotificationIds((current) => new Set(current).add(primaryAppNotification.id));
                           setActiveNotificationId("");
                           setModalTaskQuery("");
                           openEditTask(task);

@@ -715,8 +715,9 @@ textarea { resize: vertical; min-height: 86px; }
 @media (max-width: 700px) {
   main { max-width: calc(100vw - 20px); width: calc(100vw - 20px); padding: 18px 0 86px; }
   .hero { align-items: stretch; flex-direction: column; min-height: 0; padding: 20px 18px 18px; }
-  .hero h1 { padding-inline-start: 58px; }
-  .hero .subtitle { padding-inline-start: 58px; }
+  .hero > div { padding-inline-end: 62px; }
+  .hero h1 { padding-inline-start: 0; }
+  .hero .subtitle { padding-inline-start: 0; }
   .hero .secondary { align-self: flex-start; }
   .settings-button { align-self: flex-start; font-size: 0; gap: 0; padding: 10px; position: absolute; left: 18px; top: 28px; }
   .settings-button span { font-size: 1.12rem; }

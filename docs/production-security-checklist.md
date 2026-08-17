@@ -61,3 +61,18 @@ Run this checklist after security-sensitive changes, Supabase schema changes, or
 - Confirm `npm.cmd run lint` passes.
 - Confirm `npm.cmd run build` passes.
 
+## Last local security audit
+
+Updated: 2026-08-17
+
+- `/api/assistant` requires a valid Supabase session token and returns `401` for missing or invalid tokens.
+- AI assistant requests have request-size limits and per-user in-memory rate limits.
+- AI actions are sanitized server-side and bulk delete/cancel/reset actions are not allowed from the chat.
+- Client-visible environment variables are limited to the Supabase public URL and publishable key in `.env.local`.
+- Server-only AI provider keys are referenced only inside the server route.
+- Supabase SQL files define RLS for `tasks`, `user_devices`, `user_settings`, `task_taxonomy_items`, `assistant_threads`, `assistant_messages`, and `assistant_actions`.
+- Security headers are configured in `next.config.ts`.
+
+Manual follow-up that still requires two real accounts:
+
+- Log in as user A and user B and verify that each user sees only their own tasks, taxonomy, settings, devices, and assistant history.
