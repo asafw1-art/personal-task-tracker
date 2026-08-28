@@ -453,12 +453,13 @@ textarea { resize: vertical; min-height: 86px; }
 .analytics-header { align-items: center; background: linear-gradient(135deg, var(--surface), var(--surface-muted)); border: 1px solid var(--border); border-radius: 18px; box-shadow: var(--shadow-soft); display: flex; justify-content: space-between; gap: 16px; margin-bottom: 2px; padding: 18px; }
 .analytics-header h2 { margin: 0 0 6px; font-size: 1.15rem; }
 .analytics-header p, .panel-heading span, .muted-line { color: var(--muted); margin: 0; }
-.period-summary-panel { align-items: center; border-radius: 18px; display: grid; gap: 16px; grid-template-columns: minmax(220px, 1.1fr) minmax(260px, 1fr) auto; padding: 20px; }
+.period-summary-panel { align-items: center; border-radius: 18px; display: grid; gap: 16px; grid-template-columns: minmax(220px, 1.05fr) minmax(260px, 1fr) minmax(220px, .9fr) auto; padding: 20px; }
 .period-summary-panel h2 { margin: 0 0 8px; font-size: 1.18rem; }
 .period-summary-panel p:not(.eyebrow) { color: var(--muted); line-height: 1.55; margin: 0; }
 .period-summary-panel ul { display: grid; gap: 7px; list-style: none; margin: 0; padding: 0; }
 .period-summary-panel li { align-items: center; color: var(--text); display: flex; gap: 8px; line-height: 1.4; }
 .period-summary-panel li::before { background: var(--accent); border-radius: 999px; content: ""; flex: 0 0 auto; height: 7px; width: 7px; }
+.summary-recommendation { background: #eef4ff; border: 1px solid #dbe7ff; border-radius: 12px; color: var(--text) !important; font-weight: 700; padding: 12px; }
 .period-summary-panel button { background: var(--accent); border: 0; border-radius: 10px; color: #fff; font-weight: 700; padding: 11px 14px; white-space: nowrap; }
 .period-summary-panel button:hover { background: var(--accent-dark); }
 .insights-panel { border-radius: 18px; margin-bottom: 0; padding: 18px; }
@@ -693,6 +694,10 @@ textarea { resize: vertical; min-height: 86px; }
 [data-theme="dark"] .taxonomy-chip button:last-of-type:hover {
   background: #991b1b;
   border-color: #fecaca;
+}
+[data-theme="dark"] .summary-recommendation {
+  background: #1e3a5f;
+  border-color: #315f95;
 }
 [data-theme="dark"] .bar-track,
 [data-theme="dark"] .vertical-track {

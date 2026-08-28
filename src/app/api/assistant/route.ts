@@ -297,6 +297,7 @@ function findTask(tasks: Task[], taskId: unknown) {
 function sanitizeAction(action: AssistantProposedAction | undefined, tasks: Task[], userMessage: string): AssistantProposedAction | undefined {
   if (!action) return undefined;
   if (!isRecord(action) || typeof action.type !== "string") return undefined;
+  const looksLikeBulkTaskChange = /כל המשימות|כולן|כולם|איפוס|reset all|delete all|מחק הכל|לבטל הכל|סגור הכל|סגור את הכל|complete all|cancel all/i.test(userMessage);
 
   if (action.type === "delete_assistant_history") {
     return /צ[׳']?ט|שיח|שיחה|שיחות|chat|conversation|history|היסטור/i.test(userMessage)
@@ -329,6 +330,7 @@ function sanitizeAction(action: AssistantProposedAction | undefined, tasks: Task
   if (action.type === "update_task_status") {
     const task = findTask(tasks, action.taskId);
     if (!task || !taskStatuses.has(action.status)) return undefined;
+    if (looksLikeBulkTaskChange && ["done", "cancelled"].includes(action.status)) return undefined;
     return {
       type: "update_task_status",
       label: "אישור וביצוע",

@@ -636,6 +636,14 @@ function replaceValue(values: string[], oldValue: string, newValue: string) {
   return uniqueSorted(values.map((value) => value === oldValue ? newValue : value));
 }
 
+function isDestructiveAssistantAction(action: AssistantProposedAction) {
+  return (
+    action.type === "delete_assistant_history"
+    || (action.type === "update_task_status" && ["done", "cancelled"].includes(action.status))
+    || (action.type === "update_subtask_status" && action.status === "cancelled")
+  );
+}
+
 function isEmptyTaxonomy(taxonomy: TaskTaxonomy) {
   return taxonomy.topics.P.length === 0 && taxonomy.topics.W.length === 0 && taxonomy.actions.length === 0;
 }
@@ -1958,6 +1966,15 @@ export default function Home() {
           `${withoutDueDate.length} משימות פעילות בלי תאריך יעד`,
           countedSubtaskItems.length > 0 ? `${subtaskCompletionRate}% השלמה בצעדי טיפול` : "אין עדיין צעדי טיפול למדידה",
         ];
+    const summaryRecommendation = overdue.length > 0
+      ? `המלצת מיקוד: להתחיל ב-${overdue.length} המשימות שבאיחור לפני פתיחת משימות חדשות.`
+      : openSubtasks > 0
+        ? `המלצת מיקוד: לבחור צעד טיפול אחד מתוך ${openSubtasks} הצעדים הפתוחים ולסגור אותו היום.`
+        : completedLast7 === 0 && active.length > 0
+          ? "המלצת מיקוד: לבחור משימה קטנה אחת ולסגור אותה כדי לייצר תנועה השבוע."
+          : topCategory
+            ? `המלצת מיקוד: לעבוד ברצף על נושא ${topCategory.label}, שבו מרוכז כרגע העומס הגבוה ביותר.`
+            : "המלצת מיקוד: לשמור על הרשימה נקייה ולעבור על המשימות הפעילות לפי עדיפות.";
     const summaryAction = overdue.length > 0
       ? { actionLabel: "הצג באיחור", action: { statusFilter: "overdue" as TaskFilter } }
       : openSubtasks > 0
@@ -1980,6 +1997,7 @@ export default function Home() {
         title: summaryTitle,
         body: summaryBody,
         highlights: summaryHighlights,
+        recommendation: summaryRecommendation,
         ...summaryAction,
       },
       completedInRange: completedInRangeCount,
@@ -2361,6 +2379,10 @@ export default function Home() {
 
   async function approveAssistantAction(message: AssistantMessage) {
     if (!message.proposedAction) return;
+    if (isDestructiveAssistantAction(message.proposedAction)) {
+      const approved = window.confirm(`לאשר פעולה רגישה?\n${assistantActionDescription(message.proposedAction)}`);
+      if (!approved) return;
+    }
 
     try {
       if (message.proposedAction.type === "create_task") {
@@ -2615,6 +2637,11 @@ export default function Home() {
   }
 
   function removeTopic(prefix: TaskPrefix, topic: string) {
+    const usageCount = tasks.filter((task) => task.prefix === prefix && task.category === topic).length;
+    if (usageCount > 0) {
+      setTaxonomyStatus(`לא ניתן למחוק את הנושא "${topic}" כי ${usageCount} משימות עדיין משויכות אליו. אפשר לערוך את שם הנושא כדי למזג אותו עם נושא אחר.`);
+      return;
+    }
     setTaxonomy((current) => ({
       ...current,
       topics: {
@@ -2622,6 +2649,7 @@ export default function Home() {
         [prefix]: current.topics[prefix].filter((value) => value !== topic),
       },
     }));
+    setTaxonomyStatus(`הנושא "${topic}" נמחק מהרשימה.`);
   }
 
   function addAction(event: FormEvent) {
@@ -2636,15 +2664,24 @@ export default function Home() {
   }
 
   function removeAction(action: string) {
+    const usageCount = tasks.filter((task) => (
+      task.actionType === action || task.subtasks?.some((subtask) => subtask.actionType === action)
+    )).length;
+    if (usageCount > 0) {
+      setTaxonomyStatus(`לא ניתן למחוק את הפעולה "${action}" כי ${usageCount} משימות או צעדי טיפול עדיין משתמשים בה. אפשר לערוך את שם הפעולה כדי למזג אותה עם פעולה אחרת.`);
+      return;
+    }
     setTaxonomy((current) => ({
       ...current,
       actions: current.actions.filter((value) => value !== action),
     }));
+    setTaxonomyStatus(`הפעולה "${action}" נמחקה מהרשימה.`);
   }
 
   function applyTopicRename(prefix: TaskPrefix, topic: string, nextName: string) {
     const cleanName = nextName.trim();
     if (!cleanName || cleanName === topic) return;
+    const willMerge = taxonomy.topics[prefix].includes(cleanName);
     setTaxonomy((current) => ({
       ...current,
       topics: {
@@ -2656,11 +2693,15 @@ export default function Home() {
       task.prefix === prefix && task.category === topic ? { ...task, category: cleanName } : task
     )));
     setTopicFilter((current) => current === topic ? cleanName : current);
+    setTaxonomyStatus(willMerge
+      ? `הנושא "${topic}" מוזג לתוך "${cleanName}" וכל המשימות הרלוונטיות עודכנו.`
+      : `הנושא "${topic}" עודכן ל-"${cleanName}".`);
   }
 
   function applyActionRename(action: string, nextName: string) {
     const cleanName = nextName.trim();
     if (!cleanName || cleanName === action) return;
+    const willMerge = taxonomy.actions.includes(cleanName);
     setTaxonomy((current) => ({
       ...current,
       actions: replaceValue(current.actions, action, cleanName),
@@ -2673,6 +2714,9 @@ export default function Home() {
       )),
     })));
     setActionFilter((current) => current === action ? cleanName : current);
+    setTaxonomyStatus(willMerge
+      ? `הפעולה "${action}" מוזגה לתוך "${cleanName}" בכל המשימות וצעדי הטיפול הרלוונטיים.`
+      : `הפעולה "${action}" עודכנה ל-"${cleanName}".`);
   }
 
   function startEditTopic(prefix: TaskPrefix, topic: string) {
@@ -3341,6 +3385,7 @@ export default function Home() {
                 <ul>
                   {analytics.periodSummary.highlights.map((item) => <li key={item}>{item}</li>)}
                 </ul>
+                <p className="summary-recommendation">{analytics.periodSummary.recommendation}</p>
                 <button onClick={() => applyAnalyticsAction(analytics.periodSummary.action)}>{analytics.periodSummary.actionLabel}</button>
               </section>
 
