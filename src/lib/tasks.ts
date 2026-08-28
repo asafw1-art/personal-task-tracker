@@ -18,6 +18,11 @@ export type Task = {
   cloudId?: string;
   ownerUserId?: string;
   sharedWithMe?: boolean;
+  shareId?: string;
+  sharedByName?: string;
+  sharedByEmail?: string;
+  historicalShared?: boolean;
+  shareEndedAt?: string;
   prefix: TaskPrefix;
   number: number;
   title: string;

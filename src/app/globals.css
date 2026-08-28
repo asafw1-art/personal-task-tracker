@@ -211,6 +211,11 @@ textarea { resize: vertical; min-height: 86px; }
 .task-heading h2 { font-size: 1.08rem; line-height: 1.35; margin: 0; overflow-wrap: anywhere; }
 .task-id { direction: ltr; display: inline-block; background: var(--accent-soft); color: var(--accent-dark); border: 1px solid #dbeafe; border-radius: var(--radius-md); flex: 0 0 auto; padding: 4px 9px; font-weight: 900; }
 .shared-badge { background: #eef4ff; border: 1px solid #bfdbfe; border-radius: var(--radius-pill); color: var(--accent-dark); display: inline-flex; flex: 0 0 auto; font-size: .78rem; font-weight: 900; line-height: 1.25; padding: 4px 8px; }
+.shared-history-badge { background: #f1f5f9; border-color: #cbd5e1; color: #475569; }
+.shared-byline { color: var(--muted); font-size: .86rem; line-height: 1.45; margin: 3px 0 0; }
+.shared-byline strong { color: var(--text); }
+.owner-only-marker { align-items: center; align-self: start; background: #f1f5f9; border: 1px solid #cbd5e1; border-radius: 8px; color: #64748b; display: inline-flex; font-size: .7rem; font-weight: 800; justify-content: center; min-height: 34px; padding: 4px 6px; }
+.shared-readonly-status { align-items: center; background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 10px; color: #475569; display: inline-flex; font-size: .84rem; font-weight: 800; justify-content: center; min-height: 42px; padding: 8px 10px; }
 .meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; color: var(--muted); font-size: .82rem; }
 .meta span { background: var(--surface-soft); border: 1px solid var(--border); border-radius: var(--radius-pill); line-height: 1.35; padding: 4px 8px; }
 .meta span + span::before { content: none !important; margin: 0; }
@@ -363,6 +368,16 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
 .share-row span, .share-empty, .sharing-status { color: var(--muted); font-size: .88rem; margin: 0; }
 .share-row button, .share-invitation-actions .secondary-action { background: #fff; border: 1px solid #fecaca; color: #b91c1c; }
 .share-row button:hover, .share-invitation-actions .secondary-action:hover { background: #fef2f2; color: #991b1b; }
+.leave-share-button { background: #fff; border: 1px solid #fecaca; border-radius: 10px; color: #b91c1c; font-weight: 800; justify-self: start; padding: 10px 14px; }
+.leave-share-button:hover { background: #fef2f2; color: #991b1b; }
+.shared-readonly-notice { background: #eff6ff; border: 1px solid #93c5fd; border-radius: 12px; color: #1e3a8a; display: grid; gap: 4px; padding: 12px 14px; }
+.shared-readonly-notice strong { font-size: .98rem; }
+.shared-readonly-notice span { line-height: 1.5; }
+.shared-readonly-notice.is-history { background: #f8fafc; border-color: #cbd5e1; color: #334155; }
+.task-editor-form.is-shared-readonly input:disabled,
+.task-editor-form.is-shared-readonly select:disabled,
+.task-editor-form.is-shared-readonly textarea:disabled,
+.task-editor-form.is-shared-readonly button:disabled { background: #f8fafc; border-color: #cbd5e1; color: #334155; cursor: help; opacity: 1; -webkit-text-fill-color: #334155; }
 .share-invitation-card { grid-template-columns: minmax(0, 1fr) auto; }
 .share-invitation-actions { display: flex; gap: 8px; }
 .subtasks-editor-header { align-items: center; display: flex; gap: 12px; justify-content: space-between; }
@@ -669,6 +684,31 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
   background: rgba(127, 29, 29, .28);
   border-color: rgba(248, 113, 113, .45);
   color: #fecaca;
+}
+[data-theme="dark"] .shared-readonly-notice {
+  background: #13233a;
+  border-color: #315f95;
+  color: #bfdbfe;
+}
+[data-theme="dark"] .shared-readonly-notice.is-history {
+  background: #111827;
+  border-color: var(--border);
+  color: var(--text);
+}
+[data-theme="dark"] .owner-only-marker,
+[data-theme="dark"] .shared-readonly-status {
+  background: #111827;
+  border-color: var(--border);
+  color: #cbd5e1;
+}
+[data-theme="dark"] .task-editor-form.is-shared-readonly input:disabled,
+[data-theme="dark"] .task-editor-form.is-shared-readonly select:disabled,
+[data-theme="dark"] .task-editor-form.is-shared-readonly textarea:disabled,
+[data-theme="dark"] .task-editor-form.is-shared-readonly button:disabled {
+  background: #111827;
+  border-color: var(--border);
+  color: #dbeafe;
+  -webkit-text-fill-color: #dbeafe;
 }
 [data-theme="dark"] .assistant-empty,
 [data-theme="dark"] .assistant-message.role-assistant,
