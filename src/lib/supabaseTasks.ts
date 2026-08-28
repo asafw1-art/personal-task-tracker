@@ -3,6 +3,8 @@ import { Task, TaskPrefix, TaskPriority, TaskStatus, TaskSubtask, TaskSubtaskSta
 import { supabase } from "@/lib/supabase";
 
 type TaskRow = {
+  id?: string;
+  user_id?: string;
   prefix: TaskPrefix;
   task_number: number;
   title: string;
@@ -28,23 +30,23 @@ type OptionalColumns = {
 
 const selectAttempts: { columns: string; optional: OptionalColumns }[] = [
   {
-    columns: "prefix, task_number, title, category, action_type, priority, status, notes, due_at, completed_at, status_changed_at, subtasks, focused, created_at",
+    columns: "id, user_id, prefix, task_number, title, category, action_type, priority, status, notes, due_at, completed_at, status_changed_at, subtasks, focused, created_at",
     optional: { actionType: true, statusChangedAt: true, subtasks: true, focused: true },
   },
   {
-    columns: "prefix, task_number, title, category, action_type, priority, status, notes, due_at, completed_at, status_changed_at, subtasks, created_at",
+    columns: "id, user_id, prefix, task_number, title, category, action_type, priority, status, notes, due_at, completed_at, status_changed_at, subtasks, created_at",
     optional: { actionType: true, statusChangedAt: true, subtasks: true, focused: false },
   },
   {
-    columns: "prefix, task_number, title, category, action_type, priority, status, notes, due_at, completed_at, status_changed_at, created_at",
+    columns: "id, user_id, prefix, task_number, title, category, action_type, priority, status, notes, due_at, completed_at, status_changed_at, created_at",
     optional: { actionType: true, statusChangedAt: true, subtasks: false, focused: false },
   },
   {
-    columns: "prefix, task_number, title, category, action_type, priority, status, notes, due_at, completed_at, created_at",
+    columns: "id, user_id, prefix, task_number, title, category, action_type, priority, status, notes, due_at, completed_at, created_at",
     optional: { actionType: true, statusChangedAt: false, subtasks: false, focused: false },
   },
   {
-    columns: "prefix, task_number, title, category, priority, status, notes, due_at, completed_at, created_at",
+    columns: "id, user_id, prefix, task_number, title, category, priority, status, notes, due_at, completed_at, created_at",
     optional: { actionType: false, statusChangedAt: false, subtasks: false, focused: false },
   },
 ];
@@ -100,9 +102,14 @@ function normalizeSubtasks(value: unknown): TaskSubtask[] {
     .sort((a, b) => a.number - b.number);
 }
 
-function rowToTask(row: TaskRow): Task {
+function rowToTask(row: TaskRow, currentUserId?: string): Task {
+  const ownerUserId = row.user_id;
+  const sharedWithMe = Boolean(currentUserId && ownerUserId && ownerUserId !== currentUserId);
   return {
-    id: `${row.prefix}${row.task_number}`,
+    id: sharedWithMe && row.id ? `shared:${row.id}` : `${row.prefix}${row.task_number}`,
+    cloudId: row.id,
+    ownerUserId,
+    sharedWithMe,
     prefix: row.prefix,
     number: row.task_number,
     title: row.title,
@@ -150,7 +157,7 @@ function requireSupabase() {
   return supabase;
 }
 
-export async function fetchCloudTasks() {
+export async function fetchCloudTasks(user?: User) {
   const client = requireSupabase();
   let lastError: unknown;
 
@@ -161,7 +168,7 @@ export async function fetchCloudTasks() {
       .order("prefix", { ascending: true })
       .order("task_number", { ascending: true });
 
-    if (!error) return (data ?? []).map((row) => rowToTask(row as unknown as TaskRow));
+    if (!error) return (data ?? []).map((row) => rowToTask(row as unknown as TaskRow, user?.id));
     lastError = error;
     if (!isOptionalColumnError(error)) throw error;
   }
@@ -180,14 +187,15 @@ export async function countCloudTasks() {
 }
 
 export async function saveCloudTasks(tasks: Task[], user: User) {
-  if (tasks.length === 0) return;
+  const ownTasks = tasks.filter((task) => !task.sharedWithMe && (!task.ownerUserId || task.ownerUserId === user.id));
+  if (ownTasks.length === 0) return;
   const client = requireSupabase();
   let lastError: unknown;
 
   for (const optional of upsertAttempts) {
     const { error } = await client
       .from("tasks")
-      .upsert(tasks.map((task) => taskToUpsert(task, user, optional)), {
+      .upsert(ownTasks.map((task) => taskToUpsert(task, user, optional)), {
         onConflict: "user_id,prefix,task_number",
       });
 

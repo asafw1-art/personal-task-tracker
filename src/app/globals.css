@@ -210,6 +210,7 @@ textarea { resize: vertical; min-height: 86px; }
 .task-heading { align-items: flex-start; display: flex; gap: 10px; justify-content: flex-start; }
 .task-heading h2 { font-size: 1.08rem; line-height: 1.35; margin: 0; overflow-wrap: anywhere; }
 .task-id { direction: ltr; display: inline-block; background: var(--accent-soft); color: var(--accent-dark); border: 1px solid #dbeafe; border-radius: var(--radius-md); flex: 0 0 auto; padding: 4px 9px; font-weight: 900; }
+.shared-badge { background: #eef4ff; border: 1px solid #bfdbfe; border-radius: var(--radius-pill); color: var(--accent-dark); display: inline-flex; flex: 0 0 auto; font-size: .78rem; font-weight: 900; line-height: 1.25; padding: 4px 8px; }
 .meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; color: var(--muted); font-size: .82rem; }
 .meta span { background: var(--surface-soft); border: 1px solid var(--border); border-radius: var(--radius-pill); line-height: 1.35; padding: 4px 8px; }
 .meta span + span::before { content: none !important; margin: 0; }
@@ -222,6 +223,7 @@ textarea { resize: vertical; min-height: 86px; }
 .task-actions button, .settings-button, .auth-form button, .drawer-actions button { border: 0; border-radius: var(--radius-md); background: var(--accent); color: #fff; font-weight: 700; padding: 11px 14px; }
 .task-actions button:hover, .settings-button:hover, .auth-form button:hover, .drawer-actions button:hover { background: var(--accent-dark); }
 .edit-icon-button { align-items: center; display: inline-flex; font-size: 1.15rem; height: 42px; justify-content: center; line-height: 1; padding: 0 !important; width: 42px; }
+button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: not-allowed; opacity: .62; }
 .edit-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .edit-grid label { display: grid; gap: 6px; color: var(--muted); font-size: .86rem; }
 .edit-grid label > span { font-weight: 700; }
@@ -348,6 +350,21 @@ textarea { resize: vertical; min-height: 86px; }
 .subtasks-preview-item.status-cancelled { opacity: .72; }
 .subtasks-preview-item.status-cancelled { background: #f8fafc; }
 .subtasks-editor { display: grid; gap: 12px; }
+.sharing-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 10px 24px rgba(23, 32, 51, 0.05); display: grid; gap: 12px; padding: 14px; }
+.sharing-panel h3 { font-size: 1rem; margin: 0 0 4px; }
+.sharing-panel p { color: var(--muted); line-height: 1.45; margin: 0; }
+.share-form { display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr) auto; }
+.share-form button, .share-row button, .share-invitation-actions button { background: var(--accent); border: 0; border-radius: 10px; color: #fff; font-weight: 800; padding: 10px 12px; white-space: nowrap; }
+.share-form button:hover, .share-row button:hover, .share-invitation-actions button:hover { background: var(--accent-dark); }
+.share-list { display: grid; gap: 8px; }
+.share-row { align-items: center; background: var(--surface-soft); border: 1px solid var(--border); border-radius: 12px; display: flex; gap: 12px; justify-content: space-between; padding: 10px; }
+.share-row div { display: grid; gap: 3px; min-width: 0; }
+.share-row strong { overflow-wrap: anywhere; }
+.share-row span, .share-empty, .sharing-status { color: var(--muted); font-size: .88rem; margin: 0; }
+.share-row button, .share-invitation-actions .secondary-action { background: #fff; border: 1px solid #fecaca; color: #b91c1c; }
+.share-row button:hover, .share-invitation-actions .secondary-action:hover { background: #fef2f2; color: #991b1b; }
+.share-invitation-card { grid-template-columns: minmax(0, 1fr) auto; }
+.share-invitation-actions { display: flex; gap: 8px; }
 .subtasks-editor-header { align-items: center; display: flex; gap: 12px; justify-content: space-between; }
 .subtasks-editor-header h3 { font-size: 1rem; margin: 0 0 4px; }
 .subtasks-editor-header p, .subtasks-empty { color: var(--muted); line-height: 1.45; margin: 0; }
@@ -636,6 +653,7 @@ textarea { resize: vertical; min-height: 86px; }
 [data-theme="dark"] .cloud-panel code,
 [data-theme="dark"] .modal-task-tools span,
 [data-theme="dark"] .quick-filters button.active,
+[data-theme="dark"] .shared-badge,
 [data-theme="dark"] .subtask-add-inline,
 [data-theme="dark"] .subtasks-toggle,
 [data-theme="dark"] .sync-counters span,
@@ -658,6 +676,7 @@ textarea { resize: vertical; min-height: 86px; }
 [data-theme="dark"] .insight-card,
 [data-theme="dark"] .meta span,
 [data-theme="dark"] .notification-setting,
+[data-theme="dark"] .share-row,
 [data-theme="dark"] .subtask-load-row,
 [data-theme="dark"] .subtask-row.status-cancelled,
 [data-theme="dark"] .task-editor-form > label,
@@ -778,6 +797,10 @@ textarea { resize: vertical; min-height: 86px; }
   .modal-task-tools span { justify-self: start; }
   .notification-task { align-items: stretch; grid-template-columns: 1fr; }
   .notification-task button { width: 100%; }
+  .share-form, .share-invitation-card { grid-template-columns: 1fr; }
+  .share-invitation-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .share-row { align-items: stretch; flex-direction: column; }
+  .share-row button { width: 100%; }
   .metric-grid, .chart-grid, .timeline-stats, .analytics-layout { grid-template-columns: 1fr; }
   .analytics-header { align-items: stretch; flex-direction: column; }
   .period-summary-panel { align-items: stretch; grid-template-columns: 1fr; }

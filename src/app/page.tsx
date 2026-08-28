@@ -8,6 +8,7 @@ import { canonicalTaskId, initialTasks, Task, TaskPrefix, TaskPriority, TaskStat
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { addAssistantMessage, fetchAssistantMessages, fetchDeletedAssistantThreads, getOrCreateAssistantThread, restoreAssistantThread, softDeleteAssistantHistory, updateAssistantMessageActionStatus } from "@/lib/supabaseAssistant";
 import { fetchUserDevices, registerCurrentDevice, type UserDevice } from "@/lib/supabaseDevices";
+import { acceptTaskShare, createTaskShare, declineTaskShare, fetchTaskShares, revokeTaskShare, updateSharedTaskSubtaskStatus, type TaskShare } from "@/lib/supabaseSharing";
 import { countCloudTasks, fetchCloudTasks, saveCloudTasks } from "@/lib/supabaseTasks";
 import { fetchCloudTaxonomy, replaceCloudTaxonomy } from "@/lib/supabaseTaxonomy";
 import { fetchUserSettings, saveUserSettings } from "@/lib/supabaseUserSettings";
@@ -79,9 +80,9 @@ type AppNotification = {
   body: string;
   tone: "danger" | "warn" | "neutral";
   actionLabel: string;
-  action: {
-    statusFilter: TaskFilter;
-  };
+  action:
+    | { type?: "tasks"; statusFilter: TaskFilter }
+    | { type: "share_invitations" };
 };
 
 type ImportSummary = {
@@ -91,6 +92,7 @@ type ImportSummary = {
 };
 
 type TaskFilter = TaskStatus | "active" | "all" | "overdue" | "today" | "week" | "no_due" | "high" | "subtasks_open" | "focused";
+type ShareFilter = "all" | "mine" | "shared_with_me" | "shared_by_me";
 type AnalyticsRange = "week" | "month" | "all";
 type MainView = "tasks" | "stats";
 type TaxonomyMode = "topics" | "actions";
@@ -466,8 +468,20 @@ function taskStatusTimestampLabel(task: Task) {
   return timestamp ? `סטטוס ${statusLabels[task.status]} ${formatStatusTimestamp(timestamp)}` : "";
 }
 
+function taskPublicId(task: Task) {
+  return `${task.prefix}${task.number}`;
+}
+
+function taskDisplayId(task: Task) {
+  return `${task.sharedWithMe ? "*" : ""}${taskPublicId(task)}`;
+}
+
+function isOwnTask(task: Task, user: User | null) {
+  return !task.sharedWithMe && (!task.ownerUserId || !user || task.ownerUserId === user.id);
+}
+
 function nextTaskNumber(tasks: Task[], prefix: TaskPrefix) {
-  return Math.max(0, ...tasks.filter((task) => task.prefix === prefix).map((task) => task.number)) + 1;
+  return Math.max(0, ...tasks.filter((task) => !task.sharedWithMe && task.prefix === prefix).map((task) => task.number)) + 1;
 }
 
 let cachedTasksRaw: string | null | undefined;
@@ -709,6 +723,7 @@ export default function Home() {
   const [tasks, setTasks] = usePersistentTasks();
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<TaskFilter>("active");
+  const [shareFilter, setShareFilter] = useState<ShareFilter>("all");
   const [prefixFilter, setPrefixFilter] = useState<"all" | "P" | "W">("all");
   const [topicFilter, setTopicFilter] = useState("all");
   const [actionFilter, setActionFilter] = useState("all");
@@ -742,6 +757,9 @@ export default function Home() {
   const [cloudTaskCount, setCloudTaskCount] = useState<number | null>(null);
   const [lastCloudPullAt, setLastCloudPullAt] = useState<string | null>(null);
   const [cloudDevices, setCloudDevices] = useState<UserDevice[]>([]);
+  const [taskShares, setTaskShares] = useState<TaskShare[]>([]);
+  const [shareEmailDrafts, setShareEmailDrafts] = useState<Record<string, string>>({});
+  const [sharingStatus, setSharingStatus] = useState("");
   const [devicesStatus, setDevicesStatus] = useState("");
   const [isCloudReady, setIsCloudReady] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -863,6 +881,9 @@ export default function Home() {
       setCloudTaskCount(null);
       setLastCloudPullAt(null);
       setCloudDevices([]);
+      setTaskShares([]);
+      setShareEmailDrafts({});
+      setSharingStatus("");
       setDevicesStatus("");
       setAssistantThreadId(null);
       setAssistantMessages([]);
@@ -998,7 +1019,7 @@ export default function Home() {
     if (!cloudUser) return;
 
     let cancelled = false;
-    fetchCloudTasks()
+    fetchCloudTasks(cloudUser)
       .then((cloudTasks) => {
         if (cancelled) return;
         if (cloudTasks.length > 0) {
@@ -1060,12 +1081,35 @@ export default function Home() {
     };
   }, [cloudUser]);
 
+  const refreshTaskShares = useCallback(async () => {
+    if (!cloudUser) return;
+    try {
+      const shares = await fetchTaskShares();
+      setTaskShares(shares);
+      setSharingStatus(shares.length ? `נטענו ${shares.length} שיתופים פעילים או ממתינים.` : "אין כרגע שיתופים פעילים.");
+    } catch (error) {
+      setSharingStatus(`טעינת שיתופים נכשלה: ${errorMessage(error)}`);
+    }
+  }, [cloudUser]);
+
+  useEffect(() => {
+    if (!cloudUser || !isCloudReady) return;
+    let cancelled = false;
+    const timeoutId = window.setTimeout(() => {
+      if (!cancelled) refreshTaskShares();
+    }, 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [cloudUser, isCloudReady, refreshTaskShares]);
+
   useEffect(() => {
     if (!cloudUser || !cloudSyncEnabled || !isCloudReady) return;
 
     saveCloudTasks(tasks, cloudUser)
       .then(() => {
-        setCloudTaskCount(tasks.length);
+        setCloudTaskCount(tasks.filter((task) => isOwnTask(task, cloudUser)).length);
         setCloudStatus("המשימות מסונכרנות לענן.");
       })
       .catch((error: unknown) => setCloudStatus(`השמירה לענן נכשלה: ${errorMessage(error)}`));
@@ -1079,7 +1123,7 @@ export default function Home() {
     async function refreshFromCloud() {
       if (document.visibilityState === "hidden") return;
       try {
-        const cloudTasks = await fetchCloudTasks();
+        const cloudTasks = await fetchCloudTasks(cloudUser ?? undefined);
         if (cancelled) return;
         mergeCloudTasksIntoLocal(cloudTasks);
         setCloudTaskCount(cloudTasks.length);
@@ -1112,13 +1156,25 @@ export default function Home() {
   ), [tasks, taxonomy]);
 
   const filteredTasks = useMemo(() => {
-    const normalized = canonicalTaskId(query);
+    const trimmedQuery = query.trim();
+    const normalized = canonicalTaskId(trimmedQuery.startsWith("*") ? trimmedQuery.slice(1) : trimmedQuery);
+    const wantsSharedId = trimmedQuery.startsWith("*");
     const today = todayIso();
     const weekEnd = addDaysIso(6);
     if (normalized) {
-      return sortTasks(tasks.filter((task) => task.id === normalized));
+      return sortTasks(tasks.filter((task) => taskPublicId(task) === normalized && (!wantsSharedId || task.sharedWithMe)));
     }
     return sortTasks(tasks
+      .filter((task) => {
+        if (shareFilter === "all") return true;
+        if (shareFilter === "mine") return isOwnTask(task, cloudUser);
+        if (shareFilter === "shared_with_me") return Boolean(task.sharedWithMe);
+        if (shareFilter === "shared_by_me") {
+          if (!task.cloudId || !cloudUser || task.sharedWithMe) return false;
+          return taskShares.some((share) => share.taskId === task.cloudId && share.ownerUserId === cloudUser.id && share.status !== "revoked" && share.status !== "declined");
+        }
+        return true;
+      })
       .filter((task) => prefixFilter === "all" || task.prefix === prefixFilter)
       .filter((task) => topicFilter === "all" || task.category === topicFilter)
       .filter((task) => actionFilter === "all" || (task.actionType ?? "") === actionFilter || (task.subtasks ?? []).some((subtask) => subtask.actionType === actionFilter))
@@ -1136,9 +1192,9 @@ export default function Home() {
       })
       .filter((task) => {
         if (!query.trim()) return true;
-        return `${task.id} ${task.title} ${task.category} ${task.actionType ?? ""} ${task.notes ?? ""}`.toLowerCase().includes(query.trim().toLowerCase());
+        return `${task.id} ${taskPublicId(task)} ${taskDisplayId(task)} ${task.title} ${task.category} ${task.actionType ?? ""} ${task.notes ?? ""}`.toLowerCase().includes(query.trim().toLowerCase());
       }));
-  }, [tasks, query, statusFilter, prefixFilter, topicFilter, actionFilter]);
+  }, [actionFilter, cloudUser, prefixFilter, query, shareFilter, statusFilter, taskShares, tasks, topicFilter]);
 
   const activeFilters = useMemo(() => {
     const filters: { key: string; label: string }[] = [];
@@ -1146,16 +1202,18 @@ export default function Home() {
 
     if (trimmedQuery) filters.push({ key: "query", label: `חיפוש: ${trimmedQuery}` });
     if (statusFilter !== "active") filters.push({ key: "status", label: `סטטוס: ${taskFilterLabel(statusFilter)}` });
+    if (shareFilter !== "all") filters.push({ key: "share", label: shareFilter === "mine" ? "שיתוף: שלי" : shareFilter === "shared_with_me" ? "שיתוף: שותפו איתי" : "שיתוף: שיתפתי" });
     if (prefixFilter !== "all") filters.push({ key: "prefix", label: `סוג: ${prefixFilter === "P" ? "אישי" : "עבודה"}` });
     if (topicFilter !== "all") filters.push({ key: "topic", label: `נושא: ${topicFilter}` });
     if (actionFilter !== "all") filters.push({ key: "action", label: `פעולה: ${actionFilter}` });
 
     return filters;
-  }, [actionFilter, prefixFilter, query, statusFilter, topicFilter]);
+  }, [actionFilter, prefixFilter, query, shareFilter, statusFilter, topicFilter]);
 
   const clearTaskFilters = useCallback(() => {
     setQuery("");
     setStatusFilter("active");
+    setShareFilter("all");
     setPrefixFilter("all");
     setTopicFilter("all");
     setActionFilter("all");
@@ -1275,6 +1333,16 @@ export default function Home() {
     openSubtaskTasks: tasks.filter((t) => !["done", "cancelled"].includes(t.status) && subtaskProgress(t.subtasks).open > 0).length,
   }), [tasks]);
 
+  const pendingShareInvitations = useMemo(() => {
+    const email = cloudUser?.email?.trim().toLowerCase();
+    if (!cloudUser || !email) return [];
+    return taskShares.filter((share) => (
+      share.status === "pending"
+      && share.ownerUserId !== cloudUser.id
+      && (share.sharedWithUserId === cloudUser.id || share.sharedWithEmail === email)
+    ));
+  }, [cloudUser, taskShares]);
+
   const appNotifications = useMemo(() => {
     const today = todayIso();
     const weekStartIso = addDaysIso(-6);
@@ -1289,6 +1357,17 @@ export default function Home() {
       return Boolean(closureDate && closureDate >= weekStartIso);
     }).length;
     const notifications: AppNotification[] = [];
+
+    if (pendingShareInvitations.length > 0) {
+      notifications.push({
+        id: "share-invitations",
+        title: `${pendingShareInvitations.length} הזמנות לשיתוף משימה`,
+        body: "אפשר לאשר כדי לראות את המשימה והצעדים שלה ברשימה שלך.",
+        tone: "neutral",
+        actionLabel: "הצג הזמנות",
+        action: { type: "share_invitations" },
+      });
+    }
 
     if (notificationPreferences.overdue && overdueCount > 0) {
       notifications.push({
@@ -1346,7 +1425,7 @@ export default function Home() {
     }
 
     return notifications;
-  }, [notificationPreferences, tasks]);
+  }, [notificationPreferences, pendingShareInvitations.length, tasks]);
 
   function tasksForNotificationFilter(filter: TaskFilter) {
     const today = todayIso();
@@ -1376,7 +1455,7 @@ export default function Home() {
     ? selectedAppNotification ?? visibleAppNotifications[0]
     : null;
   const activeNotificationDetailTasks = activeNotificationDetail
-    ? tasksForNotificationFilter(activeNotificationDetail.action.statusFilter)
+    ? activeNotificationDetail.action.type === "share_invitations" ? [] : tasksForNotificationFilter(activeNotificationDetail.action.statusFilter)
     : [];
   const notificationModalTone = visibleAppNotifications.some((notification) => notification.tone === "danger")
     ? "danger"
@@ -1396,7 +1475,7 @@ export default function Home() {
     }
 
     if (normalized) {
-      return sortTasks(tasks.filter((task) => task.id === normalized));
+      return sortTasks(tasks.filter((task) => taskPublicId(task) === normalized));
     }
 
     return sortTasks(tasks
@@ -1421,8 +1500,8 @@ export default function Home() {
     const queryText = modalTaskQuery.trim().toLowerCase();
     if (!queryText) return true;
     const normalized = canonicalTaskId(queryText);
-    if (normalized && task.id === normalized) return true;
-    return `${task.id} ${task.title} ${task.category} ${task.actionType ?? ""} ${task.notes ?? ""}`.toLowerCase().includes(queryText);
+    if (normalized && taskPublicId(task) === normalized) return true;
+    return `${task.id} ${taskPublicId(task)} ${taskDisplayId(task)} ${task.title} ${task.category} ${task.actionType ?? ""} ${task.notes ?? ""}`.toLowerCase().includes(queryText);
   }
 
   const analyticsModalTasks = analyticsTaskModal ? tasksForAnalyticsAction(analyticsTaskModal.action) : [];
@@ -2125,6 +2204,70 @@ export default function Home() {
     setNotificationPreferences((current) => ({ ...current, [key]: value }));
   }
 
+  function taskSharesForTask(task: Task) {
+    if (!task.cloudId) return [];
+    return taskShares.filter((share) => share.taskId === task.cloudId && share.status !== "revoked" && share.status !== "declined");
+  }
+
+  function updateShareEmailDraft(taskId: string, value: string) {
+    setShareEmailDrafts((current) => ({ ...current, [taskId]: value }));
+  }
+
+  async function shareTaskWithEmail(task: Task) {
+    if (!cloudUser || !task.cloudId || !isOwnTask(task, cloudUser)) return;
+    const email = (shareEmailDrafts[task.id] ?? "").trim().toLowerCase();
+    if (!email) {
+      setSharingStatus("יש להזין כתובת מייל לשיתוף.");
+      return;
+    }
+    if (email === cloudUser.email?.trim().toLowerCase()) {
+      setSharingStatus("אין צורך לשתף משימה עם עצמך.");
+      return;
+    }
+
+    setSharingStatus("שולח הזמנת שיתוף...");
+    try {
+      await createTaskShare(cloudUser, task.cloudId, email);
+      setShareEmailDrafts((current) => ({ ...current, [task.id]: "" }));
+      await refreshTaskShares();
+      setSharingStatus(`הזמנת שיתוף נשלחה אל ${email}.`);
+    } catch (error) {
+      setSharingStatus(`שיתוף המשימה נכשל: ${errorMessage(error)}`);
+    }
+  }
+
+  async function revokeShare(share: TaskShare) {
+    const confirmed = window.confirm(`להסיר את השיתוף עם ${share.sharedWithEmail}?`);
+    if (!confirmed) return;
+    setSharingStatus("מסיר שיתוף...");
+    try {
+      await revokeTaskShare(share.id);
+      await refreshTaskShares();
+      setSharingStatus("השיתוף הוסר.");
+    } catch (error) {
+      setSharingStatus(`הסרת השיתוף נכשלה: ${errorMessage(error)}`);
+    }
+  }
+
+  async function respondToShareInvitation(share: TaskShare, response: "accept" | "decline") {
+    setSharingStatus(response === "accept" ? "מאשר הזמנת שיתוף..." : "דוחה הזמנת שיתוף...");
+    try {
+      if (response === "accept") {
+        await acceptTaskShare(share.id);
+        const cloudTasks = await fetchCloudTasks(cloudUser ?? undefined);
+        mergeCloudTasksIntoLocal(cloudTasks);
+        setCloudTaskCount(cloudTasks.length);
+        setLastCloudPullAt(new Date().toISOString());
+      } else {
+        await declineTaskShare(share.id);
+      }
+      await refreshTaskShares();
+      setSharingStatus(response === "accept" ? "ההזמנה אושרה. המשימה תופיע תחת שותפו איתי." : "ההזמנה נדחתה.");
+    } catch (error) {
+      setSharingStatus(`טיפול בהזמנה נכשל: ${errorMessage(error)}`);
+    }
+  }
+
   function updateStuckThresholdDays(value: string) {
     setStuckThresholdDays(clampStuckThresholdDays(Number(value)));
   }
@@ -2149,6 +2292,7 @@ export default function Home() {
   function updateStatus(id: string, status: TaskStatus) {
     setTasks((current) => current.map((task) => {
       if (task.id !== id) return task;
+      if (!isOwnTask(task, cloudUser)) return task;
       const nextStatus = effectiveTaskStatus(status, task.subtasks);
       const statusChangedAt = task.status === nextStatus ? task.statusChangedAt : nowIso();
       return {
@@ -2162,7 +2306,7 @@ export default function Home() {
 
   function toggleTaskFocus(id: string) {
     const nextTasks = getTasksSnapshot().map((task) => (
-      task.id === id ? { ...task, focused: !task.focused } : task
+      task.id === id && isOwnTask(task, cloudUser) ? { ...task, focused: !task.focused } : task
     ));
     setTasks(nextTasks);
 
@@ -2200,6 +2344,18 @@ export default function Home() {
   }
 
   function updateTaskSubtask(taskId: string, subtaskNumber: number, updates: Partial<TaskSubtask>) {
+    const taskBeforeUpdate = tasks.find((task) => task.id === taskId);
+    const isSharedSubtaskStatusUpdate = Boolean(
+      taskBeforeUpdate?.sharedWithMe
+      && taskBeforeUpdate.cloudId
+      && updates.status
+      && Object.keys(updates).every((key) => key === "status")
+    );
+    if (taskBeforeUpdate?.sharedWithMe && !isSharedSubtaskStatusUpdate) {
+      setSharingStatus("במשימה ששותפה איתך אפשר לעדכן רק סטטוס של צעדי טיפול.");
+      return;
+    }
+
     setTasks((current) => current.map((task) => {
       if (task.id !== taskId) return task;
       return reconcileTaskStatus({
@@ -2216,6 +2372,17 @@ export default function Home() {
         }),
       });
     }));
+
+    if (isSharedSubtaskStatusUpdate && taskBeforeUpdate?.cloudId && updates.status) {
+      updateSharedTaskSubtaskStatus(taskBeforeUpdate.cloudId, subtaskNumber, updates.status)
+        .then(() => setSharingStatus("סטטוס צעד הטיפול עודכן במשימה המשותפת."))
+        .catch((error: unknown) => {
+          setSharingStatus(`עדכון צעד הטיפול במשימה המשותפת נכשל: ${errorMessage(error)}`);
+          fetchCloudTasks(cloudUser ?? undefined)
+            .then((cloudTasks) => mergeCloudTasksIntoLocal(cloudTasks))
+            .catch(() => undefined);
+        });
+    }
   }
 
   function inlineSubtaskDraftKey(taskId: string, subtaskNumber: number) {
@@ -2240,6 +2407,10 @@ export default function Home() {
 
   function deleteTaskSubtask(taskId: string, subtaskNumber: number) {
     const task = tasks.find((item) => item.id === taskId);
+    if (task?.sharedWithMe) {
+      setSharingStatus("במשימה ששותפה איתך אי אפשר למחוק צעדי טיפול.");
+      return;
+    }
     const subtask = task?.subtasks?.find((item) => item.number === subtaskNumber);
     const confirmed = window.confirm(`למחוק את צעד הטיפול${subtask?.title ? ` "${subtask.title}"` : ""}?`);
     if (!confirmed) return;
@@ -2255,6 +2426,10 @@ export default function Home() {
   }
 
   function addTaskSubtask(task: Task) {
+    if (!isOwnTask(task, cloudUser)) {
+      setSharingStatus("במשימה ששותפה איתך אי אפשר להוסיף צעדי טיפול.");
+      return;
+    }
     const subtasks = task.subtasks ?? [];
     const number = nextSubtaskNumber(subtasks);
     const createdAt = nowIso();
@@ -2549,6 +2724,19 @@ export default function Home() {
     if (!taskEditor) return;
 
     const draft = taskEditor.draft;
+    if (taskEditor.mode === "edit") {
+      const editedTask = tasks.find((task) => task.id === taskEditor.taskId);
+      if (editedTask?.sharedWithMe) {
+        draft.subtasks.forEach((subtask) => {
+          const originalSubtask = editedTask.subtasks?.find((item) => item.number === subtask.number);
+          if (originalSubtask && originalSubtask.status !== subtask.status) {
+            updateTaskSubtask(editedTask.id, subtask.number, { status: subtask.status });
+          }
+        });
+        closeTaskEditor();
+        return;
+      }
+    }
     const title = draft.title.trim();
     const category = draft.category.trim();
     if (!title) {
@@ -2874,7 +3062,7 @@ export default function Home() {
     }
 
     try {
-      const cloudTasks = await fetchCloudTasks();
+      const cloudTasks = await fetchCloudTasks(cloudUser);
       mergeCloudTasksIntoLocal(cloudTasks);
       setCloudSyncEnabled(true);
       setCloudTaskCount(cloudTasks.length);
@@ -2941,10 +3129,12 @@ export default function Home() {
               <span>{progress.done} בוצעו</span>
               {progress.cancelled > 0 && <span>{progress.cancelled} בוטלו</span>}
             </div>
-            <button type="button" className="subtask-add-inline" onClick={() => addTaskSubtask(task)} aria-label={`הוספת צעד טיפול ל-${task.title}`}>
-              <span aria-hidden="true">+</span>
-              <span>צעד טיפול</span>
-            </button>
+            {isOwnTask(task, cloudUser) && (
+              <button type="button" className="subtask-add-inline" onClick={() => addTaskSubtask(task)} aria-label={`הוספת צעד טיפול ל-${task.title}`}>
+                <span aria-hidden="true">+</span>
+                <span>צעד טיפול</span>
+              </button>
+            )}
             <ul className="subtasks-preview-list">
               {subtasks.map((subtask) => (
                 <li className={`subtasks-preview-item status-${subtask.status}`} key={subtask.id}>
@@ -2961,11 +3151,13 @@ export default function Home() {
                     }}
                     placeholder="צעד טיפול חדש"
                     aria-label={subtask.title ? `שם צעד טיפול ${subtask.title}` : "שם צעד טיפול חדש"}
+                    disabled={!isOwnTask(task, cloudUser)}
                   />
                   <select
                     value={subtask.actionType ?? ""}
                     onChange={(event) => updateTaskSubtask(task.id, subtask.number, { actionType: event.target.value })}
                     aria-label={subtask.title ? `פעולה עבור ${subtask.title}` : "פעולה עבור צעד טיפול חדש"}
+                    disabled={!isOwnTask(task, cloudUser)}
                   >
                     <option value="">ללא פעולה</option>
                     {actionOptions.map((action) => <option value={action} key={action}>{action}</option>)}
@@ -2983,6 +3175,7 @@ export default function Home() {
                     onClick={() => deleteTaskSubtask(task.id, subtask.number)}
                     aria-label={subtask.title ? `מחיקת צעד טיפול ${subtask.title}` : "מחיקת צעד טיפול חדש"}
                     title="מחיקה"
+                    disabled={!isOwnTask(task, cloudUser)}
                   >
                     ×
                   </button>
@@ -3003,6 +3196,9 @@ export default function Home() {
   const taskEditorOriginalDueDate = taskEditor?.mode === "edit"
     ? tasks.find((task) => task.id === taskEditor.taskId)?.dueDate ?? ""
     : "";
+  const taskEditorTask = taskEditor?.mode === "edit" ? tasks.find((task) => task.id === taskEditor.taskId) : undefined;
+  const taskEditorIsShared = Boolean(taskEditorTask?.sharedWithMe);
+  const taskEditorShares = taskEditorTask ? taskSharesForTask(taskEditorTask) : [];
   const taskEditorMinDueDate = taskEditorOriginalDueDate && taskEditorOriginalDueDate < todayIso()
     ? taskEditorOriginalDueDate
     : todayIso();
@@ -3102,7 +3298,7 @@ export default function Home() {
                 </div>
                 <div className="notification-summary-list">
                   {visibleAppNotifications.map((notification) => {
-                    const notificationTasks = tasksForNotificationFilter(notification.action.statusFilter);
+                    const notificationTasks = notification.action.type === "share_invitations" ? [] : tasksForNotificationFilter(notification.action.statusFilter);
                     const notificationOpenSubtasks = notificationTasks.reduce((sum, task) => sum + subtaskProgress(task.subtasks).open, 0);
                     const isActiveDetail = activeNotificationDetail?.id === notification.id;
 
@@ -3111,7 +3307,7 @@ export default function Home() {
                         <div>
                           <strong>{notification.title}</strong>
                           <p>{notification.body}</p>
-                          <span>{notificationTasks.length} משימות</span>
+                          <span>{notification.action.type === "share_invitations" ? `${pendingShareInvitations.length} הזמנות` : `${notificationTasks.length} משימות`}</span>
                           {notificationOpenSubtasks > 0 && <span>{notificationOpenSubtasks} צעדים פתוחים</span>}
                         </div>
                         <button
@@ -3130,45 +3326,67 @@ export default function Home() {
                 </div>
                 {activeNotificationDetail && (
                   <>
-                    <div className="modal-task-tools">
-                      <input
-                        {...freeTextInputProps}
-                        value={modalTaskQuery}
-                        onChange={(event) => setModalTaskQuery(event.target.value)}
-                        placeholder={`חיפוש בתוך ${activeNotificationDetail.title}...`}
-                        aria-label="חיפוש במשימות ההתראה"
-                      />
-                      <span>{filteredNotificationTasks.length} מתוך {activeNotificationDetailTasks.length}</span>
-                    </div>
-                    <div className="notification-modal-list" aria-label="משימות בהתראה">
-                      {filteredNotificationTasks.length === 0 ? (
-                        <p className="notification-modal-empty">אין משימות רלוונטיות להצגה כרגע.</p>
-                      ) : filteredNotificationTasks.map((task) => (
-                        <article className={`notification-task status-${task.status}${isOverdue(task) ? " is-overdue" : ""}`} key={task.id}>
-                          <div>
-                            <span className="task-id">{task.id}</span>
-                            <strong>{task.title}</strong>
-                            <small>
-                              {statusLabels[task.status]} · {task.category}
-                              {task.dueDate ? ` · יעד ${formatDate(task.dueDate)}` : ""}
-                              {subtaskProgressLabel(task.subtasks) ? ` · ${subtaskProgressLabel(task.subtasks)}` : ""}
-                            </small>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setDismissedNotificationIds((current) => new Set(current).add(activeNotificationDetail.id));
-                              setActiveNotificationId("");
-                              setIsNotificationDetailOpen(false);
-                              setModalTaskQuery("");
-                              openEditTask(task);
-                            }}
-                          >
-                            פתיחה
-                          </button>
-                        </article>
-                      ))}
-                    </div>
+                    {activeNotificationDetail.action.type === "share_invitations" ? (
+                      <div className="notification-modal-list" aria-label="הזמנות שיתוף">
+                        {pendingShareInvitations.length === 0 ? (
+                          <p className="notification-modal-empty">אין כרגע הזמנות שיתוף ממתינות.</p>
+                        ) : pendingShareInvitations.map((share) => (
+                          <article className="notification-task share-invitation-card" key={share.id}>
+                            <div>
+                              <span className="shared-badge">הזמנה לשיתוף</span>
+                              <strong>משימה ששותפה אליך</strong>
+                              <small>לאחר אישור תוכל לראות את כל המשימה ולעדכן סטטוס של צעדי טיפול.</small>
+                            </div>
+                            <div className="share-invitation-actions">
+                              <button type="button" onClick={() => respondToShareInvitation(share, "accept")}>אישור</button>
+                              <button type="button" className="secondary-action" onClick={() => respondToShareInvitation(share, "decline")}>דחייה</button>
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+                    ) : (
+                      <>
+                        <div className="modal-task-tools">
+                          <input
+                            {...freeTextInputProps}
+                            value={modalTaskQuery}
+                            onChange={(event) => setModalTaskQuery(event.target.value)}
+                            placeholder={`חיפוש בתוך ${activeNotificationDetail.title}...`}
+                            aria-label="חיפוש במשימות ההתראה"
+                          />
+                          <span>{filteredNotificationTasks.length} מתוך {activeNotificationDetailTasks.length}</span>
+                        </div>
+                        <div className="notification-modal-list" aria-label="משימות בהתראה">
+                          {filteredNotificationTasks.length === 0 ? (
+                            <p className="notification-modal-empty">אין משימות רלוונטיות להצגה כרגע.</p>
+                          ) : filteredNotificationTasks.map((task) => (
+                            <article className={`notification-task status-${task.status}${isOverdue(task) ? " is-overdue" : ""}`} key={task.id}>
+                              <div>
+                                <span className="task-id">{taskDisplayId(task)}</span>
+                                <strong>{task.title}</strong>
+                                <small>
+                                  {statusLabels[task.status]} · {task.category}
+                                  {task.dueDate ? ` · יעד ${formatDate(task.dueDate)}` : ""}
+                                  {subtaskProgressLabel(task.subtasks) ? ` · ${subtaskProgressLabel(task.subtasks)}` : ""}
+                                </small>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setDismissedNotificationIds((current) => new Set(current).add(activeNotificationDetail.id));
+                                  setActiveNotificationId("");
+                                  setIsNotificationDetailOpen(false);
+                                  setModalTaskQuery("");
+                                  openEditTask(task);
+                                }}
+                              >
+                                פתיחה
+                              </button>
+                            </article>
+                          ))}
+                        </div>
+                      </>
+                    )}
                   </>
                 )}
               </article>
@@ -3215,7 +3433,7 @@ export default function Home() {
                   ) : filteredAnalyticsModalTasks.map((task) => (
                     <article className={`notification-task status-${task.status}${isOverdue(task) ? " is-overdue" : ""}`} key={task.id}>
                       <div>
-                        <span className="task-id">{task.id}</span>
+                        <span className="task-id">{taskDisplayId(task)}</span>
                         <strong>{task.title}</strong>
                         <small>
                           {statusLabels[task.status]} · {task.category}
@@ -3268,6 +3486,12 @@ export default function Home() {
                     <option value="done">בוצעו</option>
                     <option value="cancelled">בוטלו</option>
                     <option value="all">הכול</option>
+                  </select>
+                  <select value={shareFilter} onChange={(e) => setShareFilter(e.target.value as ShareFilter)} aria-label="סינון שיתוף">
+                    <option value="all">כל המשימות</option>
+                    <option value="mine">המשימות שלי</option>
+                    <option value="shared_with_me">שותפו איתי</option>
+                    <option value="shared_by_me">שיתפתי</option>
                   </select>
                   <select value={prefixFilter} onChange={(e) => setPrefixFilter(e.target.value as typeof prefixFilter)} aria-label="סינון סוג">
                     <option value="all">אישי ועבודה</option>
@@ -3325,16 +3549,19 @@ export default function Home() {
                       aria-label={task.focused ? `הסרת ${task.title} ממיקוד` : `סימון ${task.title} במיקוד`}
                       aria-pressed={Boolean(task.focused)}
                       onClick={() => toggleTaskFocus(task.id)}
+                      disabled={!isOwnTask(task, cloudUser)}
                       title={task.focused ? "הסרה ממיקוד" : "סימון במיקוד"}
                     >
                       ★
                     </button>
-                    <button className="check" aria-label={`סימון ${task.title} כבוצעה`} onClick={() => updateStatus(task.id, task.status === "done" ? "open" : "done")}>
+                    <button className="check" aria-label={`סימון ${task.title} כבוצעה`} onClick={() => updateStatus(task.id, task.status === "done" ? "open" : "done")} disabled={!isOwnTask(task, cloudUser)}>
                       {task.status === "done" ? "✓" : ""}
                     </button>
                     <div className="task-main">
                       <div className="task-heading">
-                        <span className="task-id">{task.id}</span>
+                        <span className="task-id">{taskDisplayId(task)}</span>
+                        {task.sharedWithMe && <span className="shared-badge">שותפה איתי</span>}
+                        {!task.sharedWithMe && task.cloudId && taskSharesForTask(task).length > 0 && <span className="shared-badge">משותפת</span>}
                         <h2>{task.title}</h2>
                       </div>
                       <div className="meta">
@@ -3349,10 +3576,10 @@ export default function Home() {
                       {renderSubtasksPreview(task)}
                     </div>
                     <div className="task-actions">
-                      <select value={task.status} onChange={(e) => updateStatus(task.id, e.target.value as TaskStatus)} aria-label={`סטטוס ${task.title}`}>
+                      <select value={task.status} onChange={(e) => updateStatus(task.id, e.target.value as TaskStatus)} aria-label={`סטטוס ${task.title}`} disabled={!isOwnTask(task, cloudUser)}>
                         {Object.entries(statusLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
                       </select>
-                      <button className="edit-icon-button" onClick={() => openEditTask(task)} aria-label={`עריכת ${task.title}`} title="עריכה">
+                      <button className="edit-icon-button" onClick={() => openEditTask(task)} aria-label={task.sharedWithMe ? `פתיחת ${task.title}` : `עריכת ${task.title}`} title={task.sharedWithMe ? "פתיחה" : "עריכה"}>
                         <span aria-hidden="true">✎</span>
                       </button>
                     </div>
@@ -3541,7 +3768,7 @@ export default function Home() {
                     ) : analytics.attention.map((task) => (
                       <button className={`attention-task${isOverdue(task) ? " overdue" : ""}`} key={task.id} onClick={() => focusTask(task.id)}>
                         <span className="attention-top">
-                          <span className="task-id">{task.id}</span>
+                          <span className="task-id">{taskDisplayId(task)}</span>
                           <span className="attention-tag">{attentionReason(task)}</span>
                         </span>
                         <strong>{task.title}</strong>
@@ -4003,7 +4230,7 @@ export default function Home() {
             <div className="drawer-header">
               <div>
                 <p className="eyebrow">{taskEditor.mode === "create" ? "משימה חדשה" : "עריכת משימה"}</p>
-                <h2>{taskEditor.mode === "create" ? "פרטי המשימה" : taskEditor.taskId}</h2>
+                <h2>{taskEditor.mode === "create" ? "פרטי המשימה" : taskEditorTask ? taskDisplayId(taskEditorTask) : taskEditor.taskId}</h2>
               </div>
               <button className="icon-button" onClick={closeTaskEditor} aria-label="סגירת חלונית משימה">×</button>
             </div>
@@ -4015,43 +4242,43 @@ export default function Home() {
                   <select value={taskEditor.draft.prefix} onChange={(event) => {
                     const nextPrefix = event.target.value as TaskPrefix;
                     updateTaskDraft({ prefix: nextPrefix, category: topicOptions[nextPrefix][0] ?? (nextPrefix === "W" ? "עבודה" : "אישי") });
-                  }} disabled={taskEditor.mode === "edit"} aria-label="סוג משימה">
+                  }} disabled={taskEditor.mode === "edit" || taskEditorIsShared} aria-label="סוג משימה">
                     <option value="P">אישי</option>
                     <option value="W">עבודה</option>
                   </select>
                 </label>
-                <div className="task-editor-id" aria-label={taskEditor.mode === "create" ? "מספר המשימה יווצר אוטומטית" : `מזהה משימה ${taskEditor.taskId}`}>
+                <div className="task-editor-id" aria-label={taskEditor.mode === "create" ? "מספר המשימה יווצר אוטומטית" : `מזהה משימה ${taskEditorTask ? taskDisplayId(taskEditorTask) : taskEditor.taskId}`}>
                   <span>מזהה</span>
-                  <strong>{taskEditor.mode === "create" ? "אוטומטי" : taskEditor.taskId}</strong>
+                  <strong>{taskEditor.mode === "create" ? "אוטומטי" : taskEditorTask ? taskDisplayId(taskEditorTask) : taskEditor.taskId}</strong>
                 </div>
               </div>
               <label className="task-title-field">
                 <span>שם משימה</span>
-                <input {...freeTextInputProps} value={taskEditor.draft.title} onChange={(event) => updateTaskDraft({ title: event.target.value })} placeholder="מה צריך לעשות?" autoFocus />
+                <input {...freeTextInputProps} value={taskEditor.draft.title} onChange={(event) => updateTaskDraft({ title: event.target.value })} placeholder="מה צריך לעשות?" autoFocus disabled={taskEditorIsShared} />
               </label>
               <div className="edit-grid">
                 <label>
                   <span>נושא</span>
-                  <select value={taskEditor.draft.category} onChange={(event) => updateTaskDraft({ category: event.target.value })}>
+                  <select value={taskEditor.draft.category} onChange={(event) => updateTaskDraft({ category: event.target.value })} disabled={taskEditorIsShared}>
                     {topicOptions[taskEditor.draft.prefix].map((topic) => <option value={topic} key={topic}>{topic}</option>)}
                   </select>
                 </label>
                 <label>
                   <span>פעולה</span>
-                  <select value={taskEditor.draft.actionType} onChange={(event) => updateTaskDraft({ actionType: event.target.value })}>
+                  <select value={taskEditor.draft.actionType} onChange={(event) => updateTaskDraft({ actionType: event.target.value })} disabled={taskEditorIsShared}>
                     <option value="">ללא פעולה</option>
                     {actionOptions.map((action) => <option value={action} key={action}>{action}</option>)}
                   </select>
                 </label>
                 <label>
                   <span>סטטוס</span>
-                  <select value={taskEditor.draft.status} onChange={(event) => updateTaskDraft({ status: event.target.value as TaskStatus })}>
+                  <select value={taskEditor.draft.status} onChange={(event) => updateTaskDraft({ status: event.target.value as TaskStatus })} disabled={taskEditorIsShared}>
                     {Object.entries(statusLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
                   </select>
                 </label>
                 <label>
                   <span>עדיפות</span>
-                  <select value={taskEditor.draft.priority} onChange={(event) => updateTaskDraft({ priority: event.target.value as TaskPriority })}>
+                  <select value={taskEditor.draft.priority} onChange={(event) => updateTaskDraft({ priority: event.target.value as TaskPriority })} disabled={taskEditorIsShared}>
                     {Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
                   </select>
                 </label>
@@ -4062,13 +4289,56 @@ export default function Home() {
                     value={taskEditor.draft.dueDate}
                     min={taskEditorMinDueDate}
                     onChange={(event) => updateTaskDraft({ dueDate: event.target.value })}
+                    disabled={taskEditorIsShared}
                   />
                 </label>
               </div>
               <label className="notes-field">
                 <span>הערות</span>
-                <textarea {...freeTextInputProps} value={taskEditor.draft.notes} onChange={(event) => updateTaskDraft({ notes: event.target.value })} rows={5} />
+                <textarea {...freeTextInputProps} value={taskEditor.draft.notes} onChange={(event) => updateTaskDraft({ notes: event.target.value })} rows={5} disabled={taskEditorIsShared} />
               </label>
+              {taskEditor.mode === "edit" && taskEditorTask && (
+                <section className="sharing-panel">
+                  <div>
+                    <h3>{taskEditorIsShared ? "משימה ששותפה איתך" : "שיתוף משימה"}</h3>
+                    <p>
+                      {taskEditorIsShared
+                        ? "אפשר לראות את כל פרטי המשימה ולעדכן רק סטטוס של צעדי טיפול."
+                        : "השיתוף כולל את המשימה ואת צעדי הטיפול שלה. המשתתף יוכל לעדכן רק סטטוס של צעדי טיפול אחרי אישור ההזמנה."}
+                    </p>
+                  </div>
+                  {!taskEditorIsShared && taskEditorTask.cloudId ? (
+                    <>
+                      <div className="share-form">
+                        <input
+                          type="email"
+                          value={shareEmailDrafts[taskEditorTask.id] ?? ""}
+                          onChange={(event) => updateShareEmailDraft(taskEditorTask.id, event.target.value)}
+                          placeholder="מייל לשיתוף"
+                          aria-label="כתובת מייל לשיתוף משימה"
+                        />
+                        <button type="button" onClick={() => shareTaskWithEmail(taskEditorTask)}>שליחת הזמנה</button>
+                      </div>
+                      <div className="share-list" aria-label="שיתופי משימה">
+                        {taskEditorShares.length === 0 ? (
+                          <p className="share-empty">המשימה עדיין לא שותפה.</p>
+                        ) : taskEditorShares.map((share) => (
+                          <article className="share-row" key={share.id}>
+                            <div>
+                              <strong>{share.sharedWithEmail}</strong>
+                              <span>{share.status === "accepted" ? "אושר" : "ממתין לאישור"}</span>
+                            </div>
+                            <button type="button" onClick={() => revokeShare(share)}>הסרת שיתוף</button>
+                          </article>
+                        ))}
+                      </div>
+                    </>
+                  ) : !taskEditorIsShared ? (
+                    <p className="share-empty">אפשר לשתף אחרי שהמשימה נשמרה וסונכרנה לענן.</p>
+                  ) : null}
+                  {sharingStatus && <p className="sharing-status">{sharingStatus}</p>}
+                </section>
+              )}
               <section className="subtasks-editor">
                 <div className="subtasks-editor-header">
                   <div>
@@ -4081,7 +4351,7 @@ export default function Home() {
                       <small>בוצעו מתוך {subtaskProgress(taskEditor.draft.subtasks).total}</small>
                     </div>
                   )}
-                  <button type="button" onClick={addDraftSubtask}>הוספת צעד</button>
+                  <button type="button" onClick={addDraftSubtask} disabled={taskEditorIsShared}>הוספת צעד</button>
                 </div>
                 {taskEditor.draft.subtasks.length === 0 ? (
                   <p className="subtasks-empty">עדיין אין צעדי טיפול למשימה הזו.</p>
@@ -4096,6 +4366,7 @@ export default function Home() {
                             value={subtask.title}
                             onChange={(event) => updateDraftSubtask(subtask.number, { title: event.target.value })}
                             placeholder="לדוגמה: לתאם פגישה"
+                            disabled={taskEditorIsShared}
                           />
                         </label>
                         <label>
@@ -4103,6 +4374,7 @@ export default function Home() {
                           <select
                             value={subtask.actionType ?? ""}
                             onChange={(event) => updateDraftSubtask(subtask.number, { actionType: event.target.value })}
+                            disabled={taskEditorIsShared}
                           >
                             <option value="">ללא פעולה</option>
                             {actionOptions.map((action) => <option value={action} key={action}>{action}</option>)}
@@ -4123,6 +4395,7 @@ export default function Home() {
                             className="subtask-delete"
                             onClick={() => deleteDraftSubtask(subtask.number)}
                             aria-label={subtask.title ? `מחיקת צעד טיפול ${subtask.title}` : "מחיקת צעד טיפול חדש"}
+                            disabled={taskEditorIsShared}
                           >
                             מחיקה
                           </button>
@@ -4137,7 +4410,7 @@ export default function Home() {
               )}
               {taskEditorError && <p className="editor-error">{taskEditorError}</p>}
               <div className="drawer-actions">
-                <button type="submit">{taskEditor.mode === "create" ? "יצירת משימה" : "שמירת שינויים"}</button>
+                <button type="submit">{taskEditor.mode === "create" ? "יצירת משימה" : taskEditorIsShared ? "שמירת סטטוס צעדים" : "שמירת שינויים"}</button>
                 <button type="button" className="secondary-action" onClick={closeTaskEditor}>ביטול</button>
               </div>
             </form>
