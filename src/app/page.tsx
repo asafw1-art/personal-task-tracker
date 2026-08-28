@@ -700,7 +700,6 @@ function sortTasks(tasks: Task[]) {
 export default function Home() {
   const [tasks, setTasks] = usePersistentTasks();
   const [query, setQuery] = useState("");
-  const [quickAddTitle, setQuickAddTitle] = useState("");
   const [statusFilter, setStatusFilter] = useState<TaskFilter>("active");
   const [prefixFilter, setPrefixFilter] = useState<"all" | "P" | "W">("all");
   const [topicFilter, setTopicFilter] = useState("all");
@@ -752,6 +751,7 @@ export default function Home() {
   const [deletedAssistantThreads, setDeletedAssistantThreads] = useState<AssistantThread[]>([]);
   const [assistantRestoreStatus, setAssistantRestoreStatus] = useState("");
   const [activeNotificationId, setActiveNotificationId] = useState("");
+  const [isNotificationDetailOpen, setIsNotificationDetailOpen] = useState(false);
   const [dismissedNotificationIds, setDismissedNotificationIds] = useState<Set<string>>(() => new Set());
   const [analyticsTaskModal, setAnalyticsTaskModal] = useState<{
     title: string;
@@ -1159,42 +1159,6 @@ export default function Home() {
     setTaskEditor({ mode: "create", draft: defaultTaskDraft(prefixFilter === "W" ? "W" : "P") });
   }, [prefixFilter]);
 
-  function quickAddTask(event: FormEvent) {
-    event.preventDefault();
-    const title = quickAddTitle.trim();
-    if (!title) return;
-
-    setTasks((current) => {
-      let prefix: TaskPrefix = prefixFilter === "W" ? "W" : "P";
-      if (prefixFilter === "all" && topicFilter !== "all") {
-        if (topicOptions.W.includes(topicFilter) && !topicOptions.P.includes(topicFilter)) prefix = "W";
-        if (topicOptions.P.includes(topicFilter) && !topicOptions.W.includes(topicFilter)) prefix = "P";
-      }
-      const nextNumber = nextTaskNumber(current, prefix);
-      const createdAt = todayIso();
-      const statusChangedAt = nowIso();
-      return mergeUniqueTasks([...current, {
-        id: `${prefix}${nextNumber}`,
-        prefix,
-        number: nextNumber,
-        title,
-        category: topicFilter !== "all" ? topicFilter : prefix === "W" ? "עבודה" : "אישי",
-        actionType: actionFilter !== "all" ? actionFilter : undefined,
-        priority: "normal",
-        status: "open",
-        notes: undefined,
-        dueDate: undefined,
-        createdAt,
-        statusChangedAt,
-        subtasks: [],
-      }]);
-    });
-
-    setQuickAddTitle("");
-    setActiveView("tasks");
-    setStatusFilter("active");
-  }
-
   const emptyTaskState = useMemo(() => {
     const hasNarrowingFilters = activeFilters.length > 0;
 
@@ -1402,6 +1366,15 @@ export default function Home() {
   const primaryAppNotification = selectedAppNotification ?? appNotifications.find((notification) => !visibleDismissedNotificationIds.has(notification.id));
   const primaryNotificationTasks = primaryAppNotification
     ? tasksForNotificationFilter(primaryAppNotification.action.statusFilter)
+    : [];
+  const primaryNotificationOverdueTasks = primaryNotificationTasks.filter((task) => isOverdue(task)).length;
+  const primaryNotificationOpenSubtasks = primaryNotificationTasks.reduce((sum, task) => sum + subtaskProgress(task.subtasks).open, 0);
+  const notificationSummaryItems = primaryAppNotification
+    ? [
+      `${primaryNotificationTasks.length} משימות רלוונטיות`,
+      primaryNotificationOverdueTasks > 0 ? `${primaryNotificationOverdueTasks} באיחור` : "",
+      primaryNotificationOpenSubtasks > 0 ? `${primaryNotificationOpenSubtasks} צעדי טיפול פתוחים` : "",
+    ].filter(Boolean)
     : [];
 
   function tasksForAnalyticsAction(action: NonNullable<AnalyticsInsight["action"]>) {
@@ -2133,6 +2106,7 @@ export default function Home() {
 
   function applyNotificationAction(notification: AppNotification) {
     setModalTaskQuery("");
+    setIsNotificationDetailOpen(true);
     setDismissedNotificationIds((current) => {
       const next = new Set(current);
       next.delete(notification.id);
@@ -2546,10 +2520,6 @@ export default function Home() {
         statusChangedAt,
       };
     }));
-  }
-
-  function cancelDraftSubtask(number: number) {
-    updateDraftSubtask(number, { status: "cancelled" });
   }
 
   function deleteDraftSubtask(number: number) {
@@ -3096,6 +3066,7 @@ export default function Home() {
                   onClick={() => {
                     setDismissedNotificationIds((current) => new Set(current).add(primaryAppNotification.id));
                     setActiveNotificationId("");
+                    setIsNotificationDetailOpen(false);
                     setModalTaskQuery("");
                   }}
                   aria-label="סגירת התראה"
@@ -3107,44 +3078,61 @@ export default function Home() {
                   <h2 id="primary-notification-title">{primaryAppNotification.title}</h2>
                   <p>{primaryAppNotification.body}</p>
                 </div>
-                <div className="modal-task-tools">
-                  <input
-                    {...freeTextInputProps}
-                    value={modalTaskQuery}
-                    onChange={(event) => setModalTaskQuery(event.target.value)}
-                    placeholder="חיפוש בתוך המשימות בחלונית..."
-                    aria-label="חיפוש במשימות ההתראה"
-                  />
-                  <span>{filteredNotificationTasks.length} מתוך {primaryNotificationTasks.length}</span>
+                <div className="notification-summary-card">
+                  <strong>תקציר מהיר</strong>
+                  <div>
+                    {notificationSummaryItems.map((item) => (
+                      <span key={item}>{item}</span>
+                    ))}
+                  </div>
+                  <p>אם זה רלוונטי עכשיו, אפשר לפתוח את הפירוט ולבחור משימה נקודתית לטיפול.</p>
+                  <button type="button" onClick={() => setIsNotificationDetailOpen((isOpen) => !isOpen)}>
+                    {isNotificationDetailOpen ? "הסתר פירוט" : "הצג פירוט"}
+                  </button>
                 </div>
-                <div className="notification-modal-list" aria-label="משימות בהתראה">
-                  {filteredNotificationTasks.length === 0 ? (
-                    <p className="notification-modal-empty">אין משימות רלוונטיות להצגה כרגע.</p>
-                  ) : filteredNotificationTasks.map((task) => (
-                    <article className={`notification-task status-${task.status}${isOverdue(task) ? " is-overdue" : ""}`} key={task.id}>
-                      <div>
-                        <span className="task-id">{task.id}</span>
-                        <strong>{task.title}</strong>
-                        <small>
-                          {statusLabels[task.status]} · {task.category}
-                          {task.dueDate ? ` · יעד ${formatDate(task.dueDate)}` : ""}
-                          {subtaskProgressLabel(task.subtasks) ? ` · ${subtaskProgressLabel(task.subtasks)}` : ""}
-                        </small>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setDismissedNotificationIds((current) => new Set(current).add(primaryAppNotification.id));
-                          setActiveNotificationId("");
-                          setModalTaskQuery("");
-                          openEditTask(task);
-                        }}
-                      >
-                        פתיחה
-                      </button>
-                    </article>
-                  ))}
-                </div>
+                {isNotificationDetailOpen && (
+                  <>
+                    <div className="modal-task-tools">
+                      <input
+                        {...freeTextInputProps}
+                        value={modalTaskQuery}
+                        onChange={(event) => setModalTaskQuery(event.target.value)}
+                        placeholder="חיפוש בתוך המשימות בחלונית..."
+                        aria-label="חיפוש במשימות ההתראה"
+                      />
+                      <span>{filteredNotificationTasks.length} מתוך {primaryNotificationTasks.length}</span>
+                    </div>
+                    <div className="notification-modal-list" aria-label="משימות בהתראה">
+                      {filteredNotificationTasks.length === 0 ? (
+                        <p className="notification-modal-empty">אין משימות רלוונטיות להצגה כרגע.</p>
+                      ) : filteredNotificationTasks.map((task) => (
+                        <article className={`notification-task status-${task.status}${isOverdue(task) ? " is-overdue" : ""}`} key={task.id}>
+                          <div>
+                            <span className="task-id">{task.id}</span>
+                            <strong>{task.title}</strong>
+                            <small>
+                              {statusLabels[task.status]} · {task.category}
+                              {task.dueDate ? ` · יעד ${formatDate(task.dueDate)}` : ""}
+                              {subtaskProgressLabel(task.subtasks) ? ` · ${subtaskProgressLabel(task.subtasks)}` : ""}
+                            </small>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDismissedNotificationIds((current) => new Set(current).add(primaryAppNotification.id));
+                              setActiveNotificationId("");
+                              setIsNotificationDetailOpen(false);
+                              setModalTaskQuery("");
+                              openEditTask(task);
+                            }}
+                          >
+                            פתיחה
+                          </button>
+                        </article>
+                      ))}
+                    </div>
+                  </>
+                )}
               </article>
             </section>
           )}
@@ -3222,24 +3210,6 @@ export default function Home() {
 
           {activeView === "tasks" ? (
             <>
-              <form className="panel quick-add" onSubmit={quickAddTask} aria-label="הוספה מהירה של משימה">
-                <div>
-                  <label htmlFor="quick-add-title">הוספה מהירה</label>
-                  <input
-                    {...freeTextInputProps}
-                    id="quick-add-title"
-                    value={quickAddTitle}
-                    onChange={(event) => setQuickAddTitle(event.target.value)}
-                    placeholder="מה צריך לעשות עכשיו?"
-                    aria-describedby="quick-add-help"
-                  />
-                  <small id="quick-add-help">
-                    Enter יוסיף משימה חדשה. פרטים מלאים אפשר להוסיף דרך כפתור הפלוס.
-                  </small>
-                </div>
-                <button type="submit" disabled={!quickAddTitle.trim()}>הוספה</button>
-              </form>
-
               <section className="panel controls">
                 <input {...freeTextInputProps} value={query} onChange={(e) => setQuery(e.target.value)} placeholder="חיפוש משימה או מזהה, למשל P19" aria-label="חיפוש" />
                 <button
@@ -4109,14 +4079,6 @@ export default function Home() {
                           </select>
                         </label>
                         <div className="subtask-row-actions">
-                          <button
-                            type="button"
-                            className="subtask-cancel"
-                            onClick={() => cancelDraftSubtask(subtask.number)}
-                            disabled={subtask.status === "cancelled"}
-                          >
-                            ביטול
-                          </button>
                           <button
                             type="button"
                             className="subtask-delete"
