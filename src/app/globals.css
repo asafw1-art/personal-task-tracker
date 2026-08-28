@@ -120,11 +120,13 @@ h1 { line-height: 1.05; margin: 0; font-size: clamp(2.5rem, 6vw, 4.2rem); overfl
 .notification-modal-kicker { color: var(--accent-dark); font-size: .86rem; font-weight: 900; }
 .notification-modal h2 { font-size: 1.35rem; margin: 4px 0 6px; padding-left: 46px; }
 .notification-modal p { color: var(--muted); line-height: 1.55; margin: 0; }
-.notification-summary-card { background: var(--surface-soft); border: 1px solid var(--border); border-radius: var(--radius-md); display: grid; gap: 10px; padding: 14px; }
-.notification-summary-card > strong { color: var(--text); font-size: 1rem; }
-.notification-summary-card div { display: flex; flex-wrap: wrap; gap: 8px; }
+.notification-summary-list { display: grid; gap: 10px; }
+.notification-summary-card { align-items: center; background: var(--surface-soft); border: 1px solid var(--border); border-radius: var(--radius-md); display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr) auto; padding: 14px; }
+.notification-summary-card div { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.notification-summary-card strong { color: var(--text); flex-basis: 100%; font-size: 1rem; }
+.notification-summary-card p { flex-basis: 100%; }
 .notification-summary-card span { background: var(--accent-soft); border: 1px solid #dbeafe; border-radius: var(--radius-pill); color: var(--accent-dark); font-size: .86rem; font-weight: 800; padding: 7px 10px; }
-.notification-summary-card button { background: var(--accent); border: 0; border-radius: var(--radius-md); color: #fff; font-weight: 800; justify-self: start; padding: 10px 16px; }
+.notification-summary-card button { background: var(--accent); border: 0; border-radius: var(--radius-md); color: #fff; font-weight: 800; justify-self: start; padding: 10px 16px; white-space: nowrap; }
 .notification-summary-card button:hover { background: var(--accent-dark); }
 .modal-task-tools { align-items: center; display: grid; gap: 10px; grid-template-columns: 1fr auto; }
 .modal-task-tools span { background: var(--accent-soft); border: 1px solid #dbeafe; border-radius: var(--radius-pill); color: var(--accent-dark); font-size: .82rem; font-weight: 800; padding: 7px 10px; white-space: nowrap; }
@@ -765,6 +767,8 @@ textarea { resize: vertical; min-height: 86px; }
   .app-notification button { width: 100%; }
   .notification-modal-backdrop { padding: 10px; }
   .notification-modal { max-height: calc(100vh - 20px); max-width: calc(100vw - 20px); padding: 16px; }
+  .notification-summary-card { align-items: start; grid-template-columns: minmax(0, 1fr) auto; }
+  .notification-summary-card button { min-width: 58px; padding-inline: 12px; }
   .modal-task-tools { grid-template-columns: 1fr; }
   .modal-task-tools span { justify-self: start; }
   .notification-task { align-items: stretch; grid-template-columns: 1fr; }
@@ -775,7 +779,8 @@ textarea { resize: vertical; min-height: 86px; }
   .period-summary-panel button { width: 100%; }
   .range-tabs { display: grid; grid-template-columns: repeat(3, 1fr); width: 100%; }
   .insights-grid { grid-template-columns: 1fr; }
-  .insight-card { min-height: 0; }
+  .insight-card { align-items: center; grid-template-columns: minmax(0, 1fr) auto; grid-template-rows: auto; min-height: 0; }
+  .insight-card button { align-self: center; min-width: 58px; padding-inline: 10px; }
   .analytics-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .week-chart { gap: 6px; }
   .vertical-track { width: 14px; }

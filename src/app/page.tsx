@@ -1362,20 +1362,19 @@ export default function Home() {
     const activeIds = new Set(appNotifications.map((notification) => notification.id));
     return new Set([...dismissedNotificationIds].filter((id) => activeIds.has(id)));
   }, [appNotifications, dismissedNotificationIds]);
-  const selectedAppNotification = appNotifications.find((notification) => notification.id === activeNotificationId);
-  const primaryAppNotification = selectedAppNotification ?? appNotifications.find((notification) => !visibleDismissedNotificationIds.has(notification.id));
-  const primaryNotificationTasks = primaryAppNotification
-    ? tasksForNotificationFilter(primaryAppNotification.action.statusFilter)
+  const visibleAppNotifications = appNotifications.filter((notification) => !visibleDismissedNotificationIds.has(notification.id));
+  const selectedAppNotification = visibleAppNotifications.find((notification) => notification.id === activeNotificationId);
+  const activeNotificationDetail = isNotificationDetailOpen
+    ? selectedAppNotification ?? visibleAppNotifications[0]
+    : null;
+  const activeNotificationDetailTasks = activeNotificationDetail
+    ? tasksForNotificationFilter(activeNotificationDetail.action.statusFilter)
     : [];
-  const primaryNotificationOverdueTasks = primaryNotificationTasks.filter((task) => isOverdue(task)).length;
-  const primaryNotificationOpenSubtasks = primaryNotificationTasks.reduce((sum, task) => sum + subtaskProgress(task.subtasks).open, 0);
-  const notificationSummaryItems = primaryAppNotification
-    ? [
-      `${primaryNotificationTasks.length} משימות רלוונטיות`,
-      primaryNotificationOverdueTasks > 0 ? `${primaryNotificationOverdueTasks} באיחור` : "",
-      primaryNotificationOpenSubtasks > 0 ? `${primaryNotificationOpenSubtasks} צעדי טיפול פתוחים` : "",
-    ].filter(Boolean)
-    : [];
+  const notificationModalTone = visibleAppNotifications.some((notification) => notification.tone === "danger")
+    ? "danger"
+    : visibleAppNotifications.some((notification) => notification.tone === "warn")
+      ? "warn"
+      : "neutral";
 
   function tasksForAnalyticsAction(action: NonNullable<AnalyticsInsight["action"]>) {
     const normalized = canonicalTaskId(action.query ?? "");
@@ -1420,7 +1419,7 @@ export default function Home() {
 
   const analyticsModalTasks = analyticsTaskModal ? tasksForAnalyticsAction(analyticsTaskModal.action) : [];
   const filteredAnalyticsModalTasks = analyticsModalTasks.filter(taskMatchesModalQuery);
-  const filteredNotificationTasks = primaryNotificationTasks.filter(taskMatchesModalQuery);
+  const filteredNotificationTasks = activeNotificationDetailTasks.filter(taskMatchesModalQuery);
 
   const statistics = useMemo(() => {
     const today = todayIso();
@@ -2102,17 +2101,6 @@ export default function Home() {
       tone: "neutral",
       action,
     });
-  }
-
-  function applyNotificationAction(notification: AppNotification) {
-    setModalTaskQuery("");
-    setIsNotificationDetailOpen(true);
-    setDismissedNotificationIds((current) => {
-      const next = new Set(current);
-      next.delete(notification.id);
-      return next;
-    });
-    setActiveNotificationId(notification.id);
   }
 
   function updateNotificationPreference(key: NotificationPreferenceKey, value: boolean) {
@@ -3043,28 +3031,18 @@ export default function Home() {
             </section>
           )}
 
-          {appNotifications.length > 0 && (
-            <section className="app-notifications" aria-label="התראות פעילות" aria-live="polite">
-              {appNotifications.map((notification) => (
-                <article className={`app-notification notification-${notification.tone}`} key={notification.id}>
-                  <div>
-                    <strong>{notification.title}</strong>
-                    <span>{notification.body}</span>
-                  </div>
-                  <button onClick={() => applyNotificationAction(notification)}>{notification.actionLabel}</button>
-                </article>
-              ))}
-            </section>
-          )}
-
-          {primaryAppNotification && (
+          {visibleAppNotifications.length > 0 && (
             <section className="notification-modal-backdrop" aria-label="התראה חשובה">
-              <article className={`notification-modal notification-${primaryAppNotification.tone}`} role="dialog" aria-modal="true" aria-labelledby="primary-notification-title">
+              <article className={`notification-modal notification-${notificationModalTone}`} role="dialog" aria-modal="true" aria-labelledby="primary-notification-title">
                 <button
                   type="button"
                   className="icon-button"
                   onClick={() => {
-                    setDismissedNotificationIds((current) => new Set(current).add(primaryAppNotification.id));
+                    setDismissedNotificationIds((current) => {
+                      const next = new Set(current);
+                      visibleAppNotifications.forEach((notification) => next.add(notification.id));
+                      return next;
+                    });
                     setActiveNotificationId("");
                     setIsNotificationDetailOpen(false);
                     setModalTaskQuery("");
@@ -3074,33 +3052,49 @@ export default function Home() {
                   ×
                 </button>
                 <div>
-                  <span className="notification-modal-kicker">התראה פעילה</span>
-                  <h2 id="primary-notification-title">{primaryAppNotification.title}</h2>
-                  <p>{primaryAppNotification.body}</p>
+                  <span className="notification-modal-kicker">התראות פעילות</span>
+                  <h2 id="primary-notification-title">מה דורש תשומת לב עכשיו</h2>
+                  <p>ריכזתי את הדברים החשובים בכניסה אחת. אפשר לפתוח פירוט רק לסוג שמעניין אותך עכשיו.</p>
                 </div>
-                <div className="notification-summary-card">
-                  <strong>תקציר מהיר</strong>
-                  <div>
-                    {notificationSummaryItems.map((item) => (
-                      <span key={item}>{item}</span>
-                    ))}
-                  </div>
-                  <p>אם זה רלוונטי עכשיו, אפשר לפתוח את הפירוט ולבחור משימה נקודתית לטיפול.</p>
-                  <button type="button" onClick={() => setIsNotificationDetailOpen((isOpen) => !isOpen)}>
-                    {isNotificationDetailOpen ? "הסתר פירוט" : "הצג פירוט"}
-                  </button>
+                <div className="notification-summary-list">
+                  {visibleAppNotifications.map((notification) => {
+                    const notificationTasks = tasksForNotificationFilter(notification.action.statusFilter);
+                    const notificationOpenSubtasks = notificationTasks.reduce((sum, task) => sum + subtaskProgress(task.subtasks).open, 0);
+                    const isActiveDetail = activeNotificationDetail?.id === notification.id;
+
+                    return (
+                      <article className={`notification-summary-card notification-${notification.tone}`} key={notification.id}>
+                        <div>
+                          <strong>{notification.title}</strong>
+                          <p>{notification.body}</p>
+                          <span>{notificationTasks.length} משימות</span>
+                          {notificationOpenSubtasks > 0 && <span>{notificationOpenSubtasks} צעדים פתוחים</span>}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setModalTaskQuery("");
+                            setActiveNotificationId(notification.id);
+                            setIsNotificationDetailOpen((isOpen) => !(isOpen && activeNotificationDetail?.id === notification.id));
+                          }}
+                        >
+                          {isActiveDetail ? "סגור" : "הצג"}
+                        </button>
+                      </article>
+                    );
+                  })}
                 </div>
-                {isNotificationDetailOpen && (
+                {activeNotificationDetail && (
                   <>
                     <div className="modal-task-tools">
                       <input
                         {...freeTextInputProps}
                         value={modalTaskQuery}
                         onChange={(event) => setModalTaskQuery(event.target.value)}
-                        placeholder="חיפוש בתוך המשימות בחלונית..."
+                        placeholder={`חיפוש בתוך ${activeNotificationDetail.title}...`}
                         aria-label="חיפוש במשימות ההתראה"
                       />
-                      <span>{filteredNotificationTasks.length} מתוך {primaryNotificationTasks.length}</span>
+                      <span>{filteredNotificationTasks.length} מתוך {activeNotificationDetailTasks.length}</span>
                     </div>
                     <div className="notification-modal-list" aria-label="משימות בהתראה">
                       {filteredNotificationTasks.length === 0 ? (
@@ -3119,7 +3113,7 @@ export default function Home() {
                           <button
                             type="button"
                             onClick={() => {
-                              setDismissedNotificationIds((current) => new Set(current).add(primaryAppNotification.id));
+                              setDismissedNotificationIds((current) => new Set(current).add(activeNotificationDetail.id));
                               setActiveNotificationId("");
                               setIsNotificationDetailOpen(false);
                               setModalTaskQuery("");
