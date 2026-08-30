@@ -12,6 +12,7 @@ import { acknowledgeTaskShareEnd, acceptTaskShare, createTaskShare, declineTaskS
 import { countCloudTasks, fetchCloudTasks, saveCloudTasks } from "@/lib/supabaseTasks";
 import { fetchCloudTaxonomy, replaceCloudTaxonomy } from "@/lib/supabaseTaxonomy";
 import { fetchUserSettings, saveUserSettings } from "@/lib/supabaseUserSettings";
+import { fetchAdminOverview, type AdminOverview } from "@/lib/supabaseAdmin";
 
 const STORAGE_KEY = "asaf-task-tracker-v1";
 const TAXONOMY_STORAGE_KEY = "asaf-task-tracker-taxonomy-v1";
@@ -97,7 +98,7 @@ type ShareFilter = "all" | "mine" | "shared_with_me" | "shared_by_me" | "shared_
 type AnalyticsRange = "week" | "month" | "all";
 type MainView = "tasks" | "stats";
 type TaxonomyMode = "topics" | "actions";
-type SettingsTab = "appearance" | "taxonomy" | "notifications" | "sync";
+type SettingsTab = "appearance" | "taxonomy" | "notifications" | "sync" | "admin";
 type AppTheme = "light" | "dark";
 type NotificationPreferenceKey = "overdue" | "openSubtasks" | "noWeeklyClosures" | "waiting" | "dueSoon";
 type EditingTaxonomyItem =
@@ -777,6 +778,8 @@ export default function Home() {
   const [shareEmailDrafts, setShareEmailDrafts] = useState<Record<string, string>>({});
   const [sharingStatus, setSharingStatus] = useState("");
   const [devicesStatus, setDevicesStatus] = useState("");
+  const [adminOverview, setAdminOverview] = useState<AdminOverview | null>(null);
+  const [adminOverviewStatus, setAdminOverviewStatus] = useState("");
   const [isCloudReady, setIsCloudReady] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
@@ -3239,6 +3242,22 @@ export default function Home() {
     }
   }
 
+  async function refreshAdminOverview() {
+    if (cloudUser?.email?.toLowerCase() !== "asafw1@gmail.com") {
+      setAdminOverviewStatus("אין הרשאת מנהל לחשבון הזה.");
+      return;
+    }
+
+    setAdminOverviewStatus("טוען נתוני ניהול...");
+    try {
+      const overview = await fetchAdminOverview();
+      setAdminOverview(overview);
+      setAdminOverviewStatus(`עודכן: ${formatDateTime(overview.generatedAt)}`);
+    } catch (error) {
+      setAdminOverviewStatus(`טעינת נתוני הניהול נכשלה: ${errorMessage(error)}`);
+    }
+  }
+
   function renderSubtasksPreview(task: Task) {
     const subtasks = task.subtasks ?? [];
     if (subtasks.length === 0) return null;
@@ -4046,7 +4065,7 @@ export default function Home() {
             <div className="drawer-header">
               <div>
                 <p className="eyebrow">הגדרות</p>
-                <h2>{settingsTab === "appearance" ? "תצוגה" : settingsTab === "taxonomy" ? "נושאים ופעולות" : settingsTab === "notifications" ? "התראות" : "חיבור, סנכרון וגיבוי"}</h2>
+                <h2>{settingsTab === "appearance" ? "תצוגה" : settingsTab === "taxonomy" ? "נושאים ופעולות" : settingsTab === "notifications" ? "התראות" : settingsTab === "admin" ? "ניהול אפליקציה" : "חיבור, סנכרון וגיבוי"}</h2>
               </div>
               <button className="icon-button" onClick={() => setIsSettingsOpen(false)} aria-label="סגירת הגדרות">×</button>
             </div>
@@ -4064,6 +4083,14 @@ export default function Home() {
               <button className={settingsTab === "sync" ? "active" : ""} onClick={() => setSettingsTab("sync")}>
                 חיבור, סנכרון וגיבוי
               </button>
+              {cloudUser?.email?.toLowerCase() === "asafw1@gmail.com" && (
+                <button className={settingsTab === "admin" ? "active" : ""} onClick={() => {
+                  setSettingsTab("admin");
+                  void refreshAdminOverview();
+                }}>
+                  ניהול
+                </button>
+              )}
             </div>
 
             <section className="data-view" aria-label="גיבוי ושחזור נתונים">
@@ -4271,6 +4298,30 @@ export default function Home() {
                     </span>
                   </label>
                 </div>
+              </section>
+              ) : settingsTab === "admin" ? (
+              <section className="panel admin-overview-panel">
+                <div className="panel-heading">
+                  <div>
+                    <h2>תמונת מצב ניהולית</h2>
+                    <span>מדדי מערכת מצרפיים בלבד, ללא מיילים או תוכן משימות.</span>
+                  </div>
+                  <button type="button" onClick={refreshAdminOverview}>רענון</button>
+                </div>
+                <p className="admin-overview-status">{adminOverviewStatus || "לחץ רענון לטעינת המדדים."}</p>
+                {adminOverview && (
+                  <div className="admin-metric-grid">
+                    <article><span>משתמשים רשומים</span><strong>{adminOverview.totalUsers}</strong></article>
+                    <article><span>פעילים ב־7 ימים</span><strong>{adminOverview.activeUsers7d}</strong></article>
+                    <article><span>פעילים ב־30 יום</span><strong>{adminOverview.activeUsers30d}</strong></article>
+                    <article><span>כל המשימות</span><strong>{adminOverview.totalTasks}</strong></article>
+                    <article><span>משימות פעילות</span><strong>{adminOverview.activeTasks}</strong></article>
+                    <article><span>משימות שהושלמו</span><strong>{adminOverview.completedTasks}</strong></article>
+                    <article><span>שיתופים פעילים</span><strong>{adminOverview.acceptedShares}</strong></article>
+                    <article><span>הזמנות שיתוף ממתינות</span><strong>{adminOverview.pendingShares}</strong></article>
+                  </div>
+                )}
+                <p className="admin-overview-note">משתמש פעיל הוא משתמש שמכשיר שלו נרשם באפליקציה במהלך התקופה. זהו מדד שימוש משוער, לא מעקב אחר זמן מסך.</p>
               </section>
               ) : (
               <>

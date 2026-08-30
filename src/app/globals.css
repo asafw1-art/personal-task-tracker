@@ -310,7 +310,7 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
 .drawer-header h2 { font-size: 1.7rem; line-height: 1.15; margin: 0; }
 .icon-button { align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: 10px; color: var(--muted); display: flex; font-size: 1.35rem; font-weight: 700; height: 40px; justify-content: center; line-height: 1; width: 40px; }
 .icon-button:hover { background: #f8fafc; color: var(--text); }
-.settings-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; background: rgba(226, 232, 240, .72); border: 1px solid var(--border); border-radius: 16px; margin-bottom: 14px; padding: 6px; position: sticky; top: 58px; z-index: 2; }
+.settings-tabs { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 6px; background: rgba(226, 232, 240, .72); border: 1px solid var(--border); border-radius: 16px; margin-bottom: 14px; padding: 6px; position: sticky; top: 58px; z-index: 2; }
 .settings-tabs button { background: transparent; border: 0; border-radius: 12px; color: var(--muted); font-weight: 800; padding: 11px 14px; }
 .settings-tabs button.active { background: var(--surface); box-shadow: 0 8px 18px rgba(23, 32, 51, 0.10); color: var(--accent-dark); }
 .settings-drawer .data-view { display: grid; gap: 14px; }
@@ -413,6 +413,13 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
 .profile-settings-form button:hover { background: var(--accent-dark); }
 .profile-settings-form p { color: var(--muted); grid-column: 1 / -1; line-height: 1.45; margin: 0; }
 .notification-settings-list { display: grid; gap: 10px; }
+.admin-overview-panel { display: grid; gap: 14px; padding: 18px; }
+.admin-overview-panel .panel-heading > button { background: var(--accent); border: 0; border-radius: 10px; color: #fff; font-weight: 800; padding: 10px 14px; }
+.admin-overview-status, .admin-overview-note { color: var(--muted); line-height: 1.45; margin: 0; }
+.admin-metric-grid { display: grid; gap: 10px; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.admin-metric-grid article { background: var(--surface-soft); border: 1px solid var(--border); border-radius: 12px; display: grid; gap: 8px; min-height: 104px; padding: 14px; }
+.admin-metric-grid span { color: var(--muted); font-size: .86rem; line-height: 1.35; }
+.admin-metric-grid strong { color: var(--text); font-size: 1.7rem; }
 .notification-setting { align-items: center; background: #f8fafc; border: 1px solid var(--border); border-radius: 14px; cursor: pointer; display: grid; gap: 12px; grid-template-columns: auto 1fr; padding: 14px; }
 .notification-setting:hover { border-color: #bfdbfe; }
 .notification-setting input { accent-color: var(--accent); height: 20px; width: 20px; }
@@ -856,6 +863,7 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
   .sync-panel { align-items: stretch; flex-direction: column; }
   .data-panel button, .file-button, .danger-panel button, .cloud-actions button, .cloud-login button, .sync-panel button { text-align: center; width: 100%; }
   .devices-header, .device-card { align-items: stretch; flex-direction: column; }
+  .admin-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .devices-header button { width: 100%; }
   .device-meta { justify-items: start; text-align: right; }
   .assistant-restore-card { align-items: stretch; flex-direction: column; }
