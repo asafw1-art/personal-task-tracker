@@ -45,6 +45,7 @@ const MAX_ASSISTANT_RECENT_MESSAGES = 8;
 const MAX_ASSISTANT_PAYLOAD_BYTES = 120_000;
 const ASSISTANT_RATE_LIMIT_WINDOW_MS = 5 * 60 * 1000;
 const ASSISTANT_RATE_LIMIT_MAX_REQUESTS = 25;
+const AI_PROVIDER_TIMEOUT_MS = 15_000;
 
 const assistantRateLimits = new Map<string, { count: number; resetAt: number }>();
 
@@ -147,12 +148,14 @@ function localAssistantResponse(message: string, tasks: Task[]): AssistantRespon
     return {
       reply: "אפשר למחוק את שיחת ה-AI הפעילה. היא תוסתר עכשיו ותישמר לשחזור אישי למשך 30 יום.",
       proposedAction: { type: "delete_assistant_history", label: "אישור והעברה לשחזור" },
+      mode: "local",
     };
   }
 
   if (/כל המשימות|איפוס|reset all|delete all|מחק הכל|לבטל הכל/i.test(message)) {
     return {
       reply: "מחיקה, ביטול או איפוס של כל המשימות אפשריים רק דרך ההגדרות, ולא דרך צ׳ט ה-AI.",
+      mode: "local",
     };
   }
 
@@ -163,6 +166,7 @@ function localAssistantResponse(message: string, tasks: Task[]): AssistantRespon
         ? `יש ${overdue.length} משימות באיחור:\n${listPreview(overdue)}`
         : "אין כרגע משימות באיחור.",
       proposedAction: { type: "filter_tasks", label: "הצג באיחור", filter: { statusFilter: "overdue", prefixFilter: "all" } },
+      mode: "local",
     };
   }
 
@@ -174,6 +178,7 @@ function localAssistantResponse(message: string, tasks: Task[]): AssistantRespon
         ? `יש ${openSubtasks} צעדי טיפול פתוחים בתוך ${withOpenSubtasks.length} משימות:\n${listPreview(withOpenSubtasks)}`
         : "אין כרגע צעדי טיפול פתוחים.",
       proposedAction: { type: "filter_tasks", label: "הצג צעדים פתוחים", filter: { statusFilter: "subtasks_open", prefixFilter: "all" } },
+      mode: "local",
     };
   }
 
@@ -182,6 +187,7 @@ function localAssistantResponse(message: string, tasks: Task[]): AssistantRespon
     return {
       reply: waiting.length ? `יש ${waiting.length} משימות ממתינות:\n${listPreview(waiting)}` : "אין כרגע משימות ממתינות.",
       proposedAction: { type: "filter_tasks", label: "הצג ממתינות", filter: { statusFilter: "waiting", prefixFilter: "all" } },
+      mode: "local",
     };
   }
 
@@ -190,6 +196,7 @@ function localAssistantResponse(message: string, tasks: Task[]): AssistantRespon
     return {
       reply: active.length ? `יש ${active.length} משימות פעילות:\n${listPreview(active)}` : "אין כרגע משימות פעילות.",
       proposedAction: { type: "filter_tasks", label: "הצג פעילות", filter: { statusFilter: "active", prefixFilter: "all" } },
+      mode: "local",
     };
   }
 
@@ -201,6 +208,7 @@ function localAssistantResponse(message: string, tasks: Task[]): AssistantRespon
     const openSubtasks = tasks.reduce((sum, task) => sum + countOpenSubtasks(task), 0);
     return {
       reply: `תמונת מצב קצרה:\n${active} משימות פעילות\n${overdue} משימות באיחור\n${waiting} משימות ממתינות\n${openSubtasks} צעדי טיפול פתוחים\n${done} משימות הושלמו`,
+      mode: "local",
     };
   }
 
@@ -391,7 +399,13 @@ function sanitizeAction(action: AssistantProposedAction | undefined, tasks: Task
 
 function sanitizeResponse(response: AssistantResponse, tasks: Task[], userMessage: string) {
   const proposedAction = sanitizeAction(response.proposedAction, tasks, userMessage);
-  return proposedAction ? { ...response, proposedAction } : { reply: response.reply };
+  const metadata = {
+    ...(response.mode ? { mode: response.mode } : {}),
+    ...(response.provider ? { provider: cleanText(response.provider, 40) } : {}),
+  };
+  return proposedAction
+    ? { reply: response.reply, proposedAction, ...metadata }
+    : { reply: response.reply, ...metadata };
 }
 
 async function verifyUser(request: Request) {
@@ -472,6 +486,7 @@ async function callGemini(prompt: string) {
         responseMimeType: "application/json",
       },
     }),
+    signal: AbortSignal.timeout(AI_PROVIDER_TIMEOUT_MS),
   });
 
   const data = await response.json() as GeminiResponse;
@@ -510,6 +525,7 @@ async function callVercelGateway(systemPrompt: string, userPayload: unknown, rec
         },
       ],
     }),
+    signal: AbortSignal.timeout(AI_PROVIDER_TIMEOUT_MS),
   });
 
   if (!response.ok) {
@@ -549,7 +565,7 @@ async function callAssistantProvider(systemPrompt: string, geminiPrompt: string,
   return {
     content: JSON.stringify({
       reply: "העוזר החכם לא זמין כרגע. אפשר עדיין לשאול שאלות פשוטות כמו: מה המשימות הפתוחות שלי, מה באיחור, או כמה צעדי טיפול פתוחים יש.",
-      fallback: true,
+      mode: "unavailable",
     }),
     error,
   };
@@ -591,7 +607,12 @@ export async function POST(request: Request) {
       }, 500);
     }
 
-    return jsonResponse(sanitizeResponse(extractJson(content), body.tasks, userMessage));
+    const assistantResponse = extractJson(content);
+    if (!assistantResponse.mode) {
+      assistantResponse.mode = providerResult.provider ? "ai" : "unavailable";
+    }
+    if (providerResult.provider) assistantResponse.provider = providerResult.provider;
+    return jsonResponse(sanitizeResponse(assistantResponse, body.tasks, userMessage));
   } catch (error) {
     const status = error instanceof HttpError ? error.status : 500;
     return jsonResponse({ error: error instanceof Error ? error.message : "שגיאה לא ידועה בצ׳ט." }, status);

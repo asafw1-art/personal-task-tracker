@@ -178,7 +178,7 @@ export async function fetchDeletedAssistantThreads(user: User) {
   return (data ?? []).map((row) => rowToThread(row as AssistantThreadRow));
 }
 
-export async function restoreAssistantThread(threadId: string) {
+export async function restoreAssistantThread(threadId: string, user: User) {
   const client = requireSupabase();
   const restoredAt = new Date().toISOString();
   const { data, error } = await client
@@ -189,6 +189,9 @@ export async function restoreAssistantThread(threadId: string) {
       updated_at: restoredAt,
     })
     .eq("id", threadId)
+    .eq("user_id", user.id)
+    .not("deleted_at", "is", null)
+    .gt("purge_after", restoredAt)
     .select("id, title, created_at, updated_at, deleted_at, purge_after")
     .single();
 

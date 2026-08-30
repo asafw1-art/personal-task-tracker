@@ -2640,7 +2640,8 @@ export default function Home() {
   async function restoreDeletedAssistantThread(threadId: string) {
     setAssistantRestoreStatus("משחזר שיחת AI...");
     try {
-      const thread = await restoreAssistantThread(threadId);
+      if (!cloudUser) throw new Error("יש להתחבר לענן כדי לשחזר שיחה.");
+      const thread = await restoreAssistantThread(threadId, cloudUser);
       const messages = await fetchAssistantMessages(thread.id);
       setAssistantThreadId(thread.id);
       setAssistantMessages(messages);
@@ -2745,6 +2746,8 @@ export default function Home() {
       const data = await response.json() as {
         reply?: string;
         proposedAction?: AssistantProposedAction;
+        mode?: "ai" | "local" | "unavailable";
+        provider?: string;
         error?: string;
         visibleEnvironmentKeys?: string[];
       };
@@ -2759,7 +2762,14 @@ export default function Home() {
         data.proposedAction ? "proposed" : undefined,
       );
       setAssistantMessages((current) => [...current, assistantMessage]);
-      setAssistantStatus(data.proposedAction ? "העוזר הציע פעולה שמחכה לאישור." : "העוזר ענה.");
+      if (data.mode === "local") {
+        setAssistantStatus("מצב מקומי: התשובה חושבה מנתוני האפליקציה בלבד, ללא ספק AI.");
+      } else if (data.mode === "unavailable") {
+        setAssistantStatus("ספק ה-AI אינו זמין כרגע. שאלות פשוטות על נתוני האפליקציה עדיין זמינות במצב מקומי.");
+      } else {
+        const providerLabel = data.provider ? ` באמצעות ${data.provider}` : "";
+        setAssistantStatus(data.proposedAction ? `העוזר${providerLabel} הציע פעולה שמחכה לאישור.` : `העוזר${providerLabel} ענה.`);
+      }
     } catch (error) {
       setAssistantStatus(`שגיאת צ׳ט: ${errorMessage(error)}`);
     } finally {

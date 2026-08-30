@@ -77,4 +77,6 @@ export type AssistantMessage = {
 export type AssistantResponse = {
   reply: string;
   proposedAction?: AssistantProposedAction;
+  mode?: "ai" | "local" | "unavailable";
+  provider?: string;
 };
