@@ -3774,7 +3774,9 @@ export default function Home() {
                 ))}
               </section>
 
-              <button className="floating-add" onClick={openCreateTask} aria-label="הוספת משימה חדשה">+</button>
+              {!isAssistantOpen && (
+                <button className="floating-add" onClick={openCreateTask} aria-label="הוספת משימה חדשה">+</button>
+              )}
             </>
           ) : (
             <section className="stats-view analytics-upgraded" aria-label="סטטיסטיקות משימות">
@@ -3972,13 +3974,15 @@ export default function Home() {
 
       {cloudUser && (
         <>
-          <button
-            className="assistant-floating-button"
-            onClick={() => setIsAssistantOpen((current) => !current)}
-            aria-label={isAssistantOpen ? "סגירת צ׳ט AI" : "פתיחת צ׳ט AI"}
-          >
-            AI
-          </button>
+          {!isAssistantOpen && (
+            <button
+              className="assistant-floating-button"
+              onClick={() => setIsAssistantOpen(true)}
+              aria-label="פתיחת צ׳ט AI"
+            >
+              AI
+            </button>
+          )}
 
           {isAssistantOpen && (
             <section className="assistant-chat" aria-label="צ׳ט AI למשימות">

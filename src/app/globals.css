@@ -296,7 +296,7 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
 .task-drawer { width: min(780px, 100%); }
 .drawer-header {
   align-items: flex-start;
-  background: linear-gradient(180deg, var(--bg), rgba(245, 247, 251, .86));
+  background: var(--bg);
   border-bottom: 1px solid var(--border);
   display: flex;
   gap: 14px;
@@ -623,7 +623,7 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
 }
 [data-theme="dark"] .drawer-header,
 [data-theme="dark"] .drawer-actions {
-  background: linear-gradient(180deg, var(--bg), rgba(13, 20, 36, .88));
+  background: var(--bg);
 }
 [data-theme="dark"] .analytics-header,
 [data-theme="dark"] .kanban-toolbar,
