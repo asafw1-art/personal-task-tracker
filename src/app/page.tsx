@@ -2212,7 +2212,7 @@ export default function Home() {
     const updateInsightIds = new Set(["completed-subtasks", "closure-slowdown", "closure-improved", "completion-rate", "no-overdue"]);
     const actionInsights = sortedInsights
       .filter((insight) => insight.action && insight.actionLabel && insight.tone !== "good" && !updateInsightIds.has(insight.id))
-      .slice(0, 4);
+      .slice(0, 3);
     const updateInsights = sortedInsights
       .filter((insight) => !insight.action || insight.tone === "good" || updateInsightIds.has(insight.id))
       .slice(0, 3);
@@ -2487,6 +2487,15 @@ export default function Home() {
         statusChangedAt,
       };
     }));
+  }
+
+  function confirmTaskCompletion(task: Task) {
+    const nextStatus: TaskStatus = task.status === "done" ? "open" : "done";
+    const message = nextStatus === "done"
+      ? `לסמן את "${task.title}" כבוצעה?`
+      : `להחזיר את "${task.title}" למשימות הפעילות?`;
+    if (!window.confirm(message)) return;
+    updateStatus(task.id, nextStatus);
   }
 
   function toggleTaskFocus(taskToToggle: Task) {
@@ -3659,13 +3668,17 @@ export default function Home() {
                         </div>
                         <button
                           type="button"
+                          className="notification-detail-button"
                           onClick={() => {
                             setModalTaskQuery("");
                             setActiveNotificationId(notification.id);
                             setIsNotificationDetailOpen((isOpen) => !(isOpen && activeNotificationDetail?.id === notification.id));
                           }}
+                          aria-label={isActiveDetail ? `סגירת פירוט ${notification.title}` : `פתיחת פירוט ${notification.title}`}
+                          aria-expanded={isActiveDetail}
+                          title={isActiveDetail ? "סגירת פירוט" : "פתיחת פירוט"}
                         >
-                          {isActiveDetail ? "סגור" : "הצג"}
+                          <span aria-hidden="true">{isActiveDetail ? "⌃" : "⌄"}</span>
                         </button>
                       </article>
                     );
@@ -3924,8 +3937,13 @@ export default function Home() {
                       ★
                     </button>
                     {isOwnTask(task, cloudUser) ? (
-                      <button className="check" aria-label={`סימון ${task.title} כבוצעה`} onClick={() => updateStatus(task.id, task.status === "done" ? "open" : "done")}>
-                        {task.status === "done" ? "✓" : ""}
+                      <button
+                        className="task-complete-button"
+                        aria-label={task.status === "done" ? `החזרת ${task.title} למשימות הפעילות` : `סימון ${task.title} כבוצעה`}
+                        onClick={() => confirmTaskCompletion(task)}
+                        title={task.status === "done" ? "פתיחה מחדש" : "סיום משימה"}
+                      >
+                        {task.status === "done" ? "↶ פתיחה" : "✓ סיום"}
                       </button>
                     ) : (
                       <span className="owner-only-marker" title="סטטוס המשימה ניתן לשינוי רק על ידי בעל המשימה">בעלים</span>
@@ -3936,7 +3954,18 @@ export default function Home() {
                         {task.sharedWithMe && !task.historicalShared && <span className="shared-badge">שותפה איתי</span>}
                         {task.historicalShared && <span className="shared-badge shared-history-badge">שיתוף שהסתיים</span>}
                         {!task.sharedWithMe && task.cloudId && taskSharesForTask(task).length > 0 && <span className="shared-badge">משותפת</span>}
-                        <h2>{task.title}</h2>
+                        <h2>
+                          <button
+                            type="button"
+                            className="task-title-button"
+                            onClick={() => openEditTask(task)}
+                            aria-label={task.sharedWithMe ? `פתיחת ${task.title}` : `עריכת ${task.title}`}
+                            title={task.sharedWithMe ? "פתיחת משימה" : "עריכת משימה"}
+                          >
+                            <span>{task.title}</span>
+                            <span className="task-title-edit-icon" aria-hidden="true">✎</span>
+                          </button>
+                        </h2>
                       </div>
                       {task.sharedWithMe && (task.sharedByName || task.sharedByEmail) && (
                         <p className="shared-byline">
@@ -3964,9 +3993,6 @@ export default function Home() {
                       ) : (
                         <span className="shared-readonly-status" title="סטטוס המשימה ניתן לשינוי רק על ידי בעל המשימה">{statusLabels[task.status]} · לקריאה</span>
                       )}
-                      <button className="edit-icon-button" onClick={() => openEditTask(task)} aria-label={task.sharedWithMe ? `פתיחת ${task.title}` : `עריכת ${task.title}`} title={task.sharedWithMe ? "פתיחה" : "עריכה"}>
-                        <span aria-hidden="true">✎</span>
-                      </button>
                     </div>
                   </article>
                 ))}
