@@ -3936,6 +3936,15 @@ export default function Home() {
                     >
                       ★
                     </button>
+                    <button
+                      type="button"
+                      className="task-edit-button"
+                      onClick={() => openEditTask(task)}
+                      aria-label={task.sharedWithMe ? `פתיחת ${task.title}` : `עריכת ${task.title}`}
+                      title={task.sharedWithMe ? "פתיחת משימה" : "עריכת משימה"}
+                    >
+                      <span aria-hidden="true">✎</span>
+                    </button>
                     {isOwnTask(task, cloudUser) ? (
                       <button
                         className="task-complete-button"
@@ -3963,7 +3972,6 @@ export default function Home() {
                             title={task.sharedWithMe ? "פתיחת משימה" : "עריכת משימה"}
                           >
                             <span>{task.title}</span>
-                            <span className="task-title-edit-icon" aria-hidden="true">✎</span>
                           </button>
                         </h2>
                       </div>
@@ -4046,7 +4054,13 @@ export default function Home() {
                           <p>{insight.body}</p>
                         </div>
                         {insight.action && insight.actionLabel && (
-                          <button onClick={() => applyInsightAction(insight)}>{insight.actionLabel}</button>
+                          <button
+                            onClick={() => applyInsightAction(insight)}
+                            aria-label={`${insight.actionLabel}: ${insight.title}`}
+                            title={insight.actionLabel}
+                          >
+                            הצג
+                          </button>
                         )}
                       </article>
                     ))}
