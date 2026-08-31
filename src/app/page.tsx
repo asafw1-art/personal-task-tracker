@@ -4269,8 +4269,14 @@ export default function Home() {
                   aria-label="הודעה לצ׳ט AI"
                   disabled={assistantIsSending || !assistantThreadId}
                 />
-                <button type="submit" disabled={assistantIsSending || !assistantInput.trim() || !assistantThreadId}>
-                  שליחה
+                <button
+                  type="submit"
+                  className="assistant-send-button"
+                  disabled={assistantIsSending || !assistantInput.trim() || !assistantThreadId}
+                  aria-label="שליחת הודעה"
+                  title="שליחה"
+                >
+                  <span aria-hidden="true">↑</span>
                 </button>
               </form>
             </section>
@@ -4411,13 +4417,13 @@ export default function Home() {
 
                 {taxonomyMode === "topics" ? (
                   <div className="taxonomy-manager">
-                    <form className="taxonomy-form" onSubmit={addTopic}>
+                    <form className="taxonomy-form taxonomy-form-topic" onSubmit={addTopic}>
                       <select value={newTopicPrefix} onChange={(event) => setNewTopicPrefix(event.target.value as TaskPrefix)} aria-label="סוג נושא">
                         <option value="P">אישי</option>
                         <option value="W">עבודה</option>
                       </select>
                       <input {...freeTextInputProps} value={newTopicName} onChange={(event) => setNewTopicName(event.target.value)} placeholder="שם נושא חדש" aria-label="שם נושא חדש" />
-                      <button type="submit">הוספת נושא</button>
+                      <button type="submit" aria-label="הוספת נושא" title="הוספת נושא">+</button>
                     </form>
                     <div className="taxonomy-grid">
                       {(["P", "W"] as TaskPrefix[]).map((prefix) => (
@@ -4438,9 +4444,9 @@ export default function Home() {
                   </div>
                 ) : (
                   <div className="taxonomy-manager">
-                    <form className="taxonomy-form" onSubmit={addAction}>
+                    <form className="taxonomy-form taxonomy-form-action" onSubmit={addAction}>
                       <input {...freeTextInputProps} value={newActionName} onChange={(event) => setNewActionName(event.target.value)} placeholder="שם פעולה חדשה" aria-label="שם פעולה חדשה" />
-                      <button type="submit">הוספת פעולה</button>
+                      <button type="submit" aria-label="הוספת פעולה" title="הוספת פעולה">+</button>
                     </form>
                     <div className="taxonomy-chips">
                       {actionOptions.map((action) => (
@@ -4919,17 +4925,21 @@ export default function Home() {
               )}
               <section className="subtasks-editor">
                 <div className="subtasks-editor-header">
-                  <div>
+                  <div className="subtasks-editor-copy">
                     <h3>צעדי טיפול</h3>
                     <p>פירוק פנימי של המשימה לפעולות קטנות. המספור נשמר ברקע ולא מוצג ברשימה.</p>
                   </div>
-                  {taskEditor.draft.subtasks.length > 0 && (
-                    <div className="subtasks-editor-progress" aria-label="התקדמות צעדי טיפול">
-                      <span>{subtaskProgress(taskEditor.draft.subtasks).done}</span>
-                      <small>בוצעו מתוך {subtaskProgress(taskEditor.draft.subtasks).total}</small>
-                    </div>
-                  )}
-                  <button type="button" onClick={addDraftSubtask} disabled={taskEditorIsReadOnly}>הוספת צעד</button>
+                  <div className="subtasks-editor-tools">
+                    {taskEditor.draft.subtasks.length > 0 && (
+                      <div className="subtasks-editor-progress" aria-label="התקדמות צעדי טיפול">
+                        <span>{subtaskProgress(taskEditor.draft.subtasks).done}</span>
+                        <small>מתוך {subtaskProgress(taskEditor.draft.subtasks).total}</small>
+                      </div>
+                    )}
+                    <button type="button" onClick={addDraftSubtask} disabled={taskEditorIsReadOnly}>
+                      <span aria-hidden="true">+</span> הוספת צעד
+                    </button>
+                  </div>
                 </div>
                 {taskEditor.draft.subtasks.length === 0 ? (
                   <p className="subtasks-empty">עדיין אין צעדי טיפול למשימה הזו.</p>
@@ -4937,7 +4947,7 @@ export default function Home() {
                   <div className="subtasks-list">
                     {taskEditor.draft.subtasks.map((subtask) => (
                       <div className={`subtask-row status-${subtask.status}`} key={subtask.number}>
-                        <label>
+                        <label className="subtask-title-field">
                           <span>צעד טיפול</span>
                           <input
                             {...freeTextInputProps}
@@ -4947,7 +4957,7 @@ export default function Home() {
                             disabled={taskEditorIsReadOnly}
                           />
                         </label>
-                        <label>
+                        <label className="subtask-action-field">
                           <span>פעולה</span>
                           <select
                             value={subtask.actionType ?? ""}
@@ -4958,7 +4968,7 @@ export default function Home() {
                             {actionOptions.map((action) => <option value={action} key={action}>{action}</option>)}
                           </select>
                         </label>
-                        <label>
+                        <label className="subtask-status-field">
                           <span>סטטוס</span>
                           <select
                             value={subtask.status}
@@ -4974,9 +4984,10 @@ export default function Home() {
                             className="subtask-delete"
                             onClick={() => deleteDraftSubtask(subtask.number)}
                             aria-label={subtask.title ? `מחיקת צעד טיפול ${subtask.title}` : "מחיקת צעד טיפול חדש"}
+                            title="מחיקת צעד"
                             disabled={taskEditorIsReadOnly}
                           >
-                            מחיקה
+                            <span aria-hidden="true">×</span>
                           </button>
                         </div>
                       </div>
