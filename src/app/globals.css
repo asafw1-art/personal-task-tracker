@@ -473,7 +473,8 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
 .notification-setting small { color: var(--muted); line-height: 1.45; }
 .analytics-threshold-setting { cursor: default; grid-template-columns: minmax(0, 1fr) 120px; }
 .analytics-threshold-setting input[type="number"] { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; color: var(--text); font: inherit; height: auto; padding: 10px 12px; text-align: center; width: 100%; }
-.taxonomy-status { background: #eef4ff; border-radius: 10px; color: var(--muted); line-height: 1.45; margin: 0; padding: 10px 12px; }
+.taxonomy-status { background: #eef4ff; border-radius: 10px; color: var(--muted); line-height: 1.45; margin: 0; min-width: 0; overflow-wrap: anywhere; padding: 10px 12px; }
+.taxonomy-panel > * { min-width: 0; }
 .taxonomy-manager { display: grid; gap: 14px; min-width: 0; }
 .taxonomy-form { display: grid; gap: 10px; min-width: 0; }
 .taxonomy-form input, .taxonomy-form select { min-width: 0; width: 100%; }
