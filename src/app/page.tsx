@@ -13,6 +13,7 @@ import { countCloudTasks, fetchCloudTasks, saveCloudTasks } from "@/lib/supabase
 import { fetchCloudTaxonomy, replaceCloudTaxonomy } from "@/lib/supabaseTaxonomy";
 import { fetchUserSettings, saveUserSettings } from "@/lib/supabaseUserSettings";
 import { fetchAdminOverview, type AdminOverview } from "@/lib/supabaseAdmin";
+import { createDriveBackup, deleteDriveBackupFiles, disconnectDriveBackup, dismissDriveBackupOnboarding, fetchDriveBackupOverview, fetchDriveBackupPreview, restoreDriveBackup, startDriveConnection, type DriveBackupOverview, type DriveBackupPreview } from "@/lib/driveBackup";
 
 const STORAGE_KEY = "asaf-task-tracker-v1";
 const TAXONOMY_STORAGE_KEY = "asaf-task-tracker-taxonomy-v1";
@@ -112,6 +113,13 @@ type TaskTaxonomy = {
 };
 
 type NotificationPreferences = Record<NotificationPreferenceKey, boolean>;
+
+const driveBackupKindLabels = {
+  hourly: "שעתי",
+  daily: "יומי",
+  manual: "ידני",
+  pre_restore: "לפני שחזור",
+} as const;
 
 const defaultNotificationPreferences: NotificationPreferences = {
   overdue: true,
@@ -761,6 +769,7 @@ export default function Home() {
   const [displayName, setDisplayName] = useState("");
   const [displayNameDraft, setDisplayNameDraft] = useState("");
   const [userSettingsStatus, setUserSettingsStatus] = useState("");
+  const [userCloudSettingsLoaded, setUserCloudSettingsLoaded] = useState(false);
   const [newTopicPrefix, setNewTopicPrefix] = useState<TaskPrefix>("P");
   const [newTopicName, setNewTopicName] = useState("");
   const [newActionName, setNewActionName] = useState("");
@@ -780,6 +789,11 @@ export default function Home() {
   const [devicesStatus, setDevicesStatus] = useState("");
   const [adminOverview, setAdminOverview] = useState<AdminOverview | null>(null);
   const [adminOverviewStatus, setAdminOverviewStatus] = useState("");
+  const [driveBackupOverview, setDriveBackupOverview] = useState<DriveBackupOverview | null>(null);
+  const [driveBackupStatus, setDriveBackupStatus] = useState("");
+  const [driveBackupPreview, setDriveBackupPreview] = useState<DriveBackupPreview | null>(null);
+  const [driveBackupBusy, setDriveBackupBusy] = useState(false);
+  const [isDriveOnboardingOpen, setIsDriveOnboardingOpen] = useState(false);
   const [isCloudReady, setIsCloudReady] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
@@ -817,6 +831,21 @@ export default function Home() {
     const merged = cloudUser ? applyLocalFocusedTasks(mergedTasks, cloudUser.id) : mergedTasks;
     if (JSON.stringify(merged) !== JSON.stringify(current)) setTasks(merged);
   }, [cloudUser, setTasks]);
+
+  const refreshDriveBackups = useCallback(async (allowPrompt = true) => {
+    if (!cloudUser) return;
+    setDriveBackupStatus("טוען את מצב הגיבוי...");
+    try {
+      const overview = await fetchDriveBackupOverview();
+      setDriveBackupOverview(overview);
+      setDriveBackupStatus(overview.connection.connected
+        ? "גיבוי Google Drive מחובר."
+        : "אין כרגע גיבוי חיצוני פעיל.");
+      if (allowPrompt && overview.connection.shouldPrompt) setIsDriveOnboardingOpen(true);
+    } catch (error) {
+      setDriveBackupStatus(`טעינת מצב הגיבוי נכשלה: ${errorMessage(error)}`);
+    }
+  }, [cloudUser]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -905,6 +934,11 @@ export default function Home() {
       setShareEmailDrafts({});
       setSharingStatus("");
       setDevicesStatus("");
+      setDriveBackupOverview(null);
+      setDriveBackupPreview(null);
+      setDriveBackupStatus("");
+      setIsDriveOnboardingOpen(false);
+      setUserCloudSettingsLoaded(false);
       setAssistantThreadId(null);
       setAssistantMessages([]);
       setDeletedAssistantThreads([]);
@@ -951,6 +985,7 @@ export default function Home() {
         setDisplayName("");
         setDisplayNameDraft("");
         setUserSettingsStatus("");
+        setUserCloudSettingsLoaded(false);
         return;
       }
 
@@ -965,6 +1000,13 @@ export default function Home() {
       fetchUserSettings(cloudUser)
         .then((settings) => {
           if (cancelled) return;
+          if (settings.notificationPreferences) {
+            setNotificationPreferences(parseStoredNotificationPreferences(JSON.stringify(settings.notificationPreferences)));
+          }
+          if (settings.analyticsPreferences?.stuckThresholdDays) {
+            setStuckThresholdDays(clampStuckThresholdDays(settings.analyticsPreferences.stuckThresholdDays));
+          }
+          if (settings.theme) setTheme(settings.theme);
           const cloudName = normalizeDisplayName(settings.displayName ?? "");
           if (!cloudName) {
             if (storedName) {
@@ -985,6 +1027,9 @@ export default function Home() {
         })
         .catch((error: unknown) => {
           if (!cancelled) setUserSettingsStatus(`לא הצלחתי לטעון את שם התצוגה מהענן: ${errorMessage(error)}`);
+        })
+        .finally(() => {
+          if (!cancelled) setUserCloudSettingsLoaded(true);
         });
     }, 0);
 
@@ -993,6 +1038,15 @@ export default function Home() {
       window.clearTimeout(timeoutId);
     };
   }, [cloudUser]);
+
+  useEffect(() => {
+    if (!cloudUser || !userCloudSettingsLoaded || !notificationPreferencesLoaded || !analyticsPreferencesLoaded || !themeLoaded) return;
+    saveUserSettings(cloudUser, {
+      notificationPreferences,
+      analyticsPreferences: { stuckThresholdDays },
+      theme,
+    }).catch((error: unknown) => setUserSettingsStatus(`שמירת העדפות לענן נכשלה: ${errorMessage(error)}`));
+  }, [analyticsPreferencesLoaded, cloudUser, notificationPreferences, notificationPreferencesLoaded, stuckThresholdDays, theme, themeLoaded, userCloudSettingsLoaded]);
 
   useEffect(() => {
     if (!cloudUser || !isCloudReady) return;
@@ -1026,6 +1080,29 @@ export default function Home() {
       cancelled = true;
     };
   }, [cloudUser, isCloudReady]);
+
+  useEffect(() => {
+    if (!cloudUser || !isCloudReady) return;
+    const timeoutId = window.setTimeout(() => void refreshDriveBackups(true), 0);
+    return () => window.clearTimeout(timeoutId);
+  }, [cloudUser, isCloudReady, refreshDriveBackups]);
+
+  useEffect(() => {
+    if (!cloudUser) return;
+    const url = new URL(window.location.href);
+    const driveResult = url.searchParams.get("drive");
+    if (!driveResult) return;
+    const timeoutId = window.setTimeout(() => {
+      setIsSettingsOpen(true);
+      setSettingsTab("sync");
+      setDriveBackupStatus(url.searchParams.get("driveMessage") || (driveResult === "connected" ? "חיבור Google Drive הושלם." : "חיבור Google Drive לא הושלם."));
+      url.searchParams.delete("drive");
+      url.searchParams.delete("driveMessage");
+      window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+      void refreshDriveBackups(false);
+    }, 0);
+    return () => window.clearTimeout(timeoutId);
+  }, [cloudUser, refreshDriveBackups]);
 
   useEffect(() => {
     if (!cloudUser || !taxonomyCloudReady || !taxonomyLoaded) return;
@@ -3258,6 +3335,108 @@ export default function Home() {
     }
   }
 
+  async function connectGoogleDrive() {
+    setDriveBackupBusy(true);
+    setDriveBackupStatus("פותח את מסך ההרשאה של Google...");
+    try {
+      await startDriveConnection();
+    } catch (error) {
+      setDriveBackupStatus(`פתיחת החיבור נכשלה: ${errorMessage(error)}`);
+      setDriveBackupBusy(false);
+    }
+  }
+
+  async function runManualDriveBackup() {
+    setDriveBackupBusy(true);
+    setDriveBackupStatus("יוצר גיבוי חדש ב-Google Drive...");
+    try {
+      await createDriveBackup();
+      await refreshDriveBackups(false);
+      setDriveBackupStatus("הגיבוי הידני הושלם בהצלחה.");
+    } catch (error) {
+      setDriveBackupStatus(`הגיבוי נכשל: ${errorMessage(error)}`);
+    } finally {
+      setDriveBackupBusy(false);
+    }
+  }
+
+  async function openDriveBackupPreview(runId: string) {
+    setDriveBackupBusy(true);
+    setDriveBackupStatus("בודק את קובץ הגיבוי...");
+    try {
+      const preview = await fetchDriveBackupPreview(runId);
+      setDriveBackupPreview(preview);
+      setDriveBackupStatus("בדיקת התקינות הסתיימה בהצלחה.");
+    } catch (error) {
+      setDriveBackupStatus(`בדיקת הגיבוי נכשלה: ${errorMessage(error)}`);
+    } finally {
+      setDriveBackupBusy(false);
+    }
+  }
+
+  async function confirmDriveRestore() {
+    if (!driveBackupPreview) return;
+    const approved = window.confirm("השחזור יעדכן את המשימות וההגדרות לפי הגיבוי. לפני הפעולה ייווצר גיבוי נוסף של המצב הנוכחי. להמשיך?");
+    if (!approved) return;
+    const typed = window.prompt("כדי לאשר שחזור, הקלד בדיוק: שחזור");
+    if (typed !== "שחזור") {
+      setDriveBackupStatus("השחזור בוטל. לא הוקלדה מילת האישור.");
+      return;
+    }
+    setDriveBackupBusy(true);
+    setDriveBackupStatus("יוצר גיבוי מקדים ומשחזר את הנתונים...");
+    try {
+      const result = await restoreDriveBackup(driveBackupPreview.runId);
+      setDriveBackupStatus(`השחזור הושלם: ${result.restore.taskCount} משימות נטענו. מרענן את האפליקציה...`);
+      window.setTimeout(() => window.location.reload(), 800);
+    } catch (error) {
+      setDriveBackupStatus(`השחזור נכשל והנתונים לא הוחלפו: ${errorMessage(error)}`);
+      setDriveBackupBusy(false);
+    }
+  }
+
+  async function dismissDriveOnboarding() {
+    setIsDriveOnboardingOpen(false);
+    try {
+      await dismissDriveBackupOnboarding();
+      await refreshDriveBackups(false);
+    } catch (error) {
+      setDriveBackupStatus(`שמירת הבחירה נכשלה: ${errorMessage(error)}`);
+    }
+  }
+
+  async function confirmDriveDisconnect() {
+    if (!window.confirm("לנתק את Google Drive? הגיבויים הקיימים יישארו בתיקייה שלך.")) return;
+    setDriveBackupBusy(true);
+    try {
+      await disconnectDriveBackup();
+      setDriveBackupPreview(null);
+      await refreshDriveBackups(false);
+      setDriveBackupStatus("חשבון Google Drive נותק. הקבצים הקיימים נשארו ב-Drive.");
+    } catch (error) {
+      setDriveBackupStatus(`ניתוק החשבון נכשל: ${errorMessage(error)}`);
+    } finally {
+      setDriveBackupBusy(false);
+    }
+  }
+
+  async function confirmDeleteDriveBackups() {
+    if (!window.confirm("למחוק את כל קובצי הגיבוי שהאפליקציה יצרה? לא ניתן לבטל פעולה זו.")) return;
+    const typed = window.prompt("כדי לאשר מחיקה, הקלד בדיוק: מחיקה");
+    if (typed !== "מחיקה") return;
+    setDriveBackupBusy(true);
+    try {
+      await deleteDriveBackupFiles();
+      setDriveBackupPreview(null);
+      await refreshDriveBackups(false);
+      setDriveBackupStatus("קובצי הגיבוי של האפליקציה נמחקו מ-Google Drive.");
+    } catch (error) {
+      setDriveBackupStatus(`מחיקת הגיבויים נכשלה: ${errorMessage(error)}`);
+    } finally {
+      setDriveBackupBusy(false);
+    }
+  }
+
   function renderSubtasksPreview(task: Task) {
     const subtasks = task.subtasks ?? [];
     if (subtasks.length === 0) return null;
@@ -4059,6 +4238,22 @@ export default function Home() {
         </>
       )}
 
+      {isDriveOnboardingOpen && cloudUser && (
+        <div className="modal-backdrop drive-onboarding-backdrop" role="presentation">
+          <section className="drive-onboarding" role="dialog" aria-modal="true" aria-label="חיבור גיבוי Google Drive">
+            <button className="icon-button" onClick={dismissDriveOnboarding} aria-label="סגירת הצעת הגיבוי">×</button>
+            <p className="eyebrow">הגנה על הנתונים</p>
+            <h2>לחבר גיבוי ל-Google Drive?</h2>
+            <p>החיבור אופציונלי. לאחר החיבור יישמרו עבורך 5 גיבויים שעתיים ו-5 גיבויים יומיים, גם כשהאפליקציה סגורה.</p>
+            <div className="drive-onboarding-actions">
+              <button type="button" onClick={connectGoogleDrive} disabled={driveBackupBusy}>חיבור Drive</button>
+              <button type="button" className="secondary-action" onClick={dismissDriveOnboarding}>לא עכשיו</button>
+            </div>
+            <small>לאחר “לא עכשיו” תופיע תזכורת אחת נוספת בעוד 30 יום.</small>
+          </section>
+        </div>
+      )}
+
       {isSettingsOpen && (
         <div className="modal-backdrop" role="presentation">
           <section className="settings-drawer" role="dialog" aria-modal="true" aria-label="הגדרות">
@@ -4325,6 +4520,79 @@ export default function Home() {
               </section>
               ) : (
               <>
+
+              <section className="panel drive-backup-panel">
+                <div className="panel-heading">
+                  <div>
+                    <h2>גיבוי Google Drive</h2>
+                    <span>גיבוי חיצוני אופציונלי: 5 עותקים שעתיים ו-5 עותקים יומיים סביב 03:00.</span>
+                  </div>
+                  <span className={`drive-status-badge ${driveBackupOverview?.connection.connected ? "connected" : ""}`}>
+                    {driveBackupOverview?.connection.connected ? "מחובר" : "לא מחובר"}
+                  </span>
+                </div>
+                <p className="drive-backup-status">{driveBackupStatus || "טוען את מצב הגיבוי..."}</p>
+
+                {driveBackupOverview?.connection.connected ? (
+                  <>
+                    <div className="drive-connection-summary">
+                      <span>חשבון Drive</span>
+                      <strong>{driveBackupOverview.connection.googleEmail || "חשבון Google מחובר"}</strong>
+                      <span>גיבוי אחרון</span>
+                      <strong>{driveBackupOverview.connection.lastSuccessAt ? formatDateTime(driveBackupOverview.connection.lastSuccessAt) : "עדיין לא הושלם"}</strong>
+                    </div>
+                    {driveBackupOverview.connection.lastError && (
+                      <p className="drive-error">התקלה האחרונה: {driveBackupOverview.connection.lastError}</p>
+                    )}
+                    <div className="drive-actions">
+                      <button type="button" onClick={runManualDriveBackup} disabled={driveBackupBusy}>גיבוי עכשיו</button>
+                      <button type="button" className="secondary-action" onClick={() => refreshDriveBackups(false)} disabled={driveBackupBusy}>רענון</button>
+                      <button type="button" className="secondary-action" onClick={connectGoogleDrive} disabled={driveBackupBusy}>החלפת חשבון</button>
+                    </div>
+
+                    <div className="drive-backup-list" aria-label="גיבויים זמינים לשחזור">
+                      <h3>עותקים זמינים</h3>
+                      {driveBackupOverview.backups.length === 0 ? (
+                        <p>עדיין אין קובצי גיבוי זמינים.</p>
+                      ) : driveBackupOverview.backups.map((backup) => (
+                        <article key={backup.id}>
+                          <div>
+                            <strong>{driveBackupKindLabels[backup.kind]}</strong>
+                            <span>{formatDateTime(backup.createdAt)} · {backup.taskCount} משימות</span>
+                          </div>
+                          <button type="button" onClick={() => openDriveBackupPreview(backup.id)} disabled={driveBackupBusy}>בדיקה</button>
+                        </article>
+                      ))}
+                    </div>
+
+                    {driveBackupPreview && (
+                      <div className="drive-preview" aria-live="polite">
+                        <div>
+                          <h3>תצוגה מקדימה לשחזור</h3>
+                          <p>{formatDateTime(driveBackupPreview.exportedAt)} · {driveBackupKindLabels[driveBackupPreview.kind]}</p>
+                        </div>
+                        <div className="drive-preview-metrics">
+                          <span><strong>{driveBackupPreview.taskCount}</strong> משימות</span>
+                          <span><strong>{driveBackupPreview.taxonomyCount}</strong> נושאים ופעולות</span>
+                          <span><strong>{driveBackupPreview.shareHistoryCount}</strong> רשומות שיתוף לתיעוד</span>
+                        </div>
+                        <p>{driveBackupPreview.note}</p>
+                        <button type="button" onClick={confirmDriveRestore} disabled={driveBackupBusy}>שחזור מהעותק הזה</button>
+                      </div>
+                    )}
+
+                    <div className="drive-danger-actions">
+                      <button type="button" onClick={confirmDeleteDriveBackups} disabled={driveBackupBusy}>מחיקת קובצי הגיבוי</button>
+                      <button type="button" onClick={confirmDriveDisconnect} disabled={driveBackupBusy}>ניתוק Drive</button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="drive-connect-empty">
+                    <p>האפליקציה ממשיכה לעבוד כרגיל גם בלי Drive. אפשר לחבר חשבון כדי להוסיף שכבת הגנה חיצונית.</p>
+                    <button type="button" onClick={connectGoogleDrive} disabled={driveBackupBusy || !cloudUser}>חיבור Google Drive</button>
+                  </div>
+                )}
+              </section>
 
               <section className="panel cloud-panel">
                 <div>

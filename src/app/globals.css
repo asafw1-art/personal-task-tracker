@@ -420,6 +420,40 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
 .admin-metric-grid article { background: var(--surface-soft); border: 1px solid var(--border); border-radius: 12px; display: grid; gap: 8px; min-height: 104px; padding: 14px; }
 .admin-metric-grid span { color: var(--muted); font-size: .86rem; line-height: 1.35; }
 .admin-metric-grid strong { color: var(--text); font-size: 1.7rem; }
+.drive-backup-panel { display: grid; gap: 14px; padding: 18px; }
+.drive-backup-panel .panel-heading { align-items: center; margin: 0; }
+.drive-status-badge { background: var(--surface-soft); border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font-size: .82rem; font-weight: 800; padding: 7px 10px; white-space: nowrap; }
+.drive-status-badge.connected { background: #ecfdf5; border-color: #a7f3d0; color: #047857; }
+.drive-backup-status { color: var(--muted); line-height: 1.45; margin: 0; }
+.drive-error { background: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px; color: #9a3412; line-height: 1.45; margin: 0; padding: 10px 12px; }
+.drive-connection-summary { border-block: 1px solid var(--border); display: grid; gap: 7px 12px; grid-template-columns: 130px minmax(0, 1fr); padding-block: 12px; }
+.drive-connection-summary span { color: var(--muted); }
+.drive-connection-summary strong { color: var(--text); min-width: 0; overflow-wrap: anywhere; }
+.drive-actions, .drive-danger-actions, .drive-onboarding-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.drive-actions button, .drive-connect-empty button, .drive-preview button, .drive-onboarding-actions button { background: var(--accent); border: 0; border-radius: 8px; color: #fff; font-weight: 800; padding: 10px 14px; }
+.drive-actions .secondary-action, .drive-onboarding-actions .secondary-action { background: var(--surface); border: 1px solid var(--border); color: var(--muted); }
+.drive-actions button:disabled, .drive-connect-empty button:disabled, .drive-preview button:disabled { opacity: .55; }
+.drive-connect-empty { align-items: start; border-top: 1px solid var(--border); display: grid; gap: 12px; padding-top: 14px; }
+.drive-connect-empty p { color: var(--muted); line-height: 1.5; margin: 0; }
+.drive-backup-list { border-top: 1px solid var(--border); display: grid; gap: 8px; padding-top: 14px; }
+.drive-backup-list h3, .drive-preview h3 { font-size: 1rem; margin: 0; }
+.drive-backup-list > p { color: var(--muted); margin: 0; }
+.drive-backup-list article { align-items: center; background: var(--surface-soft); border: 1px solid var(--border); border-radius: 8px; display: flex; gap: 12px; justify-content: space-between; padding: 11px 12px; }
+.drive-backup-list article > div { display: grid; gap: 4px; min-width: 0; }
+.drive-backup-list article span { color: var(--muted); font-size: .85rem; }
+.drive-backup-list article button { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; color: var(--accent-dark); font-weight: 800; padding: 8px 11px; }
+.drive-preview { border-block: 1px solid var(--border); display: grid; gap: 12px; padding-block: 14px; }
+.drive-preview p { color: var(--muted); line-height: 1.45; margin: 3px 0 0; }
+.drive-preview-metrics { display: grid; gap: 8px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.drive-preview-metrics span { background: var(--surface-soft); border: 1px solid var(--border); border-radius: 8px; color: var(--muted); display: grid; gap: 3px; padding: 10px; }
+.drive-preview-metrics strong { color: var(--text); font-size: 1.2rem; }
+.drive-danger-actions { border-top: 1px solid var(--border); padding-top: 14px; }
+.drive-danger-actions button { background: var(--surface); border: 1px solid #fecaca; border-radius: 8px; color: #b91c1c; font-weight: 800; padding: 9px 12px; }
+.drive-onboarding-backdrop { align-items: center; justify-content: center; z-index: 55; }
+.drive-onboarding { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; box-shadow: 0 24px 70px rgba(15, 23, 42, .3); display: grid; gap: 14px; max-width: 520px; padding: 22px; position: relative; width: 100%; }
+.drive-onboarding > .icon-button { left: 16px; position: absolute; top: 16px; }
+.drive-onboarding h2 { font-size: 1.5rem; margin: 0; padding-left: 48px; }
+.drive-onboarding > p:not(.eyebrow), .drive-onboarding small { color: var(--muted); line-height: 1.55; margin: 0; }
 .notification-setting { align-items: center; background: #f8fafc; border: 1px solid var(--border); border-radius: 14px; cursor: pointer; display: grid; gap: 12px; grid-template-columns: auto 1fr; padding: 14px; }
 .notification-setting:hover { border-color: #bfdbfe; }
 .notification-setting input { accent-color: var(--accent); height: 20px; width: 20px; }
@@ -702,6 +736,12 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
   border-color: var(--border);
   color: var(--text);
 }
+[data-theme="dark"] .drive-status-badge.connected { background: rgba(6, 78, 59, .35); border-color: #047857; color: #a7f3d0; }
+[data-theme="dark"] .drive-error { background: rgba(124, 45, 18, .3); border-color: #9a3412; color: #fed7aa; }
+[data-theme="dark"] .drive-actions .secondary-action,
+[data-theme="dark"] .drive-backup-list article button,
+[data-theme="dark"] .drive-danger-actions button,
+[data-theme="dark"] .drive-onboarding-actions .secondary-action { background: #111827; }
 [data-theme="dark"] .owner-only-marker,
 [data-theme="dark"] .shared-readonly-status {
   background: #111827;
@@ -864,6 +904,13 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
   .data-panel button, .file-button, .danger-panel button, .cloud-actions button, .cloud-login button, .sync-panel button { text-align: center; width: 100%; }
   .devices-header, .device-card { align-items: stretch; flex-direction: column; }
   .admin-metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .drive-preview-metrics { grid-template-columns: 1fr; }
+  .drive-actions, .drive-danger-actions, .drive-onboarding-actions { display: grid; grid-template-columns: 1fr; }
+  .drive-actions button, .drive-danger-actions button, .drive-onboarding-actions button { width: 100%; }
+  .drive-backup-list article { align-items: stretch; flex-direction: column; }
+  .drive-backup-list article button { width: 100%; }
+  .drive-connection-summary { grid-template-columns: 1fr; }
+  .drive-onboarding { border-radius: 0; min-height: 100vh; padding: 72px 20px 24px; }
   .devices-header button { width: 100%; }
   .device-meta { justify-items: start; text-align: right; }
   .assistant-restore-card { align-items: stretch; flex-direction: column; }
