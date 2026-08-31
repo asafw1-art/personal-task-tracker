@@ -250,6 +250,29 @@ function formatStatusTimestamp(value?: string) {
   }).format(new Date(value.includes("T") ? value : `${value}T00:00:00`));
 }
 
+function signedNumber(value: number) {
+  return value > 0 ? `+${value}` : `${value}`;
+}
+
+function priorityRank(priority: TaskPriority) {
+  const ranks: Record<TaskPriority, number> = { high: 0, important: 1, normal: 2, low: 3 };
+  return ranks[priority];
+}
+
+function compareTasksByPriority(a: Task, b: Task) {
+  return Number(Boolean(b.focused)) - Number(Boolean(a.focused))
+    || priorityRank(a.priority) - priorityRank(b.priority)
+    || (a.dueDate ?? "9999-12-31").localeCompare(b.dueDate ?? "9999-12-31")
+    || a.prefix.localeCompare(b.prefix)
+    || a.number - b.number;
+}
+
+function compareTasksByNewestClosure(a: Task, b: Task) {
+  return (taskClosureDate(b) ?? "").localeCompare(taskClosureDate(a) ?? "")
+    || a.prefix.localeCompare(b.prefix)
+    || a.number - b.number;
+}
+
 function deviceTypeLabel(value: UserDevice["deviceType"]) {
   if (value === "mobile") return "נייד";
   if (value === "tablet") return "טאבלט";
@@ -1616,8 +1639,11 @@ export default function Home() {
     const filter = action.statusFilter ?? "active";
 
     if (action.taskIds?.length) {
-      const taskIds = new Set(action.taskIds.map((id) => canonicalTaskId(id)));
-      return sortTasks(tasks.filter((task) => taskIds.has(task.id)));
+      const taskIds = new Set(action.taskIds.flatMap((id) => {
+        const canonical = canonicalTaskId(id);
+        return canonical ? [id, canonical] : [id];
+      }));
+      return sortTasks(tasks.filter((task) => taskIds.has(task.id) || taskIds.has(taskPublicId(task))));
     }
 
     if (normalized) {
@@ -1685,16 +1711,26 @@ export default function Home() {
     const tomorrowIso = addDaysIso(1);
     const nextWeekIso = addDaysIso(7);
     const last30StartIso = addDaysIso(-29);
+    const previous30StartIso = addDaysIso(-59);
     const stuckThresholdIso = addDaysIso(-stuckThresholdDays);
     const rangeStartIso = analyticsRange === "week" ? weekStartIso : analyticsRange === "month" ? last30StartIso : "";
+    const previousRangeStartIso = analyticsRange === "week" ? previousWeekStartIso : analyticsRange === "month" ? previous30StartIso : "";
+    const previousRangeEndIso = analyticsRange === "week" ? addDaysToIso(weekStartIso, -1) : analyticsRange === "month" ? addDaysToIso(last30StartIso, -1) : "";
+    const rangeLabel = analyticsRange === "week" ? "השבוע" : analyticsRange === "month" ? "ב-30 הימים האחרונים" : "בהיסטוריה";
     const active = tasks.filter((task) => !["done", "cancelled"].includes(task.status));
     const done = tasks.filter((task) => task.status === "done");
     const completedWithDate = done.filter((task) => taskClosureDate(task));
+    const dateInCurrentRange = (date?: string | null) => Boolean(date && (!rangeStartIso || date >= rangeStartIso) && date <= today);
+    const dateInPreviousRange = (date?: string | null) => Boolean(date && previousRangeStartIso && previousRangeEndIso && date >= previousRangeStartIso && date <= previousRangeEndIso);
+    const createdDate = (task: Task) => task.createdAt?.slice(0, 10);
     const completedInRange = completedWithDate.filter((task) => {
       const closureDate = taskClosureDate(task);
-      return !rangeStartIso || Boolean(closureDate && closureDate >= rangeStartIso);
+      return dateInCurrentRange(closureDate);
     });
     const completedInRangeCount = analyticsRange === "all" ? done.length : completedInRange.length;
+    const completedPreviousRange = completedWithDate.filter((task) => dateInPreviousRange(taskClosureDate(task)));
+    const openedInRange = tasks.filter((task) => dateInCurrentRange(createdDate(task)));
+    const openedPreviousRange = tasks.filter((task) => dateInPreviousRange(createdDate(task)));
     const completedLast7 = completedWithDate.filter((task) => {
       const closureDate = taskClosureDate(task);
       return closureDate && closureDate >= weekStartIso;
@@ -1717,11 +1753,14 @@ export default function Home() {
     const allSubtaskItems = tasks.flatMap((task) => (task.subtasks ?? []).map((subtask) => ({ task, subtask })));
     const countedSubtaskItems = allSubtaskItems.filter(({ subtask }) => subtask.status !== "cancelled");
     const doneSubtaskItems = allSubtaskItems.filter(({ subtask }) => subtask.status === "done");
+    const openedSubtasksInRange = allSubtaskItems.filter(({ subtask }) => dateInCurrentRange(subtask.createdAt?.slice(0, 10)));
+    const openedSubtasksPreviousRange = allSubtaskItems.filter(({ subtask }) => dateInPreviousRange(subtask.createdAt?.slice(0, 10)));
     const completedSubtasksInRange = doneSubtaskItems.filter(({ subtask }) => {
       const statusDate = subtask.statusChangedAt?.slice(0, 10);
-      return !rangeStartIso || Boolean(statusDate && statusDate >= rangeStartIso);
+      return dateInCurrentRange(statusDate);
     });
     const completedSubtasksInRangeCount = analyticsRange === "all" ? doneSubtaskItems.length : completedSubtasksInRange.length;
+    const completedSubtasksPreviousRange = doneSubtaskItems.filter(({ subtask }) => dateInPreviousRange(subtask.statusChangedAt?.slice(0, 10)));
     const subtaskCompletionRate = countedSubtaskItems.length > 0
       ? Math.round((doneSubtaskItems.length / countedSubtaskItems.length) * 100)
       : 0;
@@ -1781,6 +1820,61 @@ export default function Home() {
         return Boolean(statusDate && statusDate < stuckThresholdIso);
       })
       .sort((a, b) => (taskStatusTimestamp(a) ?? "").localeCompare(taskStatusTimestamp(b) ?? "") || a.number - b.number);
+    const stuckWithoutWaiting = stuckTasks.filter((task) => task.status !== "waiting");
+    const closurePace = openedInRange.length > 0 ? Math.round((completedInRangeCount / openedInRange.length) * 100) : completedInRangeCount > 0 ? 100 : 0;
+    const netChange = openedInRange.length - completedInRangeCount;
+    const previousNetChange = openedPreviousRange.length - completedPreviousRange.length;
+    const importantOpenTasks = [...active]
+      .filter((task) => task.priority === "high" || task.priority === "important" || task.focused)
+      .sort(compareTasksByPriority)
+      .slice(0, 5);
+    const overdueShortList = [...overdue]
+      .sort((a, b) => (a.dueDate ?? "").localeCompare(b.dueDate ?? "") || compareTasksByPriority(a, b))
+      .slice(0, 5);
+    const closedShortList = [...(analyticsRange === "all" ? completedWithDate : completedInRange)]
+      .sort(compareTasksByNewestClosure)
+      .slice(0, 5);
+    const sharesByMe = taskShares.filter((share) => cloudUser && share.ownerUserId === cloudUser.id);
+    const sharesWithMe = taskShares.filter((share) => isShareRecipient(share, cloudUser));
+    const activeSharesByMe = sharesByMe.filter((share) => ["pending", "accepted"].includes(share.status));
+    const activeSharesWithMe = sharesWithMe.filter((share) => share.status === "accepted");
+    const historicalSharesWithMe = sharesWithMe.filter((share) => ["revoked", "left"].includes(share.status) && Boolean(share.endedAt));
+    const endedSharesInRange = taskShares.filter((share) => dateInCurrentRange(share.endedAt?.slice(0, 10)));
+    const inactiveAcceptedShares = taskShares.filter((share) => {
+      if (share.status !== "accepted") return false;
+      const sharedTask = tasks.find((task) => task.cloudId === share.taskId);
+      const lastTaskMove = sharedTask ? taskStatusTimestamp(sharedTask)?.slice(0, 10) : undefined;
+      const lastSubtaskMove = sharedTask?.subtasks
+        ?.map((subtask) => subtask.statusChangedAt?.slice(0, 10))
+        .filter((date): date is string => Boolean(date))
+        .sort()
+        .at(-1);
+      const lastActivity = [lastTaskMove, lastSubtaskMove, share.acceptedAt?.slice(0, 10), share.createdAt?.slice(0, 10)]
+        .filter((date): date is string => Boolean(date))
+        .sort()
+        .at(-1);
+      return Boolean(lastActivity && lastActivity < stuckThresholdIso);
+    });
+    const sharedProgressRows = activeSharesByMe
+      .map((share) => {
+        const sharedTask = tasks.find((task) => task.cloudId === share.taskId);
+        const progress = subtaskProgress(sharedTask?.subtasks);
+        return {
+          share,
+          task: sharedTask,
+          progress,
+          title: sharedTask?.title ?? share.taskTitle ?? "משימה משותפת",
+          displayId: sharedTask ? taskDisplayId(sharedTask) : share.taskPrefix && share.taskNumber ? `${share.taskPrefix}${share.taskNumber}` : "",
+        };
+      })
+      .sort((a, b) => b.progress.done - a.progress.done || a.title.localeCompare(b.title))
+      .slice(0, 5);
+    const sharingTasksAction = {
+      taskIds: activeSharesWithMe
+        .map((share) => tasks.find((task) => task.cloudId === share.taskId)?.id)
+        .filter((id): id is string => Boolean(id)),
+      statusFilter: "all" as TaskFilter,
+    };
     const insights: AnalyticsInsight[] = [];
     const addInsight = (insight: AnalyticsInsight) => insights.push(insight);
 
@@ -2113,7 +2207,6 @@ export default function Home() {
       return rows;
     })();
 
-    const createdDate = (task: Task) => task.createdAt?.slice(0, 10);
     const openedLast7 = tasks.filter((task) => {
       const date = createdDate(task);
       return Boolean(date && date >= weekStartIso);
@@ -2122,7 +2215,6 @@ export default function Home() {
       const date = createdDate(task);
       return Boolean(date && date >= previousWeekStartIso && date < weekStartIso);
     }).length;
-    const previous30StartIso = addDaysIso(-59);
     const openedLast30 = tasks.filter((task) => {
       const date = createdDate(task);
       return Boolean(date && date >= last30StartIso);
@@ -2216,14 +2308,88 @@ export default function Home() {
     const updateInsights = sortedInsights
       .filter((insight) => !insight.action || insight.tone === "good" || updateInsightIds.has(insight.id))
       .slice(0, 3);
+    const recommendationCandidates: Array<{ label: string; action: NonNullable<AnalyticsInsight["action"]> } | null> = [
+      overdue.length > 0 ? {
+        label: `לטפל קודם ב-${overdue.length} משימות באיחור`,
+        action: { statusFilter: "overdue" as TaskFilter },
+      } : null,
+      stuckWithoutWaiting.length > 0 ? {
+        label: `לקבל החלטה על ${stuckWithoutWaiting.length} משימות תקועות שאינן ממתינות`,
+        action: { taskIds: stuckWithoutWaiting.map((task) => task.id), statusFilter: "all" as TaskFilter },
+      } : null,
+      openSubtasks > 0 ? {
+        label: `לסגור צעד טיפול אחד מתוך ${openSubtasks} הפתוחים`,
+        action: { statusFilter: "subtasks_open" as TaskFilter },
+      } : null,
+      topCategory ? {
+        label: `לרכז עבודה בנושא ${topCategory.label}`,
+        action: { statusFilter: "active" as TaskFilter, topicFilter: topCategory.label },
+      } : null,
+      activeSharesWithMe.length > 0 && sharingTasksAction.taskIds.length > 0 ? {
+        label: `לעבור על ${activeSharesWithMe.length} משימות ששותפו איתך`,
+        action: sharingTasksAction,
+      } : null,
+    ];
+    const topRecommendations = recommendationCandidates
+      .filter((item): item is { label: string; action: NonNullable<AnalyticsInsight["action"]> } => Boolean(item))
+      .slice(0, 3);
+    const openingLine = overdue.length > 0
+      ? `הטווח הזה מאותת שכדאי לנקות קודם איחורים: ${overdue.length} משימות כבר עברו יעד, בזמן ש-${completedInRangeCount} נסגרו ${rangeLabel}.`
+      : netChange > 0
+        ? `נכנס יותר ממה שנסגר ${rangeLabel}: נטו ${signedNumber(netChange)} משימות. זה זמן טוב למיקוד קצר לפני פתיחת פריטים חדשים.`
+        : completedInRangeCount > 0
+          ? `יש תנועה טובה ${rangeLabel}: ${completedInRangeCount} משימות נסגרו ו-${completedSubtasksInRangeCount} צעדי טיפול הושלמו.`
+          : `הסיכום מצביע על שבוע עבודה שצריך התנעה: אין סגירות מתוארכות בטווח, אבל יש ${active.length} משימות פעילות שאפשר לקדם.`;
 
     return {
       periodSummary: {
         title: summaryTitle,
         body: summaryBody,
+        openingLine,
         highlights: summaryHighlights,
         recommendation: summaryRecommendation,
+        recommendations: topRecommendations,
         ...summaryAction,
+      },
+      performance: {
+        opened: analyticsRange === "all" ? tasks.length : openedInRange.length,
+        completed: completedInRangeCount,
+        active: active.length,
+        overdue: overdue.length,
+        subtasksOpened: analyticsRange === "all" ? allSubtaskItems.length : openedSubtasksInRange.length,
+        subtasksCompleted: completedSubtasksInRangeCount,
+        netChange,
+        closurePace,
+      },
+      previousComparison: {
+        available: analyticsRange !== "all",
+        opened: openedPreviousRange.length,
+        completed: completedPreviousRange.length,
+        subtasksOpened: openedSubtasksPreviousRange.length,
+        subtasksCompleted: completedSubtasksPreviousRange.length,
+        netChange: previousNetChange,
+      },
+      management: {
+        topCategory,
+        topAction,
+        stuck: stuckTasks.length,
+        stuckWithoutWaiting: stuckWithoutWaiting.length,
+        stuckTaskIds: stuckWithoutWaiting.map((task) => task.id),
+        waiting: waiting.length,
+        closurePace,
+      },
+      sharing: {
+        byMeActive: activeSharesByMe.length,
+        withMeActive: activeSharesWithMe.length,
+        withMeHistorical: historicalSharesWithMe.length,
+        endedInRange: endedSharesInRange.length,
+        inactiveAccepted: inactiveAcceptedShares.length,
+        progressRows: sharedProgressRows,
+      },
+      lists: {
+        importantOpen: importantOpenTasks,
+        overdue: overdueShortList,
+        closed: closedShortList,
       },
       completedInRange: completedInRangeCount,
       hasDatedCompletions: completedWithDate.length > 0,
@@ -2245,7 +2411,7 @@ export default function Home() {
       updateInsights,
       insights: [...actionInsights, ...updateInsights],
     };
-  }, [analyticsRange, stuckThresholdDays, tasks]);
+  }, [analyticsRange, cloudUser, stuckThresholdDays, taskShares, tasks]);
 
   function maxValue(rows: StatRow[]) {
     return Math.max(1, ...rows.map((row) => row.value));
@@ -4025,16 +4191,158 @@ export default function Home() {
               </div>
 
               <section className="panel period-summary-panel" aria-label={analytics.periodSummary.title}>
-                <div>
+                <div className="period-summary-copy">
                   <p className="eyebrow">{analytics.periodSummary.title}</p>
-                  <h2>מה קרה בטווח הזה</h2>
+                  <h2>{analytics.periodSummary.openingLine}</h2>
                   <p>{analytics.periodSummary.body}</p>
                 </div>
-                <ul>
+                <ul className="summary-highlights">
                   {analytics.periodSummary.highlights.map((item) => <li key={item}>{item}</li>)}
                 </ul>
-                <p className="summary-recommendation">{analytics.periodSummary.recommendation}</p>
-                <button onClick={() => applyAnalyticsAction(analytics.periodSummary.action)}>{analytics.periodSummary.actionLabel}</button>
+                <div className="summary-recommendations" aria-label="המלצות מעשיות">
+                  <strong>המלצות מעשיות</strong>
+                  {analytics.periodSummary.recommendations.map((item) => (
+                    <button key={item.label} type="button" onClick={() => applyAnalyticsAction(item.action)}>
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              </section>
+
+              <section className="panel analytics-section-panel" aria-label="תמונת ביצוע">
+                <div className="panel-heading">
+                  <div>
+                    <h2>תמונת ביצוע</h2>
+                    <span>מה נפתח, מה נסגר ומה עדיין דורש ניהול</span>
+                  </div>
+                </div>
+                <div className="period-metric-grid">
+                  <button type="button" onClick={() => showTaskList("all")}><span>נפתחו</span><strong>{analytics.performance.opened}</strong><small>{analyticsRangeLabel()}</small></button>
+                  <button type="button" onClick={() => showTaskList("done")}><span>נסגרו</span><strong>{analytics.performance.completed}</strong><small>משימות בטווח</small></button>
+                  <button type="button" onClick={() => showTaskList("active")}><span>נשארו פעילות</span><strong>{analytics.performance.active}</strong><small>פתוחות, בטיפול או ממתינות</small></button>
+                  <button type="button" onClick={() => showTaskList("overdue")}><span>באיחור</span><strong>{analytics.performance.overdue}</strong><small>עברו תאריך יעד</small></button>
+                  <button type="button" onClick={() => showTaskList("subtasks_open")}><span>צעדים נפתחו</span><strong>{analytics.performance.subtasksOpened}</strong><small>{analyticsRangeLabel()}</small></button>
+                  <button type="button" onClick={() => showTaskList("subtasks_open")}><span>צעדים נסגרו</span><strong>{analytics.performance.subtasksCompleted}</strong><small>{analytics.subtaskCompletionRate}% השלמה כוללת</small></button>
+                </div>
+              </section>
+
+              <div className="analytics-split-grid">
+                <section className="panel analytics-section-panel" aria-label="השוואה לתקופה הקודמת">
+                  <div className="panel-heading">
+                    <div>
+                      <h2>השוואה לתקופה הקודמת</h2>
+                      <span>{analytics.previousComparison.available ? "אותו אורך טווח, מיד לפני הטווח הנוכחי" : "בתצוגת הכול אין תקופה קודמת להשוואה"}</span>
+                    </div>
+                  </div>
+                  {analytics.previousComparison.available ? (
+                    <div className="comparison-grid">
+                      <div><span>נפתחו</span><strong>{analytics.performance.opened}</strong><small>קודם {analytics.previousComparison.opened}</small></div>
+                      <div><span>נסגרו</span><strong>{analytics.performance.completed}</strong><small>קודם {analytics.previousComparison.completed}</small></div>
+                      <div><span>נטו עומס</span><strong>{signedNumber(analytics.performance.netChange)}</strong><small>קודם {signedNumber(analytics.previousComparison.netChange)}</small></div>
+                      <div><span>צעדים נסגרו</span><strong>{analytics.performance.subtasksCompleted}</strong><small>קודם {analytics.previousComparison.subtasksCompleted}</small></div>
+                    </div>
+                  ) : (
+                    <p className="muted-line">בחר שבוע או חודש כדי לראות שינוי מול התקופה הקודמת.</p>
+                  )}
+                </section>
+
+                <section className="panel analytics-section-panel" aria-label="אבחון ניהולי">
+                  <div className="panel-heading">
+                    <div>
+                      <h2>אבחון ניהולי</h2>
+                      <span>עומס, תקיעות וצווארי בקבוק</span>
+                    </div>
+                  </div>
+                  <div className="management-diagnosis-list">
+                    <button type="button" onClick={() => analytics.management.topCategory && showTaskList("active", { topicFilter: analytics.management.topCategory.label })}>
+                      <span>נושא עמוס</span>
+                      <strong>{analytics.management.topCategory ? analytics.management.topCategory.label : "אין"}</strong>
+                      <small>{analytics.management.topCategory ? `${analytics.management.topCategory.value} משימות פעילות` : "אין כרגע מוקד עומס"}</small>
+                    </button>
+                    <button type="button" onClick={() => analytics.management.topAction && showTaskList("active", { actionFilter: analytics.management.topAction.label === "ללא פעולה" ? "all" : analytics.management.topAction.label })}>
+                      <span>פעולה עמוסה</span>
+                      <strong>{analytics.management.topAction ? analytics.management.topAction.label : "אין"}</strong>
+                      <small>{analytics.management.topAction ? `${analytics.management.topAction.value} משימות פעילות` : "אין צוואר בקבוק לפי פעולה"}</small>
+                    </button>
+                    <button type="button" onClick={() => analytics.management.stuckTaskIds.length > 0 && applyAnalyticsAction({ taskIds: analytics.management.stuckTaskIds, statusFilter: "all" })}>
+                      <span>תקועות</span>
+                      <strong>{analytics.management.stuckWithoutWaiting}</strong>
+                      <small>{analytics.management.waiting} ממתינות נספרות בנפרד</small>
+                    </button>
+                    <div>
+                      <span>קצב סגירה</span>
+                      <strong>{analytics.management.closurePace}%</strong>
+                      <small>סגירות מול משימות שנפתחו בטווח</small>
+                    </div>
+                  </div>
+                </section>
+              </div>
+
+              <section className="panel analytics-section-panel" aria-label="נתוני שיתוף">
+                <div className="panel-heading">
+                  <div>
+                    <h2>נתוני שיתוף</h2>
+                    <span>שיתופים פעילים, היסטוריה מותרת ושיתופים ללא פעילות</span>
+                  </div>
+                </div>
+                <div className="sharing-summary-grid">
+                  <button type="button" onClick={() => { setShareFilter("shared_by_me"); setActiveView("tasks"); }}><span>שיתפתי</span><strong>{analytics.sharing.byMeActive}</strong><small>פעילים או ממתינים</small></button>
+                  <button type="button" onClick={() => { setShareFilter("shared_with_me"); setActiveView("tasks"); }}><span>שותפו איתי</span><strong>{analytics.sharing.withMeActive}</strong><small>פעילים עכשיו</small></button>
+                  <button type="button" onClick={() => { setShareFilter("shared_past"); setActiveView("tasks"); }}><span>היסטוריה</span><strong>{analytics.sharing.withMeHistorical}</strong><small>לפי תצלום סיום השיתוף</small></button>
+                  <div><span>ללא פעילות</span><strong>{analytics.sharing.inactiveAccepted}</strong><small>מעל {stuckThresholdDays} יום</small></div>
+                </div>
+                {analytics.sharing.progressRows.length > 0 && (
+                  <div className="shared-progress-list">
+                    {analytics.sharing.progressRows.map((row) => (
+                      <article key={row.share.id}>
+                        <span>{row.displayId || "שיתוף"}</span>
+                        <strong>{row.title}</strong>
+                        <small>{shareStatusLabel(row.share)} · {row.progress.done}/{row.progress.total} צעדים בוצעו</small>
+                      </article>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section className="panel analytics-section-panel" aria-label="רשימות קצרות">
+                <div className="panel-heading">
+                  <div>
+                    <h2>רשימות קצרות</h2>
+                    <span>עד חמש משימות בכל רשימה, עם פתיחה ישירה</span>
+                  </div>
+                </div>
+                <div className="summary-task-lists">
+                  <div>
+                    <h3>חשובות פתוחות</h3>
+                    {analytics.lists.importantOpen.length === 0 ? <p className="muted-line">אין משימות חשובות פתוחות.</p> : analytics.lists.importantOpen.map((task) => (
+                      <button type="button" key={task.id} onClick={() => focusTask(task.id)}>
+                        <span className="task-id">{taskDisplayId(task)}</span>
+                        <strong>{task.title}</strong>
+                        <small>{priorityLabels[task.priority]}{task.dueDate ? ` · יעד ${formatDate(task.dueDate)}` : ""}</small>
+                      </button>
+                    ))}
+                  </div>
+                  <div>
+                    <h3>באיחור</h3>
+                    {analytics.lists.overdue.length === 0 ? <p className="muted-line">אין משימות באיחור.</p> : analytics.lists.overdue.map((task) => (
+                      <button type="button" key={task.id} onClick={() => focusTask(task.id)}>
+                        <span className="task-id">{taskDisplayId(task)}</span>
+                        <strong>{task.title}</strong>
+                        <small>{task.dueDate ? `יעד ${formatDate(task.dueDate)}` : "ללא יעד"}</small>
+                      </button>
+                    ))}
+                  </div>
+                  <div>
+                    <h3>נסגרו בטווח</h3>
+                    {analytics.lists.closed.length === 0 ? <p className="muted-line">אין סגירות מתוארכות בטווח.</p> : analytics.lists.closed.map((task) => (
+                      <button type="button" key={task.id} onClick={() => focusTask(task.id)}>
+                        <span className="task-id">{taskDisplayId(task)}</span>
+                        <strong>{task.title}</strong>
+                        <small>{taskClosureDate(task) ? `נסגר ${formatDate(taskClosureDate(task))}` : "סגירה ללא תאריך"}</small>
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </section>
 
               <section className="panel insights-panel" aria-label="תובנות מרכזיות">
