@@ -4987,7 +4987,7 @@ export default function Home() {
                             title="מחיקת צעד"
                             disabled={taskEditorIsReadOnly}
                           >
-                            <span aria-hidden="true">×</span>
+                            <span aria-hidden="true">🗑</span>
                           </button>
                         </div>
                       </div>

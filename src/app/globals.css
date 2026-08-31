@@ -409,7 +409,7 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
 .subtask-delete { align-items: center; display: inline-flex; justify-content: center; }
 .subtasks-preview-item .subtask-delete { height: 36px; padding: 0; width: 36px; }
 .subtask-delete:hover { background: #fef2f2; color: #991b1b; }
-.taxonomy-panel { display: grid; gap: 14px; padding: 18px; }
+.taxonomy-panel { display: grid; gap: 14px; min-width: 0; padding: 18px; }
 .appearance-panel, .notification-settings-panel { display: grid; gap: 14px; padding: 18px; }
 .theme-options { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .theme-options button { align-items: start; background: #f8fafc; border: 1px solid var(--border); border-radius: 14px; color: var(--text); display: grid; gap: 8px; min-height: 136px; padding: 16px; text-align: right; }
@@ -474,8 +474,9 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
 .analytics-threshold-setting { cursor: default; grid-template-columns: minmax(0, 1fr) 120px; }
 .analytics-threshold-setting input[type="number"] { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; color: var(--text); font: inherit; height: auto; padding: 10px 12px; text-align: center; width: 100%; }
 .taxonomy-status { background: #eef4ff; border-radius: 10px; color: var(--muted); line-height: 1.45; margin: 0; padding: 10px 12px; }
-.taxonomy-manager { display: grid; gap: 14px; }
-.taxonomy-form { display: grid; gap: 10px; }
+.taxonomy-manager { display: grid; gap: 14px; min-width: 0; }
+.taxonomy-form { display: grid; gap: 10px; min-width: 0; }
+.taxonomy-form input, .taxonomy-form select { min-width: 0; width: 100%; }
 .taxonomy-form-topic { grid-template-columns: 130px minmax(0, 1fr) 44px; }
 .taxonomy-form-action { grid-template-columns: minmax(0, 1fr) 44px; }
 .taxonomy-form button { align-items: center; background: var(--accent); border: 0; border-radius: 10px; color: #fff; display: inline-flex; font-size: 1.3rem; font-weight: 700; height: 44px; justify-content: center; padding: 0; width: 44px; }
@@ -974,7 +975,7 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
   .subtask-row-actions { display: flex; grid-column: 2; grid-row: 1; }
   .subtask-delete { height: 40px; padding: 0; width: 40px; }
   .taxonomy-grid, .taxonomy-edit-form { grid-template-columns: 1fr; }
-  .taxonomy-form-topic { grid-template-columns: 92px minmax(0, 1fr) 44px; }
+  .taxonomy-form-topic { gap: 8px; grid-template-columns: 84px minmax(0, 1fr) 44px; }
   .taxonomy-form-action { grid-template-columns: minmax(0, 1fr) 44px; }
   .taxonomy-form button { width: 44px; }
   .taxonomy-edit-form button { width: 100%; }
