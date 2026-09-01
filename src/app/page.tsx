@@ -8,7 +8,7 @@ import { canonicalTaskId, initialTasks, Task, TaskPrefix, TaskPriority, TaskStat
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { addAssistantMessage, fetchAssistantMessages, fetchDeletedAssistantThreads, getOrCreateAssistantThread, restoreAssistantThread, softDeleteAssistantHistory, updateAssistantMessageActionStatus } from "@/lib/supabaseAssistant";
 import { fetchUserDevices, registerCurrentDevice, type UserDevice } from "@/lib/supabaseDevices";
-import { acknowledgeTaskShareEnd, acceptTaskShare, createTaskShare, declineTaskShare, fetchTaskShares, historicalTaskFromShare, leaveTaskShare, revokeTaskShare, setSharedTaskFocus, updateSharedTaskSubtaskStatus, type TaskShare } from "@/lib/supabaseSharing";
+import { acknowledgeTaskShareEnd, acceptTaskShare, createTaskShare, declineTaskShare, fetchTaskShares, fetchTaskSubtaskAssignments, historicalTaskFromShare, leaveTaskShare, revokeTaskShare, setSharedTaskFocus, setTaskSubtaskAssignment, updateSharedTaskSubtaskStatus, type TaskShare, type TaskSubtaskAssignment } from "@/lib/supabaseSharing";
 import { countCloudTasks, fetchCloudTasks, saveCloudTasks } from "@/lib/supabaseTasks";
 import { fetchCloudTaxonomy, replaceCloudTaxonomy } from "@/lib/supabaseTaxonomy";
 import { fetchUserSettings, saveUserSettings } from "@/lib/supabaseUserSettings";
@@ -807,8 +807,10 @@ export default function Home() {
   const [lastCloudPullAt, setLastCloudPullAt] = useState<string | null>(null);
   const [cloudDevices, setCloudDevices] = useState<UserDevice[]>([]);
   const [taskShares, setTaskShares] = useState<TaskShare[]>([]);
+  const [subtaskAssignments, setSubtaskAssignments] = useState<TaskSubtaskAssignment[]>([]);
   const [shareEmailDrafts, setShareEmailDrafts] = useState<Record<string, string>>({});
   const [sharingStatus, setSharingStatus] = useState("");
+  const [sharingPanelTaskId, setSharingPanelTaskId] = useState<string | null>(null);
   const [devicesStatus, setDevicesStatus] = useState("");
   const [adminOverview, setAdminOverview] = useState<AdminOverview | null>(null);
   const [adminOverviewStatus, setAdminOverviewStatus] = useState("");
@@ -954,8 +956,10 @@ export default function Home() {
       setLastCloudPullAt(null);
       setCloudDevices([]);
       setTaskShares([]);
+      setSubtaskAssignments([]);
       setShareEmailDrafts({});
       setSharingStatus("");
+      setSharingPanelTaskId(null);
       setDevicesStatus("");
       setDriveBackupOverview(null);
       setDriveBackupPreview(null);
@@ -1209,6 +1213,13 @@ export default function Home() {
       setSharingStatus(shares.length ? `נטענו ${shares.length} רשומות שיתוף.` : "אין כרגע שיתופים.");
     } catch (error) {
       setSharingStatus(`טעינת שיתופים נכשלה: ${errorMessage(error)}`);
+    }
+
+    try {
+      setSubtaskAssignments(await fetchTaskSubtaskAssignments());
+    } catch (error) {
+      setSubtaskAssignments([]);
+      setSharingStatus(`השיתופים נטענו, אך טעינת הקצאות צעדי הטיפול נכשלה: ${errorMessage(error)}`);
     }
   }, [cloudUser]);
 
@@ -2532,6 +2543,33 @@ export default function Home() {
     return recipientShares.find((share) => share.taskId === task.cloudId && share.status === "accepted");
   }
 
+  function subtaskAssignmentHistoryForTask(task: Task) {
+    if (!task.cloudId) return [];
+    return subtaskAssignments.filter((assignment) => assignment.taskId === task.cloudId);
+  }
+
+  function activeSubtaskAssignment(task: Task, subtaskNumber: number) {
+    return subtaskAssignmentHistoryForTask(task).find((assignment) => (
+      assignment.subtaskNumber === subtaskNumber && !assignment.endedAt
+    ));
+  }
+
+  function acceptedContributorsForTask(task: Task) {
+    return taskShareHistoryForTask(task).filter((share) => share.status === "accepted" && share.role === "contributor");
+  }
+
+  function assignmentDisplayName(assignment: TaskSubtaskAssignment) {
+    return assignment.assigneeDisplayName || assignment.assigneeEmail;
+  }
+
+  function canUpdateSharedSubtask(task: Task, subtaskNumber: number) {
+    if (!task.sharedWithMe) return true;
+    const assignment = activeSubtaskAssignment(task, subtaskNumber);
+    if (!assignment) return true;
+    const currentShare = taskShareForSharedTask(task);
+    return Boolean(currentShare && assignment.shareId === currentShare.id);
+  }
+
   function updateShareEmailDraft(taskId: string, value: string) {
     setShareEmailDrafts((current) => ({ ...current, [taskId]: value }));
   }
@@ -2569,6 +2607,21 @@ export default function Home() {
       setSharingStatus("השיתוף הוסר.");
     } catch (error) {
       setSharingStatus(`הסרת השיתוף נכשלה: ${errorMessage(error)}`);
+    }
+  }
+
+  async function changeSubtaskAssignment(task: Task, subtaskNumber: number, shareId: string) {
+    if (!task.cloudId || !isOwnTask(task, cloudUser)) return;
+    const selectedShare = taskShares.find((share) => share.id === shareId);
+    setSharingStatus(shareId ? "מקצה את צעד הטיפול..." : "מסיר את ההקצאה...");
+    try {
+      await setTaskSubtaskAssignment(task.cloudId, subtaskNumber, shareId || undefined);
+      setSubtaskAssignments(await fetchTaskSubtaskAssignments());
+      setSharingStatus(shareId
+        ? `צעד הטיפול הוקצה ל-${selectedShare?.recipientDisplayName || selectedShare?.sharedWithEmail || "המשתתף"}.`
+        : "ההקצאה הוסרה מצעד הטיפול.");
+    } catch (error) {
+      setSharingStatus(`עדכון ההקצאה נכשל: ${errorMessage(error)}`);
     }
   }
 
@@ -2704,6 +2757,14 @@ export default function Home() {
 
   function openEditTask(task: Task) {
     setTaskEditorError("");
+    setSharingPanelTaskId(null);
+    setTaskEditor({ mode: "edit", taskId: task.id, draft: taskToDraft(task) });
+  }
+
+  function openTaskSharing(task: Task) {
+    setTaskEditorError("");
+    setSharingStatus("");
+    setSharingPanelTaskId(task.id);
     setTaskEditor({ mode: "edit", taskId: task.id, draft: taskToDraft(task) });
   }
 
@@ -2729,6 +2790,11 @@ export default function Home() {
     );
     if (taskBeforeUpdate?.sharedWithMe && !isSharedSubtaskStatusUpdate) {
       setSharingStatus("במשימה ששותפה איתך אפשר לעדכן רק סטטוס של צעדי טיפול.");
+      return;
+    }
+    if (taskBeforeUpdate?.sharedWithMe && !canUpdateSharedSubtask(taskBeforeUpdate, subtaskNumber)) {
+      const assignment = activeSubtaskAssignment(taskBeforeUpdate, subtaskNumber);
+      setSharingStatus(`צעד הטיפול הוקצה ל-${assignment ? assignmentDisplayName(assignment) : "משתתף אחר"}, ולכן רק הוא או בעל המשימה יכולים לעדכן אותו.`);
       return;
     }
 
@@ -3103,6 +3169,7 @@ export default function Home() {
   function closeTaskEditor() {
     setTaskEditor(null);
     setTaskEditorError("");
+    setSharingPanelTaskId(null);
   }
 
   function saveTaskEditor(event: FormEvent) {
@@ -3662,6 +3729,7 @@ export default function Home() {
                     disabled={!isOwnTask(task, cloudUser)}
                   />
                   <select
+                    className="subtask-action-select"
                     value={subtask.actionType ?? ""}
                     onChange={(event) => updateTaskSubtask(task.id, subtask.number, { actionType: event.target.value })}
                     aria-label={subtask.title ? `פעולה עבור ${subtask.title}` : "פעולה עבור צעד טיפול חדש"}
@@ -3670,11 +3738,32 @@ export default function Home() {
                     <option value="">ללא פעולה</option>
                     {actionOptions.map((action) => <option value={action} key={action}>{action}</option>)}
                   </select>
+                  {isOwnTask(task, cloudUser) && task.cloudId && acceptedContributorsForTask(task).length > 0 && (
+                    <select
+                      className="subtask-assignee-select"
+                      value={activeSubtaskAssignment(task, subtask.number)?.shareId ?? ""}
+                      onChange={(event) => changeSubtaskAssignment(task, subtask.number, event.target.value)}
+                      aria-label={subtask.title ? `אחראי על ${subtask.title}` : "אחראי על צעד הטיפול"}
+                    >
+                      <option value="">ללא אחראי</option>
+                      {acceptedContributorsForTask(task).map((share) => (
+                        <option value={share.id} key={share.id}>{share.recipientDisplayName || share.sharedWithEmail}</option>
+                      ))}
+                    </select>
+                  )}
+                  {task.sharedWithMe && (
+                    <span className="subtask-assignee-chip">
+                      {activeSubtaskAssignment(task, subtask.number)
+                        ? assignmentDisplayName(activeSubtaskAssignment(task, subtask.number) as TaskSubtaskAssignment)
+                        : "ללא אחראי"}
+                    </span>
+                  )}
                   <select
+                    className="subtask-status-select"
                     value={subtask.status}
                     onChange={(event) => updateTaskSubtask(task.id, subtask.number, { status: event.target.value as TaskSubtaskStatus })}
                     aria-label={subtask.title ? `סטטוס עבור ${subtask.title}` : "סטטוס עבור צעד טיפול חדש"}
-                    disabled={Boolean(task.historicalShared)}
+                    disabled={Boolean(task.historicalShared || (task.sharedWithMe && !canUpdateSharedSubtask(task, subtask.number)))}
                   >
                     {Object.entries(subtaskStatusLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
                   </select>
@@ -4091,7 +4180,7 @@ export default function Home() {
                   </div>
                 )}
                 {filteredTasks.map((task) => (
-                  <article className={`task-card status-${task.status}${isOverdue(task) ? " is-overdue" : ""}${subtaskProgress(task.subtasks).open >= 3 ? " has-open-subtasks" : ""}${task.sharedWithMe ? " is-shared-task" : ""}`} key={task.id}>
+                  <article className={`task-card status-${task.status}${isOverdue(task) ? " is-overdue" : ""}${subtaskProgress(task.subtasks).open >= 3 ? " has-open-subtasks" : ""}${task.sharedWithMe ? " is-shared-task" : ""}${task.cloudId || task.shareId ? " has-share-control" : ""}`} key={task.id}>
                     <button
                       className={`focus-button${task.focused ? " active" : ""}`}
                       aria-label={task.focused ? `הסרת ${task.title} ממיקוד` : `סימון ${task.title} במיקוד`}
@@ -4111,6 +4200,20 @@ export default function Home() {
                     >
                       <span aria-hidden="true">✎</span>
                     </button>
+                    {(task.cloudId || task.shareId) && (
+                      <button
+                        type="button"
+                        className={`task-share-button${taskSharesForTask(task).length > 0 || task.sharedWithMe ? " active" : ""}`}
+                        onClick={() => openTaskSharing(task)}
+                        aria-label={`פתיחת פרטי השיתוף של ${task.title}`}
+                        title="שיתוף"
+                      >
+                        <span aria-hidden="true">↗</span>
+                        {!task.sharedWithMe && taskSharesForTask(task).length > 0 && (
+                          <small aria-hidden="true">{taskSharesForTask(task).length}</small>
+                        )}
+                      </button>
+                    )}
                     {isOwnTask(task, cloudUser) ? (
                       <button
                         className="task-complete-button"
@@ -5096,7 +5199,21 @@ export default function Home() {
                 <p className="eyebrow">{taskEditor.mode === "create" ? "משימה חדשה" : "עריכת משימה"}</p>
                 <h2>{taskEditor.mode === "create" ? "פרטי המשימה" : taskEditorTask ? taskDisplayId(taskEditorTask) : taskEditor.taskId}</h2>
               </div>
-              <button className="icon-button" onClick={closeTaskEditor} aria-label="סגירת חלונית משימה">×</button>
+              <div className="drawer-header-actions">
+                {taskEditor.mode === "edit" && taskEditorTask && (taskEditorTask.cloudId || taskEditorTask.shareId) && (
+                  <button
+                    type="button"
+                    className={`task-share-button${sharingPanelTaskId === taskEditorTask.id ? " active" : ""}`}
+                    onClick={() => setSharingPanelTaskId((current) => current === taskEditorTask.id ? null : taskEditorTask.id)}
+                    aria-label={sharingPanelTaskId === taskEditorTask.id ? "סגירת פרטי השיתוף" : "פתיחת פרטי השיתוף"}
+                    aria-expanded={sharingPanelTaskId === taskEditorTask.id}
+                    title="שיתוף"
+                  >
+                    <span aria-hidden="true">↗</span>
+                  </button>
+                )}
+                <button className="icon-button" onClick={closeTaskEditor} aria-label="סגירת חלונית משימה">×</button>
+              </div>
             </div>
 
             <form
@@ -5181,7 +5298,7 @@ export default function Home() {
                 <span>הערות</span>
                 <textarea {...freeTextInputProps} value={taskEditor.draft.notes} onChange={(event) => updateTaskDraft({ notes: event.target.value })} rows={5} disabled={taskEditorIsReadOnly} />
               </label>
-              {taskEditor.mode === "edit" && taskEditorTask && (
+              {taskEditor.mode === "edit" && taskEditorTask && sharingPanelTaskId === taskEditorTask.id && (
                 <section className="sharing-panel">
                   <div>
                     <h3>{taskEditorIsShared ? "פרטי השיתוף" : "שיתוף משימה"}</h3>
@@ -5228,6 +5345,24 @@ export default function Home() {
                   ) : !taskEditorIsHistorical && taskEditorCurrentShare ? (
                     <button type="button" className="leave-share-button" onClick={() => leaveSharedTask(taskEditorTask)}>עזיבת המשימה המשותפת</button>
                   ) : null}
+                  {subtaskAssignmentHistoryForTask(taskEditorTask).length > 0 && (
+                    <div className="assignment-history" aria-label="היסטוריית הקצאת צעדי טיפול">
+                      <h4>הקצאות צעדי טיפול</h4>
+                      {subtaskAssignmentHistoryForTask(taskEditorTask).map((assignment) => {
+                        const subtaskTitle = taskEditorTask.subtasks?.find((subtask) => subtask.id === assignment.subtaskId)?.title;
+                        return (
+                          <article key={assignment.id}>
+                            <strong>{subtaskTitle || `צעד ${assignment.subtaskNumber}`}</strong>
+                            <span>{assignmentDisplayName(assignment)}</span>
+                            <small>
+                              הוקצה {formatDateTime(assignment.assignedAt)}
+                              {assignment.endedAt ? ` · הסתיים ${formatDateTime(assignment.endedAt)}` : " · פעיל"}
+                            </small>
+                          </article>
+                        );
+                      })}
+                    </div>
+                  )}
                   {sharingStatus && <p className="sharing-status">{sharingStatus}</p>}
                 </section>
               )}
@@ -5276,12 +5411,34 @@ export default function Home() {
                             {actionOptions.map((action) => <option value={action} key={action}>{action}</option>)}
                           </select>
                         </label>
+                        {taskEditorTask && isOwnTask(taskEditorTask, cloudUser) && taskEditorTask.cloudId && (
+                          <label className="subtask-assignee-field">
+                            <span>אחראי</span>
+                            <select
+                              value={activeSubtaskAssignment(taskEditorTask, subtask.number)?.shareId ?? ""}
+                              onChange={(event) => changeSubtaskAssignment(taskEditorTask, subtask.number, event.target.value)}
+                            >
+                              <option value="">ללא הקצאה</option>
+                              {acceptedContributorsForTask(taskEditorTask).map((share) => (
+                                <option value={share.id} key={share.id}>{share.recipientDisplayName || share.sharedWithEmail}</option>
+                              ))}
+                            </select>
+                          </label>
+                        )}
+                        {taskEditorTask?.sharedWithMe && (
+                          <div className="subtask-assignee-readonly">
+                            <span>אחראי</span>
+                            <strong>{activeSubtaskAssignment(taskEditorTask, subtask.number)
+                              ? assignmentDisplayName(activeSubtaskAssignment(taskEditorTask, subtask.number) as TaskSubtaskAssignment)
+                              : "ללא הקצאה"}</strong>
+                          </div>
+                        )}
                         <label className="subtask-status-field">
                           <span>סטטוס</span>
                           <select
                             value={subtask.status}
                             onChange={(event) => updateDraftSubtask(subtask.number, { status: event.target.value as TaskSubtaskStatus })}
-                            disabled={taskEditorIsHistorical}
+                            disabled={taskEditorIsHistorical || Boolean(taskEditorTask?.sharedWithMe && !canUpdateSharedSubtask(taskEditorTask, subtask.number))}
                           >
                             {Object.entries(subtaskStatusLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
                           </select>

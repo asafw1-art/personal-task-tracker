@@ -42,6 +42,22 @@ export type TaskShare = {
   updatedAt: string;
 };
 
+export type TaskSubtaskAssignment = {
+  id: string;
+  taskId: string;
+  subtaskId: string;
+  subtaskNumber: number;
+  shareId: string;
+  ownerUserId: string;
+  assigneeUserId?: string;
+  assigneeEmail: string;
+  assigneeDisplayName?: string;
+  assignedAt: string;
+  endedAt?: string;
+  endReason?: "unassigned" | "reassigned" | "share_ended" | "subtask_removed";
+  updatedAt: string;
+};
+
 type TaskShareRow = {
   id: string;
   task_id: string;
@@ -63,6 +79,22 @@ type TaskShareRow = {
   end_reason: "owner_revoked" | "recipient_left" | null;
   task_snapshot: TaskShareSnapshot | null;
   end_seen_at: string | null;
+  updated_at: string;
+};
+
+type TaskSubtaskAssignmentRow = {
+  id: string;
+  task_id: string;
+  subtask_id: string;
+  subtask_number: number;
+  share_id: string;
+  owner_user_id: string;
+  assignee_user_id: string | null;
+  assignee_email: string;
+  assignee_display_name: string | null;
+  assigned_at: string;
+  ended_at: string | null;
+  end_reason: "unassigned" | "reassigned" | "share_ended" | "subtask_removed" | null;
   updated_at: string;
 };
 
@@ -97,6 +129,24 @@ function rowToTaskShare(row: TaskShareRow): TaskShare {
   };
 }
 
+function rowToSubtaskAssignment(row: TaskSubtaskAssignmentRow): TaskSubtaskAssignment {
+  return {
+    id: row.id,
+    taskId: row.task_id,
+    subtaskId: row.subtask_id,
+    subtaskNumber: row.subtask_number,
+    shareId: row.share_id,
+    ownerUserId: row.owner_user_id,
+    assigneeUserId: row.assignee_user_id ?? undefined,
+    assigneeEmail: row.assignee_email,
+    assigneeDisplayName: row.assignee_display_name?.trim() || undefined,
+    assignedAt: row.assigned_at,
+    endedAt: row.ended_at ?? undefined,
+    endReason: row.end_reason ?? undefined,
+    updatedAt: row.updated_at,
+  };
+}
+
 export async function fetchTaskShares() {
   const client = requireSupabase();
   const { data, error } = await client
@@ -106,6 +156,27 @@ export async function fetchTaskShares() {
 
   if (error) throw error;
   return (data ?? []).map((row) => rowToTaskShare(row as TaskShareRow));
+}
+
+export async function fetchTaskSubtaskAssignments() {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("task_subtask_assignments")
+    .select("id, task_id, subtask_id, subtask_number, share_id, owner_user_id, assignee_user_id, assignee_email, assignee_display_name, assigned_at, ended_at, end_reason, updated_at")
+    .order("assigned_at", { ascending: false });
+
+  if (error) throw error;
+  return (data ?? []).map((row) => rowToSubtaskAssignment(row as TaskSubtaskAssignmentRow));
+}
+
+export async function setTaskSubtaskAssignment(taskCloudId: string, subtaskNumber: number, shareId?: string) {
+  const client = requireSupabase();
+  const { error } = await client.rpc("set_task_subtask_assignment", {
+    p_task_id: taskCloudId,
+    p_subtask_number: subtaskNumber,
+    p_share_id: shareId ?? null,
+  });
+  if (error) throw error;
 }
 
 export async function createTaskShare(user: User, task: Pick<Task, "cloudId" | "title" | "prefix" | "number">, email: string, ownerDisplayName?: string) {

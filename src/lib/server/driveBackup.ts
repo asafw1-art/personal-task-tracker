@@ -223,20 +223,26 @@ function signaturesMatch(actual: string | undefined, expected: string) {
 }
 
 async function buildSnapshot(admin: SupabaseClient, userId: string, kind: BackupKind): Promise<DriveSnapshot> {
-  const [tasksResult, taxonomyResult, settingsResult, sharesResult] = await Promise.all([
+  const [tasksResult, taxonomyResult, settingsResult, sharesResult, assignmentsResult] = await Promise.all([
     admin.from("tasks").select("*").eq("user_id", userId).order("prefix").order("task_number"),
     admin.from("task_taxonomy_items").select("*").eq("user_id", userId).order("item_type").order("name"),
     admin.from("user_settings").select("*").eq("user_id", userId).maybeSingle(),
     admin.from("task_shares").select("*").eq("owner_user_id", userId).order("created_at"),
+    admin.from("task_subtask_assignments").select("*").eq("owner_user_id", userId).order("assigned_at"),
   ]);
   for (const result of [tasksResult, taxonomyResult, settingsResult, sharesResult]) {
     if (result.error) throw result.error;
   }
+  if (assignmentsResult.error && assignmentsResult.error.code !== "42P01") throw assignmentsResult.error;
+  const shareHistory = [
+    ...((sharesResult.data ?? []) as Record<string, unknown>[]).map((row) => ({ ...row, record_type: "task_share" })),
+    ...((assignmentsResult.data ?? []) as Record<string, unknown>[]).map((row) => ({ ...row, record_type: "subtask_assignment" })),
+  ];
   const data: SnapshotData = {
     tasks: (tasksResult.data ?? []) as Record<string, unknown>[],
     taxonomy: (taxonomyResult.data ?? []) as Record<string, unknown>[],
     settings: (settingsResult.data ?? null) as Record<string, unknown> | null,
-    shareHistory: (sharesResult.data ?? []) as Record<string, unknown>[],
+    shareHistory,
   };
   const dataChecksum = checksum(data);
   const exportedAt = new Date().toISOString();
