@@ -127,7 +127,9 @@ h1 { line-height: 1.05; margin: 0; font-size: clamp(2.5rem, 6vw, 4.2rem); overfl
 .notification-summary-card p { flex-basis: 100%; }
 .notification-summary-card span { background: var(--accent-soft); border: 1px solid #dbeafe; border-radius: var(--radius-pill); color: var(--accent-dark); font-size: .86rem; font-weight: 800; padding: 7px 10px; }
 .notification-summary-card button { background: var(--accent); border: 0; border-radius: var(--radius-md); color: #fff; font-weight: 800; justify-self: start; padding: 10px 16px; white-space: nowrap; }
-.notification-summary-card .notification-detail-button { align-items: center; display: inline-flex; font-size: 1.35rem; height: 38px; justify-content: center; line-height: 1; padding: 0; width: 38px; }
+.notification-summary-card .notification-detail-button { align-items: center; box-shadow: 0 3px 10px rgba(37, 99, 235, .2); display: inline-flex; height: 38px; justify-content: center; line-height: 1; padding: 0; width: 38px; }
+.notification-detail-button svg { transition: transform .18s ease; }
+.notification-detail-button[aria-expanded="true"] svg { transform: rotate(180deg); }
 .notification-summary-card button:hover { background: var(--accent-dark); }
 .modal-task-tools { align-items: center; display: grid; gap: 10px; grid-template-columns: 1fr auto; }
 .modal-task-tools span { background: var(--accent-soft); border: 1px solid #dbeafe; border-radius: var(--radius-pill); color: var(--accent-dark); font-size: .82rem; font-weight: 800; padding: 7px 10px; white-space: nowrap; }
@@ -204,8 +206,10 @@ textarea { resize: vertical; min-height: 86px; }
 .focus-button.active { background: #fef3c7; border-color: #f59e0b; color: #b45309; }
 .task-edit-button { align-items: center; background: var(--surface); border: 1px solid #bfdbfe; border-radius: var(--radius-md); color: var(--accent-dark); display: inline-flex; font-size: 1rem; height: 34px; justify-content: center; line-height: 1; padding: 0; width: 34px; }
 .task-edit-button:hover { background: var(--accent-soft); border-color: var(--accent); }
-.task-share-button { align-items: center; background: var(--surface); border: 1px solid #bfdbfe; border-radius: var(--radius-md); color: var(--accent-dark); display: inline-flex; font-size: 1rem; height: 34px; justify-content: center; line-height: 1; padding: 0; position: relative; width: 34px; }
-.task-share-button:hover, .task-share-button.active { background: var(--accent-soft); border-color: var(--accent); }
+.task-share-button { align-items: center; background: var(--surface); border: 1px solid #bfdbfe; border-radius: var(--radius-md); color: var(--accent-dark); display: inline-flex; height: 34px; justify-content: center; line-height: 1; padding: 0; position: relative; transition: background .18s ease, border-color .18s ease, box-shadow .18s ease, color .18s ease, transform .18s ease; width: 34px; }
+.task-share-button:hover { background: var(--accent-soft); border-color: var(--accent); box-shadow: 0 3px 10px rgba(37, 99, 235, .18); transform: translateY(-1px); }
+.task-share-button.active { background: var(--accent); border-color: var(--accent); color: #fff; box-shadow: 0 3px 10px rgba(37, 99, 235, .22); }
+.task-share-button svg { flex: 0 0 auto; }
 .task-share-button small { align-items: center; background: var(--accent); border: 2px solid var(--surface); border-radius: 999px; color: #fff; display: inline-flex; font-size: .62rem; font-weight: 900; height: 18px; inset: -7px auto auto -7px; justify-content: center; min-width: 18px; padding: 0 3px; position: absolute; }
 .kanban-focus { justify-self: start; margin-bottom: 4px; }
 .task-complete-button { align-items: center; background: var(--surface); border: 1px solid #bfdbfe; border-radius: var(--radius-md); color: var(--accent-dark); display: inline-flex; font-size: .78rem; font-weight: 900; height: 34px; justify-content: center; line-height: 1; padding: 0 10px; white-space: nowrap; }
@@ -808,7 +812,8 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
   border-color: #315f95;
   color: var(--accent-dark);
 }
-[data-theme="dark"] .task-share-button { background: #111827; border-color: #315f95; color: var(--accent-dark); }
+[data-theme="dark"] .task-share-button:not(.active) { background: #111827; border-color: #315f95; color: var(--accent-dark); }
+[data-theme="dark"] .task-share-button.active { background: var(--accent); border-color: #60a5fa; color: #fff; }
 [data-theme="dark"] .assignment-history article { background: #111827; }
 [data-theme="dark"] .auth-status-error {
   background: rgba(127, 29, 29, .28);

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ChangeEvent, Dispatch, FormEvent, SetStateAction } from "react";
 import type { User } from "@supabase/supabase-js";
+import { ChevronDown, Share2 } from "lucide-react";
 import type { AssistantMessage, AssistantProposedAction, AssistantThread } from "@/lib/assistant";
 import { canonicalTaskId, initialTasks, Task, TaskPrefix, TaskPriority, TaskStatus, TaskSubtask, TaskSubtaskStatus } from "@/lib/tasks";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
@@ -3933,7 +3934,7 @@ export default function Home() {
                           aria-expanded={isActiveDetail}
                           title={isActiveDetail ? "סגירת פירוט" : "פתיחת פירוט"}
                         >
-                          <span aria-hidden="true">{isActiveDetail ? "⌃" : "⌄"}</span>
+                          <ChevronDown aria-hidden="true" size={20} strokeWidth={2.5} />
                         </button>
                       </article>
                     );
@@ -4208,7 +4209,7 @@ export default function Home() {
                         aria-label={`פתיחת פרטי השיתוף של ${task.title}`}
                         title="שיתוף"
                       >
-                        <span aria-hidden="true">↗</span>
+                        <Share2 aria-hidden="true" size={18} strokeWidth={2.4} />
                         {!task.sharedWithMe && taskSharesForTask(task).length > 0 && (
                           <small aria-hidden="true">{taskSharesForTask(task).length}</small>
                         )}
@@ -5209,7 +5210,7 @@ export default function Home() {
                     aria-expanded={sharingPanelTaskId === taskEditorTask.id}
                     title="שיתוף"
                   >
-                    <span aria-hidden="true">↗</span>
+                    <Share2 aria-hidden="true" size={18} strokeWidth={2.4} />
                   </button>
                 )}
                 <button className="icon-button" onClick={closeTaskEditor} aria-label="סגירת חלונית משימה">×</button>
