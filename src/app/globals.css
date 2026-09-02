@@ -52,7 +52,7 @@
   box-sizing: border-box;
   font-family: var(--font-app);
 }
-html { font-family: var(--font-app); max-width: 100%; overflow-x: hidden; width: 100%; }
+html { font-family: var(--font-app); max-width: 100%; overflow-x: clip; width: 100%; }
 body {
   margin: 0;
   background:
@@ -61,7 +61,7 @@ body {
   color: var(--text);
   font-family: var(--font-app);
   max-width: 100%;
-  overflow-x: hidden;
+  overflow-x: clip;
   text-rendering: optimizeLegibility;
   width: 100%;
 }
