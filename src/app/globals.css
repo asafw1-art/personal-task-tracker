@@ -291,11 +291,12 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
 .floating-add:hover { background: var(--accent-dark); }
 .assistant-floating-button { align-items: center; background: linear-gradient(135deg, #111827, #2563eb); border: 1px solid rgba(255, 255, 255, .16); border-radius: 999px; bottom: 24px; box-shadow: 0 18px 42px rgba(17, 24, 39, 0.30); color: #fff; display: flex; font-weight: 900; height: 62px; justify-content: center; position: fixed; right: 24px; width: 62px; z-index: 25; }
 .assistant-floating-button:hover { background: linear-gradient(135deg, #1f2937, #1d4ed8); transform: translateY(-1px); }
-.assistant-chat { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; bottom: 96px; box-shadow: var(--shadow-strong); display: grid; gap: 12px; max-height: min(680px, calc(100vh - 120px)); overflow: hidden; padding: 0; position: fixed; right: 24px; width: min(470px, calc(100% - 32px)); z-index: 35; }
+.assistant-modal { align-items: flex-end; background: rgba(15, 23, 42, .42); bottom: auto; display: flex; height: 100dvh; inset-inline: 0; justify-content: flex-end; min-height: 0; padding: 24px; position: fixed; top: 0; z-index: 45; }
+.assistant-chat { background: var(--surface); border: 1px solid var(--border); border-radius: 18px; box-shadow: var(--shadow-strong); display: grid; gap: 0; grid-template-rows: auto minmax(0, 1fr) auto auto; max-height: min(680px, calc(100% - 48px)); overflow: hidden; padding: 0; position: relative; width: min(470px, calc(100% - 32px)); }
 .assistant-chat-header { align-items: flex-start; background: linear-gradient(135deg, var(--surface), var(--surface-muted)); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; gap: 12px; padding: 14px; }
 .assistant-chat-header h2 { font-size: 1.05rem; margin: 0; }
 .assistant-chat-header span { color: var(--muted); display: block; font-size: .86rem; line-height: 1.45; margin-top: 4px; }
-.assistant-messages { display: grid; gap: 10px; max-height: 410px; overflow: auto; padding: 14px; scroll-behavior: smooth; }
+.assistant-messages { align-content: start; display: grid; gap: 10px; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 14px; scroll-behavior: smooth; }
 .assistant-empty { background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 12px; color: var(--muted); display: grid; gap: 6px; line-height: 1.45; padding: 14px; }
 .assistant-empty strong { color: var(--text); }
 .assistant-message { border-radius: 14px; display: grid; gap: 7px; max-width: 92%; padding: 11px 13px; }
@@ -312,6 +313,7 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
 .assistant-form { background: var(--surface-soft); border-top: 1px solid var(--border); display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr) 42px; padding: 12px; }
 .assistant-form input { min-width: 0; }
 .assistant-form .assistant-send-button { align-items: center; display: inline-flex; font-size: 1.2rem; height: 42px; justify-content: center; padding: 0; width: 42px; }
+html.modal-open, html.modal-open body { overflow: hidden; overscroll-behavior: none; }
 .modal-backdrop { background: rgba(15, 23, 42, .34); bottom: 0; display: flex; justify-content: flex-start; left: 0; padding: 18px; position: fixed; right: 0; top: 0; z-index: 40; }
 .settings-drawer, .task-drawer { background: var(--bg); border: 1px solid var(--border); border-radius: 18px; box-shadow: 0 24px 70px rgba(15, 23, 42, .28); max-height: calc(100vh - 36px); overflow: auto; padding: 18px; width: min(620px, 100%); }
 .settings-drawer { width: min(820px, 100%); }
@@ -370,14 +372,23 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
 .subtask-add-inline:hover { background: #dbeafe; }
 .subtask-add-inline span:first-child { align-items: center; background: var(--accent); border-radius: 999px; color: #fff; display: inline-flex; height: 20px; justify-content: center; line-height: 1; width: 20px; }
 .subtasks-preview-list { display: grid; gap: 6px; list-style: none; margin: 0; padding: 0; }
-.subtasks-preview-item { align-items: center; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); display: grid; gap: 8px; grid-template-columns: minmax(150px, 1fr) minmax(105px, .5fr) minmax(105px, .5fr) minmax(100px, .45fr) 36px; padding: 8px; }
-.subtasks-preview-item input, .subtasks-preview-item select { padding: 8px 9px; }
-.subtasks-preview-item > input { grid-column: 1; }
-.subtasks-preview-item .subtask-action-select { grid-column: 2; }
-.subtasks-preview-item .subtask-assignee-select,
-.subtasks-preview-item .subtask-assignee-chip { grid-column: 3; }
-.subtasks-preview-item .subtask-status-select { grid-column: 4; }
-.subtasks-preview-item .subtask-delete { grid-column: 5; }
+.subtasks-preview-item { align-items: start; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); display: grid; gap: 10px; grid-template-columns: minmax(0, 1fr) auto; padding: 10px; }
+.subtask-read-main { background: transparent; border: 0; color: var(--text); display: grid; gap: 7px; min-width: 0; padding: 2px; text-align: right; }
+button.subtask-read-main { cursor: pointer; }
+.subtask-read-main strong { display: -webkit-box; font-size: .92rem; line-height: 1.45; overflow: hidden; overflow-wrap: anywhere; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.subtask-read-meta { display: flex; flex-wrap: wrap; gap: 5px; }
+.subtask-read-meta span { background: var(--surface-soft); border: 1px solid var(--border); border-radius: var(--radius-pill); color: var(--muted); font-size: .72rem; font-weight: 700; padding: 3px 7px; }
+.subtask-read-actions { display: flex; gap: 8px; }
+.subtask-read-actions button, .subtask-inline-actions button { align-items: center; border-radius: var(--radius-md); display: inline-flex; height: 40px; justify-content: center; padding: 0; width: 40px; }
+.subtask-quick-status { background: var(--surface); border: 1px solid #bfdbfe; color: var(--accent-dark); }
+.subtask-quick-status.is-done { background: var(--success); border-color: var(--success); color: #fff; }
+.subtask-read-edit, .subtask-inline-cancel { background: var(--surface); border: 1px solid var(--border); color: var(--muted); }
+.subtask-inline-editor { display: grid; gap: 8px; grid-column: 1 / -1; grid-template-columns: minmax(180px, 1fr) repeat(3, minmax(110px, .45fr)); }
+.subtask-inline-editor > input { grid-column: 1; }
+.subtask-inline-editor input, .subtask-inline-editor select { min-width: 0; padding: 8px 9px; }
+.subtask-inline-actions { display: flex; gap: 8px; grid-column: 1 / -1; justify-content: flex-start; }
+.subtask-inline-actions .subtask-inline-save { background: var(--accent); border: 1px solid var(--accent); color: #fff; gap: 6px; padding-inline: 12px; width: auto; }
+.subtask-inline-actions .subtask-delete { background: var(--surface); border: 1px solid #fecaca; color: #b91c1c; }
 .subtask-assignee-chip { align-items: center; background: var(--accent-soft); border: 1px solid #bfdbfe; border-radius: var(--radius-md); color: var(--accent-dark); display: inline-flex; font-size: .78rem; font-weight: 800; min-height: 36px; padding: 7px 9px; }
 .subtasks-preview-item.status-open { border-right: 4px solid var(--accent); }
 .subtasks-preview-item.status-done { background: #f0fdf4; border-color: #bbf7d0; }
@@ -435,7 +446,7 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
 .subtask-row-actions { display: flex; gap: 6px; }
 .subtask-delete { background: #fff; border: 1px solid #fecaca; border-radius: 10px; color: #b91c1c; font-weight: 800; padding: 10px 12px; white-space: nowrap; }
 .subtask-delete { align-items: center; display: inline-flex; justify-content: center; }
-.subtasks-preview-item .subtask-delete { height: 36px; padding: 0; width: 36px; }
+.subtasks-preview-item .subtask-delete { height: 40px; padding: 0; width: 40px; }
 .subtask-delete:hover { background: #fef2f2; color: #991b1b; }
 .taxonomy-panel { display: grid; gap: 14px; min-width: 0; padding: 18px; }
 .appearance-panel, .notification-settings-panel { display: grid; gap: 14px; padding: 18px; }
@@ -956,7 +967,7 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
   background: rgba(2, 6, 23, .72);
 }
 @media (max-width: 700px) {
-  main { max-width: calc(100vw - 20px); width: calc(100vw - 20px); padding: 18px 0 86px; }
+  main { max-width: calc(100vw - 20px); width: calc(100vw - 20px); padding: 18px 0 calc(112px + env(safe-area-inset-bottom)); }
   .hero { align-items: stretch; flex-direction: column; min-height: 0; padding: 20px 18px 18px; }
   .hero > div { padding-inline-end: 62px; }
   .hero h1 { padding-inline-start: 0; }
@@ -1041,20 +1052,21 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
   .bar-row { grid-template-columns: 82px 1fr 28px; }
   .subtask-load-row { grid-template-columns: auto 1fr; }
   .subtask-load-row > span:last-child { grid-column: 1 / -1; }
-  .task-card { gap: 10px; grid-template-columns: minmax(0, 1fr); padding: 14px 14px 14px 166px; }
+  .task-card { gap: 10px; grid-template-columns: minmax(0, 1fr); padding: 14px 14px 14px 176px; }
   .task-card:hover { transform: none; }
+  .task-card > .focus-button, .task-card > .task-edit-button, .task-card > .task-share-button, .task-card > .task-complete-button { height: 44px; width: 44px; }
   .task-card > .focus-button { left: 14px; position: absolute; top: 14px; }
-  .task-card > .task-edit-button { left: 54px; position: absolute; top: 14px; }
-  .task-card > .task-complete-button { left: 94px; position: absolute; top: 14px; }
-  .task-card > .owner-only-marker { left: 94px; position: absolute; top: 14px; }
-  .task-card.has-share-control { grid-template-columns: minmax(0, 1fr); padding-left: 96px; }
+  .task-card > .task-edit-button { left: 66px; position: absolute; top: 14px; }
+  .task-card > .task-complete-button { left: 118px; position: absolute; top: 14px; }
+  .task-card > .owner-only-marker { left: 118px; position: absolute; top: 14px; }
+  .task-card.has-share-control { grid-template-columns: minmax(0, 1fr); padding-left: 118px; }
   .task-card.has-share-control > .focus-button { left: 14px; top: 14px; }
-  .task-card.has-share-control > .task-edit-button { left: 54px; top: 14px; }
-  .task-card.has-share-control > .task-share-button { left: 14px; position: absolute; top: 54px; }
-  .task-card.has-share-control > .task-complete-button { font-size: 0; left: 54px; padding: 0; top: 54px; width: 34px; }
+  .task-card.has-share-control > .task-edit-button { left: 66px; top: 14px; }
+  .task-card.has-share-control > .task-share-button { left: 14px; position: absolute; top: 66px; }
+  .task-card.has-share-control > .task-complete-button { font-size: 0; left: 66px; padding: 0; top: 66px; width: 44px; }
   .task-card.has-share-control > .task-complete-button::before { content: "✓"; font-size: 1rem; }
   .task-card.has-share-control.status-done > .task-complete-button::before { content: "↶"; }
-  .task-card.has-share-control > .owner-only-marker { left: 54px; max-width: 42px; overflow: hidden; padding: 4px; text-overflow: ellipsis; top: 54px; white-space: nowrap; }
+  .task-card.has-share-control > .owner-only-marker { left: 66px; max-width: 44px; overflow: hidden; padding: 4px; text-overflow: ellipsis; top: 66px; white-space: nowrap; }
   .task-card.has-share-control > .task-main { grid-column: 1; grid-row: 1; }
   .task-card.has-share-control > .task-actions { grid-column: 1; grid-row: 2; }
   .task-main { grid-column: 1; grid-row: 1; }
@@ -1070,7 +1082,7 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
   .meta { gap: 5px; max-height: 58px; overflow: hidden; }
   .meta span { font-size: .76rem; padding: 3px 7px; }
   .quick-filters { display: grid; gap: 8px; grid-template-columns: repeat(3, minmax(0, 1fr)); justify-content: stretch; margin-inline: 0; overflow: visible; padding: 0 0 8px; }
-  .quick-filters button { min-height: 38px; min-width: 0; overflow: hidden; padding: 8px 8px; text-overflow: ellipsis; white-space: nowrap; }
+  .quick-filters button { min-height: 44px; min-width: 0; overflow: hidden; padding: 8px 8px; text-overflow: ellipsis; white-space: nowrap; }
   .subtasks-editor-header { align-items: start; display: grid; grid-template-columns: minmax(0, 1fr) auto; }
   .subtasks-editor-tools { align-items: stretch; flex-direction: column; }
   .subtasks-editor-progress { min-width: 0; padding: 6px 8px; }
@@ -1078,11 +1090,12 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
   .subtasks-editor-progress small { font-size: .7rem; }
   .subtasks-editor-header button { padding: 9px 10px; width: auto; }
   .subtasks-preview-panel { margin-top: 10px; }
-  .subtasks-preview-item { align-items: stretch; grid-template-columns: minmax(0, 1fr); }
-  .subtasks-preview-item input { grid-column: 1; }
-  .subtasks-preview-item select { grid-column: 1 / -1; }
-  .subtasks-preview-item .subtask-assignee-chip { grid-column: 1 / -1; }
-  .subtasks-preview-item .subtask-delete { grid-column: 1; grid-row: auto; width: 100%; }
+  .subtasks-preview-item { align-items: start; grid-template-columns: minmax(0, 1fr) auto; }
+  .subtask-read-actions button, .subtask-inline-actions button { height: 44px; width: 44px; }
+  .subtasks-preview-item .subtask-delete { height: 44px; width: 44px; }
+  .subtask-inline-editor { grid-template-columns: minmax(0, 1fr); }
+  .subtask-inline-editor > input, .subtask-inline-editor select, .subtask-inline-actions { grid-column: 1; }
+  .subtask-inline-actions .subtask-inline-save { width: auto; }
   .subtask-add-inline { justify-content: center; width: 100%; }
   .subtask-row { align-items: end; grid-template-columns: minmax(0, 1fr) 40px; }
   .subtask-title-field { grid-column: 1; grid-row: 1; }
@@ -1101,16 +1114,19 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
   .kanban-column { flex: 0 0 min(86vw, 330px); max-height: calc(100vh - 260px); min-height: 360px; min-width: 0; scroll-snap-align: start; }
   .kanban-card:hover, .metric-button:hover { transform: none; }
   .modal-backdrop { padding: 0; }
-  .settings-drawer, .task-drawer { border-radius: 0; max-height: 100vh; min-height: 100vh; width: 100%; }
+  .settings-drawer, .task-drawer { border-radius: 0; max-height: 100dvh; min-height: 100dvh; width: 100%; }
   .drawer-header { top: -18px; }
-  .drawer-actions { display: grid; }
+  .drawer-actions { display: block; padding-bottom: calc(18px + env(safe-area-inset-bottom)); }
   .drawer-actions button { width: 100%; }
-  .floating-add { bottom: 18px; height: 54px; left: 18px; width: 54px; }
-  .assistant-floating-button { bottom: 18px; height: 54px; right: 18px; width: 54px; }
-  .assistant-chat { bottom: 84px; left: 10px; right: 10px; width: auto; }
-  .assistant-chat-header { padding: 12px; }
-  .assistant-messages { padding: 12px; }
+  .floating-add { bottom: calc(18px + env(safe-area-inset-bottom)); height: 54px; left: 18px; width: 54px; }
+  .assistant-floating-button { bottom: calc(18px + env(safe-area-inset-bottom)); height: 54px; right: 18px; width: 54px; }
+  .assistant-modal { align-items: stretch; background: var(--bg); padding: 0; }
+  .assistant-chat { border: 0; border-radius: 0; box-shadow: none; height: 100%; max-height: none; width: 100%; }
+  .assistant-chat-header { padding: calc(12px + env(safe-area-inset-top)) 12px 12px; }
+  .assistant-messages { max-height: none; padding: 12px; }
+  .assistant-status { background: var(--surface); padding-block: 8px; }
   .assistant-form { grid-template-columns: minmax(0, 1fr) 42px; }
+  .assistant-form { padding-bottom: calc(12px + env(safe-area-inset-bottom)); }
   .assistant-form .assistant-send-button { width: 42px; }
 }
 @media (max-width: 430px) {
@@ -1131,8 +1147,8 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
   .panel-heading { align-items: stretch; flex-direction: column; }
   .bar-row { grid-template-columns: minmax(68px, 88px) 1fr 26px; gap: 8px; }
   .kanban-column { flex-basis: min(92vw, 340px); }
-  .assistant-chat { max-height: calc(100vh - 104px); }
-  .assistant-messages { max-height: min(340px, calc(100vh - 315px)); }
+  .assistant-chat { max-height: none; }
+  .assistant-messages { max-height: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

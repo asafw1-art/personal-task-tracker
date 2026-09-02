@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ChangeEvent, Dispatch, FormEvent, SetStateAction } from "react";
 import type { User } from "@supabase/supabase-js";
-import { ChevronDown, Share2 } from "lucide-react";
+import { Check, ChevronDown, Pencil, Share2, Trash2, X } from "lucide-react";
 import type { AssistantMessage, AssistantProposedAction, AssistantThread } from "@/lib/assistant";
 import { canonicalTaskId, initialTasks, Task, TaskPrefix, TaskPriority, TaskStatus, TaskSubtask, TaskSubtaskStatus } from "@/lib/tasks";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
@@ -191,8 +191,8 @@ type TaskDraft = {
 };
 
 type TaskEditorState =
-  | { mode: "create"; draft: TaskDraft }
-  | { mode: "edit"; taskId: string; draft: TaskDraft }
+  | { mode: "create"; draft: TaskDraft; initialDraft: TaskDraft }
+  | { mode: "edit"; taskId: string; draft: TaskDraft; initialDraft: TaskDraft }
   | null;
 
 const todayIso = () => {
@@ -827,7 +827,9 @@ export default function Home() {
   const [taskEditorError, setTaskEditorError] = useState("");
   const [expandedSubtaskTaskIds, setExpandedSubtaskTaskIds] = useState<Set<string>>(() => new Set());
   const [inlineSubtaskDrafts, setInlineSubtaskDrafts] = useState<Record<string, string>>({});
+  const [editingInlineSubtaskKey, setEditingInlineSubtaskKey] = useState<string | null>(null);
   const [isAssistantOpen, setIsAssistantOpen] = useState(false);
+  const [assistantViewport, setAssistantViewport] = useState({ height: 0, top: 0 });
   const [assistantThreadId, setAssistantThreadId] = useState<string | null>(null);
   const [assistantMessages, setAssistantMessages] = useState<AssistantMessage[]>([]);
   const [assistantInput, setAssistantInput] = useState("");
@@ -1388,7 +1390,8 @@ export default function Home() {
 
   const openCreateTask = useCallback(() => {
     setTaskEditorError("");
-    setTaskEditor({ mode: "create", draft: defaultTaskDraft(prefixFilter === "W" ? "W" : "P") });
+    const draft = defaultTaskDraft(prefixFilter === "W" ? "W" : "P");
+    setTaskEditor({ mode: "create", draft, initialDraft: draft });
   }, [prefixFilter]);
 
   const emptyTaskState = useMemo(() => {
@@ -1643,6 +1646,54 @@ export default function Home() {
     : visibleAppNotifications.some((notification) => notification.tone === "warn")
       ? "warn"
       : "neutral";
+  const hasBlockingOverlay = isAssistantOpen
+    || isSettingsOpen
+    || Boolean(taskEditor)
+    || isDriveOnboardingOpen
+    || Boolean(analyticsTaskModal)
+    || visibleAppNotifications.length > 0;
+
+  useEffect(() => {
+    if (!hasBlockingOverlay) return;
+    const scrollY = window.scrollY;
+    const previous = {
+      position: document.body.style.position,
+      top: document.body.style.top,
+      width: document.body.style.width,
+      overflow: document.body.style.overflow,
+    };
+    document.documentElement.classList.add("modal-open");
+    document.body.style.position = "fixed";
+    document.body.style.top = `-${scrollY}px`;
+    document.body.style.width = "100%";
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.documentElement.classList.remove("modal-open");
+      document.body.style.position = previous.position;
+      document.body.style.top = previous.top;
+      document.body.style.width = previous.width;
+      document.body.style.overflow = previous.overflow;
+      window.scrollTo(0, scrollY);
+    };
+  }, [hasBlockingOverlay]);
+
+  useEffect(() => {
+    if (!isAssistantOpen) return;
+    const viewport = window.visualViewport;
+    const syncViewport = () => setAssistantViewport({
+      height: Math.round(viewport?.height ?? window.innerHeight),
+      top: Math.round(viewport?.offsetTop ?? 0),
+    });
+    syncViewport();
+    viewport?.addEventListener("resize", syncViewport);
+    viewport?.addEventListener("scroll", syncViewport);
+    window.addEventListener("resize", syncViewport);
+    return () => {
+      viewport?.removeEventListener("resize", syncViewport);
+      viewport?.removeEventListener("scroll", syncViewport);
+      window.removeEventListener("resize", syncViewport);
+    };
+  }, [isAssistantOpen]);
 
   function tasksForAnalyticsAction(action: NonNullable<AnalyticsInsight["action"]>) {
     const normalized = canonicalTaskId(action.query ?? "");
@@ -2759,14 +2810,16 @@ export default function Home() {
   function openEditTask(task: Task) {
     setTaskEditorError("");
     setSharingPanelTaskId(null);
-    setTaskEditor({ mode: "edit", taskId: task.id, draft: taskToDraft(task) });
+    const draft = taskToDraft(task);
+    setTaskEditor({ mode: "edit", taskId: task.id, draft, initialDraft: draft });
   }
 
   function openTaskSharing(task: Task) {
     setTaskEditorError("");
     setSharingStatus("");
     setSharingPanelTaskId(task.id);
-    setTaskEditor({ mode: "edit", taskId: task.id, draft: taskToDraft(task) });
+    const draft = taskToDraft(task);
+    setTaskEditor({ mode: "edit", taskId: task.id, draft, initialDraft: draft });
   }
 
   function toggleTaskSubtasks(taskId: string) {
@@ -2839,13 +2892,25 @@ export default function Home() {
   function commitInlineSubtaskDraft(taskId: string, subtaskNumber: number, fallbackTitle: string) {
     const key = inlineSubtaskDraftKey(taskId, subtaskNumber);
     const nextTitle = inlineSubtaskDrafts[key];
-    if (nextTitle === undefined || nextTitle === fallbackTitle) return;
-    updateTaskSubtask(taskId, subtaskNumber, { title: nextTitle });
+    if (nextTitle === undefined) return;
+    if (nextTitle !== fallbackTitle) updateTaskSubtask(taskId, subtaskNumber, { title: nextTitle });
     setInlineSubtaskDrafts((current) => {
       const next = { ...current };
       delete next[key];
       return next;
     });
+  }
+
+  function startInlineSubtaskEditing(task: Task, subtask: TaskSubtask) {
+    if (!isOwnTask(task, cloudUser)) return;
+    const key = inlineSubtaskDraftKey(task.id, subtask.number);
+    setInlineSubtaskDrafts((current) => ({ ...current, [key]: subtask.title }));
+    setEditingInlineSubtaskKey(key);
+  }
+
+  function finishInlineSubtaskEditing(task: Task, subtask: TaskSubtask) {
+    commitInlineSubtaskDraft(task.id, subtask.number, subtask.title);
+    setEditingInlineSubtaskKey(null);
   }
 
   function deleteTaskSubtask(taskId: string, subtaskNumber: number) {
@@ -3171,6 +3236,13 @@ export default function Home() {
     setTaskEditor(null);
     setTaskEditorError("");
     setSharingPanelTaskId(null);
+  }
+
+  function requestCloseTaskEditor() {
+    if (!taskEditor) return;
+    const hasUnsavedChanges = JSON.stringify(taskEditor.draft) !== JSON.stringify(taskEditor.initialDraft);
+    if (hasUnsavedChanges && !window.confirm("יש שינויים שלא נשמרו. לצאת בלי לשמור?")) return;
+    closeTaskEditor();
   }
 
   function saveTaskEditor(event: FormEvent) {
@@ -3712,74 +3784,123 @@ export default function Home() {
               </button>
             )}
             <ul className="subtasks-preview-list">
-              {subtasks.map((subtask) => (
-                <li className={`subtasks-preview-item status-${subtask.status}`} key={subtask.id}>
-                  <input
-                    {...freeTextInputProps}
-                    value={inlineSubtaskDrafts[inlineSubtaskDraftKey(task.id, subtask.number)] ?? subtask.title}
-                    onChange={(event) => updateInlineSubtaskDraft(task.id, subtask.number, event.target.value)}
-                    onBlur={() => commitInlineSubtaskDraft(task.id, subtask.number, subtask.title)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        commitInlineSubtaskDraft(task.id, subtask.number, subtask.title);
-                        event.currentTarget.blur();
-                      }
-                    }}
-                    placeholder="צעד טיפול חדש"
-                    aria-label={subtask.title ? `שם צעד טיפול ${subtask.title}` : "שם צעד טיפול חדש"}
-                    disabled={!isOwnTask(task, cloudUser)}
-                  />
-                  <select
-                    className="subtask-action-select"
-                    value={subtask.actionType ?? ""}
-                    onChange={(event) => updateTaskSubtask(task.id, subtask.number, { actionType: event.target.value })}
-                    aria-label={subtask.title ? `פעולה עבור ${subtask.title}` : "פעולה עבור צעד טיפול חדש"}
-                    disabled={!isOwnTask(task, cloudUser)}
-                  >
-                    <option value="">ללא פעולה</option>
-                    {actionOptions.map((action) => <option value={action} key={action}>{action}</option>)}
-                  </select>
-                  {isOwnTask(task, cloudUser) && task.cloudId && acceptedContributorsForTask(task).length > 0 && (
-                    <select
-                      className="subtask-assignee-select"
-                      value={activeSubtaskAssignment(task, subtask.number)?.shareId ?? ""}
-                      onChange={(event) => changeSubtaskAssignment(task, subtask.number, event.target.value)}
-                      aria-label={subtask.title ? `אחראי על ${subtask.title}` : "אחראי על צעד הטיפול"}
-                    >
-                      <option value="">ללא אחראי</option>
-                      {acceptedContributorsForTask(task).map((share) => (
-                        <option value={share.id} key={share.id}>{share.recipientDisplayName || share.sharedWithEmail}</option>
-                      ))}
-                    </select>
-                  )}
-                  {task.sharedWithMe && (
-                    <span className="subtask-assignee-chip">
-                      {activeSubtaskAssignment(task, subtask.number)
-                        ? assignmentDisplayName(activeSubtaskAssignment(task, subtask.number) as TaskSubtaskAssignment)
-                        : "ללא אחראי"}
+              {subtasks.map((subtask) => {
+                const draftKey = inlineSubtaskDraftKey(task.id, subtask.number);
+                const isEditing = editingInlineSubtaskKey === draftKey && isOwnTask(task, cloudUser);
+                const assignment = activeSubtaskAssignment(task, subtask.number);
+                const canChangeStatus = !task.historicalShared && (!task.sharedWithMe || canUpdateSharedSubtask(task, subtask.number));
+                const readContent = (
+                  <>
+                    <strong>{subtask.title || "צעד ללא תיאור"}</strong>
+                    <span className="subtask-read-meta">
+                      <span>{subtaskStatusLabels[subtask.status]}</span>
+                      {subtask.actionType && <span>{subtask.actionType}</span>}
+                      {assignment && <span>{assignmentDisplayName(assignment)}</span>}
                     </span>
-                  )}
-                  <select
-                    className="subtask-status-select"
-                    value={subtask.status}
-                    onChange={(event) => updateTaskSubtask(task.id, subtask.number, { status: event.target.value as TaskSubtaskStatus })}
-                    aria-label={subtask.title ? `סטטוס עבור ${subtask.title}` : "סטטוס עבור צעד טיפול חדש"}
-                    disabled={Boolean(task.historicalShared || (task.sharedWithMe && !canUpdateSharedSubtask(task, subtask.number)))}
-                  >
-                    {Object.entries(subtaskStatusLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
-                  </select>
-                  <button
-                    type="button"
-                    className="subtask-delete"
-                    onClick={() => deleteTaskSubtask(task.id, subtask.number)}
-                    aria-label={subtask.title ? `מחיקת צעד טיפול ${subtask.title}` : "מחיקת צעד טיפול חדש"}
-                    title="מחיקה"
-                    disabled={!isOwnTask(task, cloudUser)}
-                  >
-                    ×
-                  </button>
-                </li>
-              ))}
+                  </>
+                );
+
+                return (
+                  <li className={`subtasks-preview-item status-${subtask.status}${isEditing ? " is-editing" : ""}`} key={subtask.id}>
+                    {isEditing ? (
+                      <div className="subtask-inline-editor">
+                        <input
+                          {...freeTextInputProps}
+                          value={inlineSubtaskDrafts[draftKey] ?? subtask.title}
+                          onChange={(event) => updateInlineSubtaskDraft(task.id, subtask.number, event.target.value)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter" && event.currentTarget.value.trim()) finishInlineSubtaskEditing(task, subtask);
+                          }}
+                          placeholder="תיאור צעד הטיפול"
+                          aria-label={subtask.title ? `שם צעד טיפול ${subtask.title}` : "שם צעד טיפול חדש"}
+                          autoFocus
+                        />
+                        <select
+                          className="subtask-action-select"
+                          value={subtask.actionType ?? ""}
+                          onChange={(event) => updateTaskSubtask(task.id, subtask.number, { actionType: event.target.value })}
+                          aria-label={subtask.title ? `פעולה עבור ${subtask.title}` : "פעולה עבור צעד טיפול חדש"}
+                        >
+                          <option value="">ללא פעולה</option>
+                          {actionOptions.map((action) => <option value={action} key={action}>{action}</option>)}
+                        </select>
+                        {task.cloudId && acceptedContributorsForTask(task).length > 0 && (
+                          <select
+                            className="subtask-assignee-select"
+                            value={assignment?.shareId ?? ""}
+                            onChange={(event) => changeSubtaskAssignment(task, subtask.number, event.target.value)}
+                            aria-label={subtask.title ? `אחראי על ${subtask.title}` : "אחראי על צעד הטיפול"}
+                          >
+                            <option value="">ללא אחראי</option>
+                            {acceptedContributorsForTask(task).map((share) => (
+                              <option value={share.id} key={share.id}>{share.recipientDisplayName || share.sharedWithEmail}</option>
+                            ))}
+                          </select>
+                        )}
+                        <select
+                          className="subtask-status-select"
+                          value={subtask.status}
+                          onChange={(event) => updateTaskSubtask(task.id, subtask.number, { status: event.target.value as TaskSubtaskStatus })}
+                          aria-label={subtask.title ? `סטטוס עבור ${subtask.title}` : "סטטוס עבור צעד טיפול חדש"}
+                        >
+                          {Object.entries(subtaskStatusLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
+                        </select>
+                        <div className="subtask-inline-actions">
+                          <button
+                            type="button"
+                            className="subtask-inline-save"
+                            onClick={() => finishInlineSubtaskEditing(task, subtask)}
+                            disabled={!(inlineSubtaskDrafts[draftKey] ?? subtask.title).trim()}
+                          >
+                            <Check aria-hidden="true" size={17} />
+                            <span>שמירה</span>
+                          </button>
+                          <button type="button" className="subtask-inline-cancel" onClick={() => setEditingInlineSubtaskKey(null)} aria-label="סגירת עריכת הצעד" title="סגירה">
+                            <X aria-hidden="true" size={17} />
+                          </button>
+                          <button
+                            type="button"
+                            className="subtask-delete"
+                            onClick={() => deleteTaskSubtask(task.id, subtask.number)}
+                            aria-label={subtask.title ? `מחיקת צעד טיפול ${subtask.title}` : "מחיקת צעד טיפול חדש"}
+                            title="מחיקה"
+                          >
+                            <Trash2 aria-hidden="true" size={17} />
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        {isOwnTask(task, cloudUser) ? (
+                          <button type="button" className="subtask-read-main" onClick={() => startInlineSubtaskEditing(task, subtask)} aria-label={`עריכת צעד טיפול ${subtask.title}`}>
+                            {readContent}
+                          </button>
+                        ) : (
+                          <div className="subtask-read-main">{readContent}</div>
+                        )}
+                        <div className="subtask-read-actions">
+                          <button
+                            type="button"
+                            className={`subtask-quick-status${subtask.status === "done" ? " is-done" : ""}`}
+                            onClick={() => updateTaskSubtask(task.id, subtask.number, { status: subtask.status === "done" ? "open" : "done" })}
+                            disabled={!canChangeStatus}
+                            aria-label={subtask.status === "done" ? `סימון ${subtask.title} כטרם בוצע` : `סימון ${subtask.title} כבוצע`}
+                            aria-pressed={subtask.status === "done"}
+                            title={subtask.status === "done" ? "החזרה לביצוע" : "סימון כבוצע"}
+                          >
+                            <Check aria-hidden="true" size={18} strokeWidth={2.6} />
+                          </button>
+                          {isOwnTask(task, cloudUser) && (
+                            <button type="button" className="subtask-read-edit" onClick={() => startInlineSubtaskEditing(task, subtask)} aria-label={`עריכת צעד טיפול ${subtask.title}`} title="עריכה">
+                              <Pencil aria-hidden="true" size={17} />
+                            </button>
+                          )}
+                        </div>
+                      </>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           </div>
         )}
@@ -4115,14 +4236,24 @@ export default function Home() {
                 </button>
                 <div className={`advanced-filters${isMobileFiltersOpen ? " open" : ""}`}>
                   <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as typeof statusFilter)} aria-label="סינון סטטוס">
-                    <option value="active">משימות פעילות</option>
-                    <option value="open">פתוחות</option>
-                    <option value="in_progress">בטיפול</option>
-                    <option value="waiting">ממתינות</option>
-                    <option value="focused">במיקוד</option>
-                    <option value="done">בוצעו</option>
-                    <option value="cancelled">בוטלו</option>
-                    <option value="all">הכול</option>
+                    <optgroup label="מצב משימה">
+                      <option value="active">משימות פעילות</option>
+                      <option value="open">פתוחות</option>
+                      <option value="in_progress">בטיפול</option>
+                      <option value="waiting">ממתינות</option>
+                      <option value="done">בוצעו</option>
+                      <option value="cancelled">בוטלו</option>
+                      <option value="all">הכול</option>
+                    </optgroup>
+                    <optgroup label="סינון ממוקד">
+                      <option value="today">להיום</option>
+                      <option value="week">השבוע</option>
+                      <option value="overdue">באיחור</option>
+                      <option value="no_due">בלי יעד</option>
+                      <option value="high">עדיפות גבוהה</option>
+                      <option value="focused">במיקוד</option>
+                      <option value="subtasks_open">צעדים פתוחים</option>
+                    </optgroup>
                   </select>
                   <select value={shareFilter} onChange={(e) => setShareFilter(e.target.value as ShareFilter)} aria-label="סינון שיתוף">
                     <option value="all">כל המשימות</option>
@@ -4166,7 +4297,6 @@ export default function Home() {
                 <button className={statusFilter === "today" ? "active" : ""} onClick={() => setStatusFilter("today")}>להיום</button>
                 <button className={statusFilter === "week" ? "active" : ""} onClick={() => setStatusFilter("week")}>השבוע</button>
                 <button className={statusFilter === "overdue" ? "active" : ""} onClick={() => setStatusFilter("overdue")}>באיחור</button>
-                <button className={statusFilter === "no_due" ? "active" : ""} onClick={() => setStatusFilter("no_due")}>בלי יעד</button>
                 <button className={statusFilter === "high" ? "active" : ""} onClick={() => setStatusFilter("high")}>גבוהה</button>
                 <button className={statusFilter === "focused" ? "active" : ""} onClick={() => setStatusFilter("focused")}>במיקוד</button>
                 <button className={statusFilter === "subtasks_open" ? "active" : ""} onClick={() => setStatusFilter("subtasks_open")}>צעדים פתוחים</button>
@@ -4276,7 +4406,7 @@ export default function Home() {
                 ))}
               </section>
 
-              {!isAssistantOpen && (
+              {!hasBlockingOverlay && (
                 <button className="floating-add" onClick={openCreateTask} aria-label="הוספת משימה חדשה">+</button>
               )}
             </>
@@ -4624,7 +4754,7 @@ export default function Home() {
 
       {cloudUser && (
         <>
-          {!isAssistantOpen && (
+          {!hasBlockingOverlay && (
             <button
               className="assistant-floating-button"
               onClick={() => setIsAssistantOpen(true)}
@@ -4635,63 +4765,69 @@ export default function Home() {
           )}
 
           {isAssistantOpen && (
-            <section className="assistant-chat" aria-label="צ׳ט AI למשימות">
-              <div className="assistant-chat-header">
-                <div>
-                  <p className="eyebrow">עוזר משימות</p>
-                  <h2>צ׳ט AI</h2>
-                  <span>פעולות מוצעות בלבד, וכל שינוי דורש אישור שלך.</span>
-                </div>
-                <button className="icon-button" onClick={() => setIsAssistantOpen(false)} aria-label="סגירת צ׳ט AI">×</button>
-              </div>
-
-              <div className="assistant-messages" aria-live="polite" ref={assistantMessagesRef}>
-                {assistantMessages.length === 0 ? (
-                  <div className="assistant-empty">
-                    <strong>אפשר להתחיל בשאלה קצרה</strong>
-                    <span>למשל: מה כדאי לעשות עכשיו? או תוסיף משימה להתקשר לרואה חשבון.</span>
+            <div
+              className="assistant-modal"
+              role="presentation"
+              style={assistantViewport.height ? { height: `${assistantViewport.height}px`, top: `${assistantViewport.top}px` } : undefined}
+            >
+              <section className="assistant-chat" role="dialog" aria-modal="true" aria-label="צ׳ט AI למשימות">
+                <div className="assistant-chat-header">
+                  <div>
+                    <p className="eyebrow">עוזר משימות</p>
+                    <h2>צ׳ט AI</h2>
+                    <span>פעולות מוצעות בלבד, וכל שינוי דורש אישור שלך.</span>
                   </div>
-                ) : assistantMessages.map((message) => (
-                  <article className={`assistant-message role-${message.role}`} key={message.id}>
-                    <span className="assistant-message-meta">{message.role === "user" ? "אני" : "עוזר המשימות"}</span>
-                    <p>{message.content}</p>
-                    {message.proposedAction && (
-                      <div className="assistant-action-card">
-                        <span>{assistantActionDescription(message.proposedAction)}</span>
-                        <button
-                          onClick={() => approveAssistantAction(message)}
-                          disabled={message.actionStatus === "done"}
-                        >
-                          {message.actionStatus === "done" ? "בוצע" : message.proposedAction.label}
-                        </button>
-                      </div>
-                    )}
-                  </article>
-                ))}
-              </div>
+                  <button className="icon-button" onClick={() => setIsAssistantOpen(false)} aria-label="סגירת צ׳ט AI">×</button>
+                </div>
 
-              <p className="assistant-status">{assistantStatus}</p>
+                <div className="assistant-messages" aria-live="polite" ref={assistantMessagesRef}>
+                  {assistantMessages.length === 0 ? (
+                    <div className="assistant-empty">
+                      <strong>אפשר להתחיל בשאלה קצרה</strong>
+                      <span>למשל: מה כדאי לעשות עכשיו? או תוסיף משימה להתקשר לרואה חשבון.</span>
+                    </div>
+                  ) : assistantMessages.map((message) => (
+                    <article className={`assistant-message role-${message.role}`} key={message.id}>
+                      <span className="assistant-message-meta">{message.role === "user" ? "אני" : "עוזר המשימות"}</span>
+                      <p>{message.content}</p>
+                      {message.proposedAction && (
+                        <div className="assistant-action-card">
+                          <span>{assistantActionDescription(message.proposedAction)}</span>
+                          <button
+                            onClick={() => approveAssistantAction(message)}
+                            disabled={message.actionStatus === "done"}
+                          >
+                            {message.actionStatus === "done" ? "בוצע" : message.proposedAction.label}
+                          </button>
+                        </div>
+                      )}
+                    </article>
+                  ))}
+                </div>
 
-              <form className="assistant-form" onSubmit={sendAssistantMessage}>
-                <input
-                  {...freeTextInputProps}
-                  value={assistantInput}
-                  onChange={(event) => setAssistantInput(event.target.value)}
-                  placeholder="כתוב לעוזר המשימות..."
-                  aria-label="הודעה לצ׳ט AI"
-                  disabled={assistantIsSending || !assistantThreadId}
-                />
-                <button
-                  type="submit"
-                  className="assistant-send-button"
-                  disabled={assistantIsSending || !assistantInput.trim() || !assistantThreadId}
-                  aria-label="שליחת הודעה"
-                  title="שליחה"
-                >
-                  <span aria-hidden="true">↑</span>
-                </button>
-              </form>
-            </section>
+                <p className="assistant-status">{assistantStatus}</p>
+
+                <form className="assistant-form" onSubmit={sendAssistantMessage}>
+                  <input
+                    {...freeTextInputProps}
+                    value={assistantInput}
+                    onChange={(event) => setAssistantInput(event.target.value)}
+                    placeholder="כתוב לעוזר המשימות..."
+                    aria-label="הודעה לצ׳ט AI"
+                    disabled={assistantIsSending || !assistantThreadId}
+                  />
+                  <button
+                    type="submit"
+                    className="assistant-send-button"
+                    disabled={assistantIsSending || !assistantInput.trim() || !assistantThreadId}
+                    aria-label="שליחת הודעה"
+                    title="שליחה"
+                  >
+                    <span aria-hidden="true">↑</span>
+                  </button>
+                </form>
+              </section>
+            </div>
           )}
         </>
       )}
@@ -5213,7 +5349,7 @@ export default function Home() {
                     <Share2 aria-hidden="true" size={18} strokeWidth={2.4} />
                   </button>
                 )}
-                <button className="icon-button" onClick={closeTaskEditor} aria-label="סגירת חלונית משימה">×</button>
+                <button className="icon-button" onClick={requestCloseTaskEditor} aria-label="סגירת חלונית משימה">×</button>
               </div>
             </div>
 
@@ -5465,10 +5601,11 @@ export default function Home() {
                 <p className="editor-help">המספר ייווצר אוטומטית לפי הרצף הקיים ולא ניתן לבחור אותו ידנית.</p>
               )}
               {taskEditorError && <p className="editor-error">{taskEditorError}</p>}
-              <div className="drawer-actions">
-                {!taskEditorIsHistorical && <button type="submit">{taskEditor.mode === "create" ? "יצירת משימה" : taskEditorIsShared ? "שמירת סטטוס צעדים" : "שמירת שינויים"}</button>}
-                <button type="button" className="secondary-action" onClick={closeTaskEditor}>{taskEditorIsHistorical ? "סגירה" : "ביטול"}</button>
-              </div>
+              {!taskEditorIsHistorical && (
+                <div className="drawer-actions">
+                  <button type="submit">{taskEditor.mode === "create" ? "יצירת משימה" : taskEditorIsShared ? "שמירת סטטוס צעדים" : "שמירת שינויים"}</button>
+                </div>
+              )}
             </form>
           </section>
         </div>
