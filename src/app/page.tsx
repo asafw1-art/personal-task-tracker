@@ -849,6 +849,7 @@ export default function Home() {
   } | null>(null);
   const [modalTaskQuery, setModalTaskQuery] = useState("");
   const assistantMessagesRef = useRef<HTMLDivElement | null>(null);
+  const heroCollapseSentinelRef = useRef<HTMLSpanElement | null>(null);
   const [cloudStatus, setCloudStatus] = useState(
     isSupabaseConfigured ? "בודק חיבור ל-Supabase..." : "Supabase עדיין לא מוגדר. עובדים במצב מקומי."
   );
@@ -1656,24 +1657,19 @@ export default function Home() {
 
   useEffect(() => {
     const mobileViewport = window.matchMedia("(max-width: 700px)");
-    let animationFrame = 0;
-    const syncHero = () => {
-      window.cancelAnimationFrame(animationFrame);
-      animationFrame = window.requestAnimationFrame(() => {
-        if (!mobileViewport.matches) {
-          setIsMobileHeroCompact(false);
-          return;
-        }
-        setIsMobileHeroCompact((current) => window.scrollY <= 8 ? false : window.scrollY > 96 ? true : current);
-      });
+    const sentinel = heroCollapseSentinelRef.current;
+    if (!sentinel) return;
+    const observer = new IntersectionObserver(([entry]) => {
+      setIsMobileHeroCompact(mobileViewport.matches && !entry.isIntersecting);
+    }, { rootMargin: "-64px 0px 0px", threshold: 0 });
+    const syncViewport = () => {
+      if (!mobileViewport.matches) setIsMobileHeroCompact(false);
     };
-    syncHero();
-    window.addEventListener("scroll", syncHero, { passive: true });
-    mobileViewport.addEventListener("change", syncHero);
+    observer.observe(sentinel);
+    mobileViewport.addEventListener("change", syncViewport);
     return () => {
-      window.cancelAnimationFrame(animationFrame);
-      window.removeEventListener("scroll", syncHero);
-      mobileViewport.removeEventListener("change", syncHero);
+      observer.disconnect();
+      mobileViewport.removeEventListener("change", syncViewport);
     };
   }, []);
 
@@ -3969,6 +3965,7 @@ export default function Home() {
           </button>
         )}
       </header>
+      <span className="hero-collapse-sentinel" ref={heroCollapseSentinelRef} aria-hidden="true" />
 
       {!authChecked ? (
         <LoadingSkeleton />

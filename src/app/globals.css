@@ -91,6 +91,7 @@ main { max-width: calc(100vw - 28px); width: min(1120px, calc(100% - 28px)); mar
 }
 .hero::before { background: linear-gradient(90deg, var(--accent), var(--success), var(--waiting)); content: ""; height: 5px; inset: 0 0 auto; position: absolute; }
 .hero > div { max-width: 100%; min-width: 0; }
+.hero-collapse-sentinel { display: block; height: 1px; margin-top: -1px; pointer-events: none; }
 .eyebrow { color: var(--accent); font-size: .92rem; font-weight: 800; letter-spacing: .02em; margin: 0 0 8px; }
 h1 { line-height: 1.05; margin: 0; font-size: clamp(2.5rem, 6vw, 4.2rem); overflow-wrap: anywhere; }
 .subtitle { color: var(--muted); font-size: 1.02rem; margin: 12px 0 0; }
