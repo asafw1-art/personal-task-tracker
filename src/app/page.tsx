@@ -823,6 +823,7 @@ export default function Home() {
   const [isCloudReady, setIsCloudReady] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isMobileFiltersOpen, setIsMobileFiltersOpen] = useState(false);
+  const [isMobileHeroCompact, setIsMobileHeroCompact] = useState(false);
   const [taskEditor, setTaskEditor] = useState<TaskEditorState>(null);
   const [taskEditorError, setTaskEditorError] = useState("");
   const [expandedSubtaskTaskIds, setExpandedSubtaskTaskIds] = useState<Set<string>>(() => new Set());
@@ -1652,6 +1653,29 @@ export default function Home() {
     || isDriveOnboardingOpen
     || Boolean(analyticsTaskModal)
     || visibleAppNotifications.length > 0;
+
+  useEffect(() => {
+    const mobileViewport = window.matchMedia("(max-width: 700px)");
+    let animationFrame = 0;
+    const syncHero = () => {
+      window.cancelAnimationFrame(animationFrame);
+      animationFrame = window.requestAnimationFrame(() => {
+        if (!mobileViewport.matches) {
+          setIsMobileHeroCompact(false);
+          return;
+        }
+        setIsMobileHeroCompact((current) => window.scrollY <= 8 ? false : window.scrollY > 96 ? true : current);
+      });
+    };
+    syncHero();
+    window.addEventListener("scroll", syncHero, { passive: true });
+    mobileViewport.addEventListener("change", syncHero);
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      window.removeEventListener("scroll", syncHero);
+      mobileViewport.removeEventListener("change", syncHero);
+    };
+  }, []);
 
   useEffect(() => {
     if (!hasBlockingOverlay) return;
@@ -3929,7 +3953,7 @@ export default function Home() {
 
   return (
     <main>
-      <header className="hero">
+      <header className={`hero${isMobileHeroCompact ? " is-compact" : ""}`}>
         <div>
           <p className="eyebrow">מעקב משימות אישי</p>
           <h1>{pageTitle}</h1>
@@ -4395,7 +4419,7 @@ export default function Home() {
                     </div>
                     <div className="task-actions">
                       {isOwnTask(task, cloudUser) ? (
-                        <select value={task.status} onChange={(e) => updateStatus(task.id, e.target.value as TaskStatus)} aria-label={`סטטוס ${task.title}`}>
+                        <select className={`task-status-select task-status-${task.status}`} value={task.status} onChange={(e) => updateStatus(task.id, e.target.value as TaskStatus)} aria-label={`סטטוס ${task.title}`}>
                           {Object.entries(statusLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
                         </select>
                       ) : (
@@ -4412,12 +4436,12 @@ export default function Home() {
             </>
           ) : (
             <section className="stats-view analytics-upgraded" aria-label="סטטיסטיקות משימות">
-              <div className="analytics-header">
+              <div className={`analytics-header${isMobileHeroCompact ? " is-compact" : ""}`}>
                 <div>
                   <h2>תמונת מצב</h2>
                   <p>מדדים, קצב סגירה ומשימות שדורשות תשומת לב.</p>
                 </div>
-                <div className="range-tabs" aria-label="טווח סטטיסטיקות">
+                <div className="range-tabs analytics-range-tabs" aria-label="טווח סטטיסטיקות">
                   <button className={analyticsRange === "week" ? "active" : ""} onClick={() => setAnalyticsRange("week")}>7 ימים</button>
                   <button className={analyticsRange === "month" ? "active" : ""} onClick={() => setAnalyticsRange("month")}>חודש</button>
                   <button className={analyticsRange === "all" ? "active" : ""} onClick={() => setAnalyticsRange("all")}>הכול</button>
@@ -4858,6 +4882,23 @@ export default function Home() {
               </div>
               <button className="icon-button" onClick={() => setIsSettingsOpen(false)} aria-label="סגירת הגדרות">×</button>
             </div>
+
+            <select
+              className="settings-mobile-select"
+              value={settingsTab}
+              onChange={(event) => {
+                const nextTab = event.target.value as SettingsTab;
+                setSettingsTab(nextTab);
+                if (nextTab === "admin") void refreshAdminOverview();
+              }}
+              aria-label="בחירת אזור הגדרות"
+            >
+              <option value="appearance">תצוגה</option>
+              <option value="taxonomy">נושאים ופעולות</option>
+              <option value="notifications">התראות</option>
+              <option value="sync">חיבור, סנכרון וגיבוי</option>
+              {cloudUser?.email?.toLowerCase() === "asafw1@gmail.com" && <option value="admin">ניהול</option>}
+            </select>
 
             <div className="settings-tabs" aria-label="אזורי הגדרות">
               <button className={settingsTab === "appearance" ? "active" : ""} onClick={() => setSettingsTab("appearance")}>
