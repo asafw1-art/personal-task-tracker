@@ -107,7 +107,8 @@
 לפני כל סבב עבודה:
 
 1. לקרוא את `AGENTS.md` ואת `docs/internal/project-handoff.md`.
-2. לקרוא באמצעות חיפוש ממוקד רק את הסעיפים הרלוונטיים ב-`docs/internal/project-backlog.md`.
-3. לבדוק ב-`docs/internal/project-task-log.md` אם המשימה כבר בוצעה או בוצעה חלקית.
-4. לבדוק ב-`docs/internal/known-decisions.md` אם יש החלטה שמונעת כיוון מסוים.
-5. אחרי ביצוע, לעדכן את מסמך החפיפה, היומן וה-Backlog לפי הצורך באותו commit או ב-commit צמוד.
+2. להשתמש ב-`docs/internal/project-handoff-deep.md` לחפיפה עמוקה או לקריאה ממוקדת של הסעיפים הנוגעים למשימה; אין צורך לקרוא אותו בשלמותו בכל סבב.
+3. לקרוא באמצעות חיפוש ממוקד רק את הסעיפים הרלוונטיים ב-`docs/internal/project-backlog.md`.
+4. לבדוק ב-`docs/internal/project-task-log.md` אם המשימה כבר בוצעה או בוצעה חלקית.
+5. לבדוק ב-`docs/internal/known-decisions.md` אם יש החלטה שמונעת כיוון מסוים.
+6. אחרי ביצוע, לעדכן את מסמך החפיפה, היומן וה-Backlog לפי הצורך באותו commit או ב-commit צמוד.
