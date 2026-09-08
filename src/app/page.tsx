@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ChangeEvent, Dispatch, FormEvent, SetStateAction } from "react";
 import type { User } from "@supabase/supabase-js";
-import { ArrowUp, Bell, Check, ChevronDown, CircleAlert, CircleCheck, LoaderCircle, Pencil, Share2, Sparkles, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Bell, Check, ChevronDown, CircleAlert, CircleCheck, LoaderCircle, Pencil, RotateCcw, Share2, Sparkles, Trash2, X } from "lucide-react";
 import { useNotificationReceipts } from "@/lib/useNotificationReceipts";
 import type { AssistantMessage, AssistantProposedAction, AssistantThread } from "@/lib/assistant";
 import { canonicalTaskId, initialTasks, Task, TaskPrefix, TaskPriority, TaskStatus, TaskSubtask, TaskSubtaskStatus } from "@/lib/tasks";
@@ -22,6 +22,7 @@ const TAXONOMY_STORAGE_KEY = "asaf-task-tracker-taxonomy-v1";
 const NOTIFICATION_PREFERENCES_STORAGE_KEY = "asaf-task-tracker-notification-preferences-v1";
 const ANALYTICS_PREFERENCES_STORAGE_KEY = "asaf-task-tracker-analytics-preferences-v1";
 const USER_SETTINGS_STORAGE_KEY = "asaf-task-tracker-user-settings-v1";
+const ASSISTANT_DRAFT_STORAGE_KEY = "asaf-task-tracker-assistant-draft-v1";
 const THEME_STORAGE_KEY = "asaf-task-tracker-theme-v1";
 const FOCUSED_TASKS_STORAGE_KEY = "asaf-task-tracker-focused-tasks-v1";
 const DEFAULT_STUCK_THRESHOLD_DAYS = 21;
@@ -720,6 +721,10 @@ function userSettingsStorageKey(userId: string) {
   return `${USER_SETTINGS_STORAGE_KEY}:${userId}`;
 }
 
+function assistantDraftStorageKey(userId: string, threadId: string) {
+  return `${ASSISTANT_DRAFT_STORAGE_KEY}:${userId}:${threadId}`;
+}
+
 function displayNameFromUser(user: User | null) {
   if (!user) return "";
   const metadata = user.user_metadata as Record<string, unknown>;
@@ -837,6 +842,11 @@ export default function Home() {
   const [assistantInput, setAssistantInput] = useState("");
   const [assistantStatus, setAssistantStatus] = useState("הצ׳ט ייטען אחרי התחברות לענן.");
   const [assistantIsSending, setAssistantIsSending] = useState(false);
+  const [assistantReplyRetry, setAssistantReplyRetry] = useState<{
+    message: string;
+    recentMessages: Array<{ role: "user" | "assistant"; content: string }>;
+  } | null>(null);
+  const [assistantHasUnreadMessages, setAssistantHasUnreadMessages] = useState(false);
   const [assistantMode, setAssistantMode] = useState<"ai" | "local" | "unavailable" | null>(null);
   const [assistantActionErrors, setAssistantActionErrors] = useState<Record<string, string>>({});
   const [assistantActionInFlightIds, setAssistantActionInFlightIds] = useState<Set<string>>(() => new Set());
@@ -857,6 +867,9 @@ export default function Home() {
   const [modalTaskQuery, setModalTaskQuery] = useState("");
   const assistantMessagesRef = useRef<HTMLDivElement | null>(null);
   const assistantActionsInFlightRef = useRef<Set<string>>(new Set());
+  const assistantIsNearBottomRef = useRef(true);
+  const assistantShouldScrollToBottomRef = useRef(false);
+  const assistantWasOpenRef = useRef(false);
   const heroCollapseSentinelRef = useRef<HTMLSpanElement | null>(null);
   const [cloudStatus, setCloudStatus] = useState(
     isSupabaseConfigured ? "בודק חיבור ל-Supabase..." : "Supabase עדיין לא מוגדר. עובדים במצב מקומי."
@@ -938,14 +951,50 @@ export default function Home() {
     window.localStorage.setItem(THEME_STORAGE_KEY, theme);
   }, [theme, themeLoaded]);
 
+  function scrollAssistantMessagesToBottom() {
+    const messagesElement = assistantMessagesRef.current;
+    if (!messagesElement) return;
+    messagesElement.scrollTop = messagesElement.scrollHeight;
+    assistantIsNearBottomRef.current = true;
+    assistantShouldScrollToBottomRef.current = false;
+    setAssistantHasUnreadMessages(false);
+  }
+
+  function handleAssistantMessagesScroll() {
+    const messagesElement = assistantMessagesRef.current;
+    if (!messagesElement) return;
+    const isNearBottom = messagesElement.scrollHeight - messagesElement.scrollTop - messagesElement.clientHeight < 96;
+    assistantIsNearBottomRef.current = isNearBottom;
+    if (isNearBottom) setAssistantHasUnreadMessages(false);
+  }
+
+  function updateAssistantDraft(value: string) {
+    setAssistantInput(value);
+    if (!cloudUser || !assistantThreadId) return;
+    const key = assistantDraftStorageKey(cloudUser.id, assistantThreadId);
+    if (value.trim()) window.localStorage.setItem(key, value);
+    else window.localStorage.removeItem(key);
+  }
+
   useEffect(() => {
-    if (!isAssistantOpen) return;
+    if (!cloudUser || !assistantThreadId) return;
     const timeoutId = window.setTimeout(() => {
-      const messagesElement = assistantMessagesRef.current;
-      if (!messagesElement) return;
-      messagesElement.scrollTop = messagesElement.scrollHeight;
+      setAssistantInput(window.localStorage.getItem(assistantDraftStorageKey(cloudUser.id, assistantThreadId)) ?? "");
     }, 0);
     return () => window.clearTimeout(timeoutId);
+  }, [assistantThreadId, cloudUser]);
+
+  useEffect(() => {
+    const openedNow = isAssistantOpen && !assistantWasOpenRef.current;
+    assistantWasOpenRef.current = isAssistantOpen;
+    if (!isAssistantOpen) return;
+
+    if (openedNow || assistantShouldScrollToBottomRef.current || assistantIsNearBottomRef.current) {
+      const timeoutId = window.setTimeout(scrollAssistantMessagesToBottom, 0);
+      return () => window.clearTimeout(timeoutId);
+    }
+
+    setAssistantHasUnreadMessages(true);
   }, [assistantMessages.length, isAssistantOpen]);
 
   useEffect(() => {
@@ -981,6 +1030,9 @@ export default function Home() {
       setUserCloudSettingsLoaded(false);
       setAssistantThreadId(null);
       setAssistantMessages([]);
+      setAssistantInput("");
+      setAssistantReplyRetry(null);
+      setAssistantHasUnreadMessages(false);
       setAssistantMode(null);
       setAssistantActionErrors({});
       setAssistantActionInFlightIds(new Set());
@@ -3122,6 +3174,8 @@ export default function Home() {
       const messages = await fetchAssistantMessages(thread.id);
       setAssistantThreadId(thread.id);
       setAssistantMessages(messages);
+      setAssistantReplyRetry(null);
+      setAssistantHasUnreadMessages(false);
       setAssistantMode(null);
       setAssistantActionErrors({});
       setIsAssistantOpen(true);
@@ -3147,8 +3201,11 @@ export default function Home() {
     setAssistantStatus("מעביר את שיחת ה-AI לשחזור ל-30 יום...");
     await softDeleteAssistantHistory(cloudUser);
     const thread = await getOrCreateAssistantThread(cloudUser);
+    updateAssistantDraft("");
     setAssistantThreadId(thread.id);
     setAssistantMessages([]);
+    setAssistantReplyRetry(null);
+    setAssistantHasUnreadMessages(false);
     setAssistantMode(null);
     setAssistantActionErrors({});
     await refreshDeletedAssistantThreadList();
@@ -3222,67 +3279,93 @@ export default function Home() {
     }
   }
 
+  async function requestAssistantReply(
+    message: string,
+    recentMessages: Array<{ role: "user" | "assistant"; content: string }>,
+  ) {
+    if (!cloudUser || !assistantThreadId || !supabase) throw new Error("השיחה אינה מוכנה עדיין.");
+
+    const session = await supabase.auth.getSession();
+    const token = session.data.session?.access_token;
+    if (!token) throw new Error("אין session פעיל.");
+
+    const response = await fetch("/api/assistant", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ message, tasks, taxonomy, recentMessages }),
+    });
+
+    const data = await response.json() as {
+      reply?: string;
+      proposedAction?: AssistantProposedAction;
+      mode?: "ai" | "local" | "unavailable";
+      error?: string;
+    };
+    if (!response.ok || data.error) throw new Error(data.error ?? "העוזר החזיר שגיאה.");
+
+    const assistantMessage = await addAssistantMessage(
+      assistantThreadId,
+      cloudUser,
+      "assistant",
+      data.reply ?? "לא התקבלה תשובה.",
+      data.proposedAction,
+      data.proposedAction ? "proposed" : undefined,
+    );
+    setAssistantMessages((current) => [...current, assistantMessage]);
+    setAssistantMode(data.mode ?? "ai");
+    if (data.mode === "local") {
+      setAssistantStatus("מצב מקומי: התשובה חושבה מנתוני האפליקציה בלבד, ללא ספק AI.");
+    } else if (data.mode === "unavailable") {
+      setAssistantStatus("ספק ה-AI אינו זמין כרגע. שאלות פשוטות על נתוני האפליקציה עדיין זמינות במצב מקומי.");
+    } else {
+      setAssistantStatus("");
+    }
+  }
+
+  async function retryAssistantResponse() {
+    if (!assistantReplyRetry || assistantIsSending) return;
+    setAssistantIsSending(true);
+    setAssistantStatus("מנסה לקבל תשובה מחדש...");
+
+    try {
+      await requestAssistantReply(assistantReplyRetry.message, assistantReplyRetry.recentMessages);
+      setAssistantReplyRetry(null);
+    } catch (error) {
+      setAssistantMode("unavailable");
+      setAssistantStatus(`עדיין לא התקבלה תשובה: ${errorMessage(error)}`);
+    } finally {
+      setAssistantIsSending(false);
+    }
+  }
+
   async function sendAssistantMessage(event: FormEvent) {
     event.preventDefault();
     const message = assistantInput.trim();
-    if (!message || !cloudUser || !assistantThreadId || !supabase) return;
+    if (!message || !cloudUser || !assistantThreadId || !supabase || assistantIsSending || assistantReplyRetry) return;
 
-    setAssistantInput("");
+    const recentMessages = assistantMessages.slice(-8).map((item) => ({ role: item.role, content: item.content }));
+    let userMessageSaved = false;
     setAssistantIsSending(true);
-    setAssistantStatus("שולח לעוזר...");
+    setAssistantStatus("שומר את ההודעה...");
+    assistantShouldScrollToBottomRef.current = true;
 
     try {
       const userMessage = await addAssistantMessage(assistantThreadId, cloudUser, "user", message);
+      userMessageSaved = true;
       setAssistantMessages((current) => [...current, userMessage]);
-
-      const session = await supabase.auth.getSession();
-      const token = session.data.session?.access_token;
-      if (!token) throw new Error("אין session פעיל.");
-
-      const response = await fetch("/api/assistant", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          message,
-          tasks,
-          taxonomy,
-          recentMessages: assistantMessages.slice(-8).map((item) => ({ role: item.role, content: item.content })),
-        }),
-      });
-
-      const data = await response.json() as {
-        reply?: string;
-        proposedAction?: AssistantProposedAction;
-        mode?: "ai" | "local" | "unavailable";
-        provider?: string;
-        error?: string;
-        visibleEnvironmentKeys?: string[];
-      };
-      if (!response.ok || data.error) throw new Error(data.error ?? "העוזר החזיר שגיאה.");
-
-      const assistantMessage = await addAssistantMessage(
-        assistantThreadId,
-        cloudUser,
-        "assistant",
-        data.reply ?? "לא התקבלה תשובה.",
-        data.proposedAction,
-        data.proposedAction ? "proposed" : undefined,
-      );
-      setAssistantMessages((current) => [...current, assistantMessage]);
-      setAssistantMode(data.mode ?? "ai");
-      if (data.mode === "local") {
-        setAssistantStatus("מצב מקומי: התשובה חושבה מנתוני האפליקציה בלבד, ללא ספק AI.");
-      } else if (data.mode === "unavailable") {
-        setAssistantStatus("ספק ה-AI אינו זמין כרגע. שאלות פשוטות על נתוני האפליקציה עדיין זמינות במצב מקומי.");
-      } else {
-        setAssistantStatus("");
-      }
+      updateAssistantDraft("");
+      setAssistantReplyRetry({ message, recentMessages });
+      setAssistantStatus("העוזר מכין תשובה...");
+      await requestAssistantReply(message, recentMessages);
+      setAssistantReplyRetry(null);
     } catch (error) {
       setAssistantMode("unavailable");
-      setAssistantStatus(`שגיאת צ׳ט: ${errorMessage(error)}`);
+      setAssistantStatus(userMessageSaved
+        ? `ההודעה נשמרה, אך לא התקבלה תשובה: ${errorMessage(error)}`
+        : `לא הצלחנו לשמור את ההודעה. הטקסט נשאר בשדה הכתיבה: ${errorMessage(error)}`);
     } finally {
       setAssistantIsSending(false);
     }
@@ -3712,6 +3795,9 @@ export default function Home() {
     setDevicesStatus("");
     setAssistantThreadId(null);
     setAssistantMessages([]);
+    setAssistantInput("");
+    setAssistantReplyRetry(null);
+    setAssistantHasUnreadMessages(false);
     setAssistantStatus("הצ׳ט ייטען אחרי התחברות לענן.");
     setTaxonomyCloudReady(false);
     setTaxonomyStatus("נושאים ופעולות נשמרים מקומית עד להתחברות לענן.");
@@ -4955,7 +5041,7 @@ export default function Home() {
                   </button>
                 </div>
 
-                <div className={`assistant-messages${assistantMessages.length === 0 ? " is-empty" : ""}`} aria-live="polite" ref={assistantMessagesRef}>
+                <div className={`assistant-messages${assistantMessages.length === 0 ? " is-empty" : ""}`} aria-live="polite" ref={assistantMessagesRef} onScroll={handleAssistantMessagesScroll}>
                   {assistantMessages.length === 0 ? (
                     <div className="assistant-empty">
                       <span className="assistant-empty-mark" aria-hidden="true"><Sparkles size={30} strokeWidth={1.8} /></span>
@@ -5001,13 +5087,30 @@ export default function Home() {
                   })}
                 </div>
 
+                {assistantHasUnreadMessages && (
+                  <button type="button" className="assistant-new-messages" onClick={scrollAssistantMessagesToBottom}>
+                    <ArrowDown size={16} aria-hidden="true" />
+                    הודעות חדשות
+                  </button>
+                )}
+
+                {assistantReplyRetry && (
+                  <div className="assistant-retry" role="status">
+                    <span>ההודעה נשמרה. לא התקבלה עדיין תשובה מהעוזר.</span>
+                    <button type="button" onClick={retryAssistantResponse} disabled={assistantIsSending}>
+                      <RotateCcw size={16} aria-hidden="true" />
+                      נסה שוב
+                    </button>
+                  </div>
+                )}
+
                 {assistantStatus && <p className="assistant-status" role="status">{assistantStatus}</p>}
 
                 <form className="assistant-form" onSubmit={sendAssistantMessage}>
                   <input
                     {...freeTextInputProps}
                     value={assistantInput}
-                    onChange={(event) => setAssistantInput(event.target.value)}
+                    onChange={(event) => updateAssistantDraft(event.target.value)}
                     placeholder="כתוב לעוזר המשימות..."
                     aria-label="הודעה לצ׳ט AI"
                     disabled={assistantIsSending || !assistantThreadId}
@@ -5015,7 +5118,7 @@ export default function Home() {
                   <button
                     type="submit"
                     className="assistant-send-button"
-                    disabled={assistantIsSending || !assistantInput.trim() || !assistantThreadId}
+                    disabled={assistantIsSending || Boolean(assistantReplyRetry) || !assistantInput.trim() || !assistantThreadId}
                     aria-label="שליחת הודעה"
                     title="שליחה"
                   >

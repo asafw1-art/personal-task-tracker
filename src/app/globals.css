@@ -308,7 +308,7 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
 .assistant-floating-button { align-items: center; background: linear-gradient(135deg, #111827, #2563eb); border: 1px solid rgba(255, 255, 255, .16); border-radius: 999px; bottom: 24px; box-shadow: 0 18px 42px rgba(17, 24, 39, 0.30); color: #fff; display: flex; font-weight: 900; height: 62px; justify-content: center; position: fixed; right: 24px; width: 62px; z-index: 25; }
 .assistant-floating-button:hover { background: linear-gradient(135deg, #1f2937, #1d4ed8); transform: translateY(-1px); }
 .assistant-modal { align-items: center; background: rgba(15, 23, 42, .42); bottom: auto; display: flex; height: 100dvh; inset-inline: 0; justify-content: flex-end; min-height: 0; padding: 24px; position: fixed; top: 0; z-index: 45; }
-.assistant-chat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-strong); display: grid; gap: 0; grid-template-rows: auto minmax(0, 1fr) auto auto; height: min(760px, calc(100% - 48px)); overflow: hidden; padding: 0; position: relative; width: min(760px, calc(100% - 32px)); }
+.assistant-chat { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-strong); display: grid; gap: 0; grid-template-rows: auto minmax(0, 1fr) auto auto auto auto; height: min(760px, calc(100% - 48px)); overflow: hidden; padding: 0; position: relative; width: min(760px, calc(100% - 32px)); }
 .assistant-chat-header { align-items: center; background: var(--surface); border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; gap: 16px; padding: 16px 18px; }
 .assistant-chat-identity { align-items: center; display: flex; gap: 11px; min-width: 0; }
 .assistant-chat-identity > div { min-width: 0; }
@@ -346,6 +346,13 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
 .assistant-action-flow button:disabled, .assistant-form button:disabled { cursor: default; opacity: .58; }
 .assistant-action-spinner { animation: assistant-spin .8s linear infinite; }
 @keyframes assistant-spin { to { transform: rotate(360deg); } }
+.assistant-new-messages { align-items: center; align-self: center; background: var(--surface); border: 1px solid var(--border); border-radius: 999px; box-shadow: 0 4px 12px rgba(15, 23, 42, .12); color: var(--accent-dark); display: inline-flex; font-size: .8rem; font-weight: 800; gap: 6px; justify-self: center; margin: 0 16px 8px; padding: 7px 11px; }
+.assistant-new-messages:hover { background: var(--accent-soft); }
+.assistant-retry { align-items: center; background: #fff7ed; border-top: 1px solid #fed7aa; color: #9a3412; display: flex; font-size: .82rem; gap: 10px; justify-content: space-between; line-height: 1.4; padding: 9px 18px; }
+.assistant-retry span { min-width: 0; }
+.assistant-retry button { align-items: center; background: transparent; border: 0; color: inherit; display: inline-flex; flex: 0 0 auto; font: inherit; font-weight: 800; gap: 6px; padding: 4px; }
+.assistant-retry button:hover { color: #7c2d12; }
+.assistant-retry button:disabled { cursor: default; opacity: .58; }
 .assistant-status { background: var(--surface); color: var(--muted); font-size: .82rem; line-height: 1.4; margin: 0; padding: 8px 20px 0; }
 .assistant-form { background: var(--surface); border-top: 1px solid var(--border); display: grid; gap: 9px; grid-template-columns: minmax(0, 1fr) 46px; padding: 14px 18px 18px; }
 .assistant-form input { background: var(--surface-soft); border-radius: 24px; min-height: 46px; min-width: 0; padding-inline: 16px; }
@@ -933,6 +940,8 @@ button.subtask-read-main { cursor: pointer; }
 [data-theme="dark"] .assistant-form {
   background: #101827;
 }
+[data-theme="dark"] .assistant-retry { background: rgba(124, 45, 18, .24); border-color: #9a3412; color: #fed7aa; }
+[data-theme="dark"] .assistant-retry button:hover { color: #ffedd5; }
 [data-theme="dark"] .assistant-action-flow { border-color: #60a5fa; }
 [data-theme="dark"] .assistant-action-flow.status-done { border-color: #4ade80; }
 [data-theme="dark"] .assistant-action-flow.status-done .assistant-action-kicker { color: #86efac; }
