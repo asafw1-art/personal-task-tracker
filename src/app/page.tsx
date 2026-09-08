@@ -3,13 +3,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ChangeEvent, Dispatch, FormEvent, SetStateAction } from "react";
 import type { User } from "@supabase/supabase-js";
-import { Check, ChevronDown, Pencil, Share2, Trash2, X } from "lucide-react";
+import { Bell, Check, ChevronDown, Pencil, Share2, Trash2, X } from "lucide-react";
+import { useNotificationReceipts } from "@/lib/useNotificationReceipts";
 import type { AssistantMessage, AssistantProposedAction, AssistantThread } from "@/lib/assistant";
 import { canonicalTaskId, initialTasks, Task, TaskPrefix, TaskPriority, TaskStatus, TaskSubtask, TaskSubtaskStatus } from "@/lib/tasks";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { addAssistantMessage, fetchAssistantMessages, fetchDeletedAssistantThreads, getOrCreateAssistantThread, restoreAssistantThread, softDeleteAssistantHistory, updateAssistantMessageActionStatus } from "@/lib/supabaseAssistant";
 import { fetchUserDevices, registerCurrentDevice, type UserDevice } from "@/lib/supabaseDevices";
-import { acknowledgeTaskShareEnd, acceptTaskShare, createTaskShare, declineTaskShare, fetchTaskShares, fetchTaskSubtaskAssignments, historicalTaskFromShare, leaveTaskShare, revokeTaskShare, setSharedTaskFocus, setTaskSubtaskAssignment, updateSharedTaskSubtaskStatus, type TaskShare, type TaskSubtaskAssignment } from "@/lib/supabaseSharing";
+import { acceptTaskShare, createTaskShare, declineTaskShare, fetchTaskShares, fetchTaskSubtaskAssignments, historicalTaskFromShare, leaveTaskShare, revokeTaskShare, setSharedTaskFocus, setTaskSubtaskAssignment, updateSharedTaskSubtaskStatus, type TaskShare, type TaskSubtaskAssignment } from "@/lib/supabaseSharing";
 import { countCloudTasks, fetchCloudTasks, saveCloudTasks } from "@/lib/supabaseTasks";
 import { fetchCloudTaxonomy, replaceCloudTaxonomy } from "@/lib/supabaseTaxonomy";
 import { fetchUserSettings, saveUserSettings } from "@/lib/supabaseUserSettings";
@@ -840,7 +841,10 @@ export default function Home() {
   const [assistantRestoreStatus, setAssistantRestoreStatus] = useState("");
   const [activeNotificationId, setActiveNotificationId] = useState("");
   const [isNotificationDetailOpen, setIsNotificationDetailOpen] = useState(false);
-  const [dismissedNotificationIds, setDismissedNotificationIds] = useState<Set<string>>(() => new Set());
+  const [isNotificationCenterOpen, setIsNotificationCenterOpen] = useState(false);
+  const [shareNotice, setShareNotice] = useState<{ userId: string; count: number } | null>(null);
+  const notificationBellRef = useRef<HTMLButtonElement>(null);
+  const notificationDialogRef = useRef<HTMLElement>(null);
   const [analyticsTaskModal, setAnalyticsTaskModal] = useState<{
     title: string;
     body: string;
@@ -1234,9 +1238,14 @@ export default function Home() {
     const timeoutId = window.setTimeout(() => {
       if (!cancelled) refreshTaskShares();
     }, 0);
+    const refreshVisibleShares = () => { if (!cancelled && document.visibilityState === "visible") void refreshTaskShares(); };
+    const intervalId = window.setInterval(refreshVisibleShares, 30_000);
+    window.addEventListener("focus", refreshVisibleShares);
     return () => {
       cancelled = true;
       window.clearTimeout(timeoutId);
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", refreshVisibleShares);
     };
   }, [cloudUser, isCloudReady, refreshTaskShares]);
 
@@ -1513,7 +1522,6 @@ export default function Home() {
     share.status === "revoked"
     && share.endReason === "owner_revoked"
     && Boolean(share.endedAt)
-    && !share.endSeenAt
   )), [recipientShares]);
 
   const appNotifications = useMemo(() => {
@@ -1629,11 +1637,74 @@ export default function Home() {
     }));
   }
 
-  const visibleDismissedNotificationIds = useMemo(() => {
-    const activeIds = new Set(appNotifications.map((notification) => notification.id));
-    return new Set([...dismissedNotificationIds].filter((id) => activeIds.has(id)));
-  }, [appNotifications, dismissedNotificationIds]);
-  const visibleAppNotifications = appNotifications.filter((notification) => !visibleDismissedNotificationIds.has(notification.id));
+  const receipts = useNotificationReceipts(cloudUser?.id);
+  const visibleAppNotifications = appNotifications;
+  function notificationKeys(notification: AppNotification): string[] {
+    if (notification.action.type === "share_invitations") return pendingShareInvitations.map((share) => `invitation:${share.id}:${share.createdAt}`);
+    if (notification.action.type === "share_ended") return unseenEndedShares.map((share) => `ended:${share.id}:${share.endedAt}`);
+    if (notification.id === "no-weekly-closures") {
+      const start = new Date(`${todayIso()}T12:00:00Z`);
+      start.setUTCDate(start.getUTCDate() - (start.getUTCDay() + 6) % 7);
+      return [`no-closures:${start.toISOString().slice(0, 10)}`];
+    }
+    return tasksForNotificationFilter(notification.action.statusFilter).flatMap((task) => {
+      const id = task.cloudId || task.id;
+      if (notification.id === "open-subtasks") return (task.subtasks || []).filter((step) => step.status === "open").map((step) => `step:${id}:${step.id}`);
+      return [`${notification.id}:${id}:${notification.id === "waiting" ? task.statusChangedAt || "" : task.dueDate || ""}`];
+    });
+  }
+  const legacyReadKeys = new Set(unseenEndedShares.filter((share) => share.endSeenAt).map((share) => `ended:${share.id}:${share.endedAt}`));
+  const unreadKeys = (notification: AppNotification) => notificationKeys(notification).filter((key) => !receipts.read.has(key) && !legacyReadKeys.has(key));
+  const unreadNotificationCount = visibleAppNotifications.filter((notification) => unreadKeys(notification).length > 0).length;
+  const unannouncedShareKeys = visibleAppNotifications
+    .filter((notification) => notification.action.type === "share_invitations" || notification.action.type === "share_ended")
+    .flatMap(unreadKeys).filter((key) => !receipts.announced.has(key));
+  const announcementKey = JSON.stringify(unannouncedShareKeys.sort());
+  const { ready: receiptsReady, claimAnnouncement } = receipts;
+
+  useEffect(() => {
+    if (!cloudUser || !receiptsReady || !isCloudReady || isNotificationCenterOpen) return;
+    const keys = JSON.parse(announcementKey) as string[];
+    if (!keys.length) return;
+    void claimAnnouncement(keys).then((claimed) => {
+      if (claimed) setShareNotice({ userId: cloudUser.id, count: keys.length });
+    });
+  }, [announcementKey, cloudUser, isCloudReady, isNotificationCenterOpen, claimAnnouncement, receiptsReady]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => { setIsNotificationCenterOpen(false); setShareNotice(null); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [cloudUser?.id]);
+
+  useEffect(() => {
+    if (!shareNotice) return;
+    const timeout = window.setTimeout(() => setShareNotice(null), 8000);
+    return () => window.clearTimeout(timeout);
+  }, [shareNotice]);
+
+  const closeNotificationCenter = useCallback(() => {
+    setIsNotificationCenterOpen(false);
+    setActiveNotificationId("");
+    setIsNotificationDetailOpen(false);
+    setModalTaskQuery("");
+    notificationBellRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    if (!isNotificationCenterOpen) return;
+    notificationDialogRef.current?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") { event.preventDefault(); closeNotificationCenter(); }
+      if (event.key !== "Tab") return;
+      const elements = notificationDialogRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), [tabindex="0"]');
+      if (!elements?.length) return;
+      const first = elements[0], last = elements[elements.length - 1];
+      if (event.shiftKey && (document.activeElement === first || document.activeElement === notificationDialogRef.current)) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [closeNotificationCenter, isNotificationCenterOpen]);
   const selectedAppNotification = visibleAppNotifications.find((notification) => notification.id === activeNotificationId);
   const activeNotificationDetail = isNotificationDetailOpen
     ? selectedAppNotification ?? visibleAppNotifications[0]
@@ -1653,7 +1724,7 @@ export default function Home() {
     || Boolean(taskEditor)
     || isDriveOnboardingOpen
     || Boolean(analyticsTaskModal)
-    || visibleAppNotifications.length > 0;
+    || isNotificationCenterOpen;
 
   useEffect(() => {
     const mobileViewport = window.matchMedia("(max-width: 700px)");
@@ -2712,16 +2783,6 @@ export default function Home() {
       setSharingStatus("עזבת את המשימה. תצלום המצב האחרון נשמר בהיסטוריית השיתוף.");
     } catch (error) {
       setSharingStatus(`עזיבת המשימה נכשלה: ${errorMessage(error)}`);
-    }
-  }
-
-  async function acknowledgeEndedShareNotifications() {
-    if (unseenEndedShares.length === 0) return;
-    try {
-      await Promise.all(unseenEndedShares.map((share) => acknowledgeTaskShareEnd(share.id)));
-      await refreshTaskShares();
-    } catch (error) {
-      setSharingStatus(`סימון התראת ההסרה כנקראה נכשל: ${errorMessage(error)}`);
     }
   }
 
@@ -3956,6 +4017,15 @@ export default function Home() {
           <p className="subtitle">ניהול פשוט, עקבי ונגיש מכל מכשיר</p>
         </div>
         {cloudUser && (
+          <div className="hero-tools">
+          <button type="button" className="notification-bell" ref={notificationBellRef}
+            disabled={!isCloudReady}
+            aria-label={`מרכז התראות${unreadNotificationCount ? `, ${unreadNotificationCount} התראות שלא נקראו` : ""}`}
+            aria-haspopup="dialog" aria-expanded={isNotificationCenterOpen} title="מרכז התראות"
+            onClick={() => { setShareNotice(null); setIsNotificationCenterOpen(true); }}>
+            <Bell size={22} aria-hidden="true" />
+            {unreadNotificationCount > 0 && <span className="notification-count" aria-hidden="true">{unreadNotificationCount}</span>}
+          </button>
           <button className="settings-button" onClick={() => {
             setSettingsTab("appearance");
             setIsSettingsOpen(true);
@@ -3963,6 +4033,7 @@ export default function Home() {
             <span aria-hidden="true">⚙</span>
             הגדרות
           </button>
+          </div>
         )}
       </header>
       <span className="hero-collapse-sentinel" ref={heroCollapseSentinelRef} aria-hidden="true" />
@@ -4016,32 +4087,33 @@ export default function Home() {
             </section>
           )}
 
-          {visibleAppNotifications.length > 0 && (
-            <section className="notification-modal-backdrop" aria-label="התראה חשובה">
-              <article className={`notification-modal notification-${notificationModalTone}`} role="dialog" aria-modal="true" aria-labelledby="primary-notification-title">
+          {shareNotice?.userId === cloudUser.id && !hasBlockingOverlay && (
+            <aside className="share-notice" role="status">
+              <span>{shareNotice.count} עדכוני שיתוף חדשים</span>
+              <button type="button" onClick={() => { setShareNotice(null); setIsNotificationCenterOpen(true); }}>הצג</button>
+              <button type="button" aria-label="סגירת הודעת שיתוף" onClick={() => setShareNotice(null)}><X size={18} aria-hidden="true" /></button>
+            </aside>
+          )}
+          {isNotificationCenterOpen && (
+            <section className="notification-modal-backdrop" aria-label="מרכז התראות" onClick={(event) => { if (event.target === event.currentTarget) closeNotificationCenter(); }}>
+              <article ref={notificationDialogRef} tabIndex={-1} className={`notification-modal notification-${notificationModalTone}`} role="dialog" aria-modal="true" aria-labelledby="primary-notification-title">
                 <button
                   type="button"
                   className="icon-button"
                   onClick={() => {
-                    void acknowledgeEndedShareNotifications();
-                    setDismissedNotificationIds((current) => {
-                      const next = new Set(current);
-                      visibleAppNotifications.forEach((notification) => next.add(notification.id));
-                      return next;
-                    });
-                    setActiveNotificationId("");
-                    setIsNotificationDetailOpen(false);
-                    setModalTaskQuery("");
+                    closeNotificationCenter();
                   }}
-                  aria-label="סגירת התראה"
+                  aria-label="סגירת מרכז התראות"
                 >
                   ×
                 </button>
                 <div>
-                  <span className="notification-modal-kicker">התראות פעילות</span>
-                  <h2 id="primary-notification-title">מה דורש תשומת לב עכשיו</h2>
-                  <p>ריכזתי את הדברים החשובים בכניסה אחת. אפשר לפתוח פירוט רק לסוג שמעניין אותך עכשיו.</p>
+                  <h2 id="primary-notification-title">מרכז התראות</h2>
+                  <p>{unreadNotificationCount ? `${unreadNotificationCount} התראות שלא נקראו` : "כל ההתראות נקראו"}</p>
+                  {unreadNotificationCount > 0 && <button type="button" className="secondary-action notification-mark-read" onClick={() => receipts.markRead(visibleAppNotifications.flatMap(notificationKeys))}>סימון הכול כנקרא</button>}
+                  {receipts.error && <p role="status">{receipts.error}</p>}
                 </div>
+                {visibleAppNotifications.length === 0 && <p className="notification-modal-empty">אין התראות כרגע.</p>}
                 <div className="notification-summary-list">
                   {visibleAppNotifications.map((notification) => {
                     const notificationTasks = notification.action.type === "share_invitations" || notification.action.type === "share_ended"
@@ -4054,6 +4126,7 @@ export default function Home() {
                       <article className={`notification-summary-card notification-${notification.tone}`} key={notification.id}>
                         <div>
                           <strong>{notification.title}</strong>
+                          {unreadKeys(notification).length > 0 && <span className="notification-unread">חדש</span>}
                           <p>{notification.body}</p>
                           <span>
                             {notification.action.type === "share_invitations"
@@ -4068,6 +4141,7 @@ export default function Home() {
                           type="button"
                           className="notification-detail-button"
                           onClick={() => {
+                            receipts.markRead(notificationKeys(notification));
                             setModalTaskQuery("");
                             setActiveNotificationId(notification.id);
                             setIsNotificationDetailOpen((isOpen) => !(isOpen && activeNotificationDetail?.id === notification.id));
@@ -4118,7 +4192,7 @@ export default function Home() {
                                   {share.endedAt ? ` · ${formatDateTime(share.endedAt)}` : ""}
                                 </small>
                               </div>
-                              {historicalTask && <button type="button" onClick={() => openEditTask(historicalTask)}>צפייה בתצלום</button>}
+                              {historicalTask && <button type="button" onClick={() => { closeNotificationCenter(); openEditTask(historicalTask); }}>צפייה בתצלום</button>}
                             </article>
                           );
                         })}
@@ -4152,10 +4226,7 @@ export default function Home() {
                               <button
                                 type="button"
                                 onClick={() => {
-                                  setDismissedNotificationIds((current) => new Set(current).add(activeNotificationDetail.id));
-                                  setActiveNotificationId("");
-                                  setIsNotificationDetailOpen(false);
-                                  setModalTaskQuery("");
+                                  closeNotificationCenter();
                                   openEditTask(task);
                                 }}
                               >
@@ -5051,7 +5122,7 @@ export default function Home() {
                 <div className="panel-heading">
                   <div>
                     <h2>העדפות התראות</h2>
-                    <span>בחר אילו התראות יופיעו בראש האפליקציה.</span>
+                    <span>סוגי התראות במרכז ההתראות</span>
                   </div>
                 </div>
                 <label className="notification-setting analytics-threshold-setting">
