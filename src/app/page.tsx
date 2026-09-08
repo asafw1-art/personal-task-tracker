@@ -1656,6 +1656,7 @@ export default function Home() {
   const legacyReadKeys = new Set(unseenEndedShares.filter((share) => share.endSeenAt).map((share) => `ended:${share.id}:${share.endedAt}`));
   const unreadKeys = (notification: AppNotification) => notificationKeys(notification).filter((key) => !receipts.read.has(key) && !legacyReadKeys.has(key));
   const unreadNotificationCount = visibleAppNotifications.filter((notification) => unreadKeys(notification).length > 0).length;
+  const unreadNotificationLabel = unreadNotificationCount === 1 ? "התראה אחת שלא נקראה" : `${unreadNotificationCount} התראות שלא נקראו`;
   const unannouncedShareKeys = visibleAppNotifications
     .filter((notification) => notification.action.type === "share_invitations" || notification.action.type === "share_ended")
     .flatMap(unreadKeys).filter((key) => !receipts.announced.has(key));
@@ -4020,7 +4021,7 @@ export default function Home() {
           <div className="hero-tools">
           <button type="button" className="notification-bell" ref={notificationBellRef}
             disabled={!isCloudReady}
-            aria-label={`מרכז התראות${unreadNotificationCount ? `, ${unreadNotificationCount} התראות שלא נקראו` : ""}`}
+            aria-label={`מרכז התראות${unreadNotificationCount ? `, ${unreadNotificationLabel}` : ""}`}
             aria-haspopup="dialog" aria-expanded={isNotificationCenterOpen} title="מרכז התראות"
             onClick={() => { setShareNotice(null); setIsNotificationCenterOpen(true); }}>
             <Bell size={22} aria-hidden="true" />
@@ -4109,7 +4110,7 @@ export default function Home() {
                 </button>
                 <div>
                   <h2 id="primary-notification-title">מרכז התראות</h2>
-                  <p>{unreadNotificationCount ? `${unreadNotificationCount} התראות שלא נקראו` : "כל ההתראות נקראו"}</p>
+                  <p>{unreadNotificationCount ? unreadNotificationLabel : "כל ההתראות נקראו"}</p>
                   {unreadNotificationCount > 0 && <button type="button" className="secondary-action notification-mark-read" onClick={() => receipts.markRead(visibleAppNotifications.flatMap(notificationKeys))}>סימון הכול כנקרא</button>}
                   {receipts.error && <p role="status">{receipts.error}</p>}
                 </div>

@@ -96,7 +96,8 @@ main { max-width: calc(100vw - 28px); width: min(1120px, calc(100% - 28px)); mar
 .notification-bell { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--accent-dark); position: relative; flex-shrink: 0; }
 .notification-bell:hover { background: var(--surface-soft); }
 .notification-count { position: absolute; top: -5px; right: -5px; min-width: 19px; height: 19px; padding: 0 4px; display: grid; place-items: center; border-radius: 50%; background: var(--danger); color: white; font-size: 11px; font-weight: 800; }
-.notification-mark-read { margin-top: 10px; }
+.notification-mark-read { margin-top: 10px; min-height: 44px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-soft); color: var(--accent-dark); font-weight: 700; }
+.notification-mark-read:hover { background: var(--accent-soft); }
 .notification-unread { margin-inline-start: 8px; color: var(--accent-dark); font-weight: 700; }
 .share-notice { position: fixed; top: calc(12px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); z-index: 30; display: flex; align-items: center; gap: 10px; width: max-content; max-width: calc(100vw - 24px); padding: 8px 12px; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow-soft); }
 .share-notice button { min-width: 44px; min-height: 44px; display: grid; place-items: center; border: 1px solid var(--border); border-radius: 8px; background: var(--surface-soft); color: var(--accent-dark); flex-shrink: 0; }
