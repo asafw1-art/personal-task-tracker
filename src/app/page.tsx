@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ChangeEvent, Dispatch, FormEvent, SetStateAction } from "react";
 import type { User } from "@supabase/supabase-js";
-import { Bell, Check, ChevronDown, Pencil, Share2, Trash2, X } from "lucide-react";
+import { ArrowUp, Bell, Check, ChevronDown, Pencil, Share2, Sparkles, Trash2, X } from "lucide-react";
 import { useNotificationReceipts } from "@/lib/useNotificationReceipts";
 import type { AssistantMessage, AssistantProposedAction, AssistantThread } from "@/lib/assistant";
 import { canonicalTaskId, initialTasks, Task, TaskPrefix, TaskPriority, TaskStatus, TaskSubtask, TaskSubtaskStatus } from "@/lib/tasks";
@@ -1096,7 +1096,7 @@ export default function Home() {
         const messages = await fetchAssistantMessages(thread.id);
         if (cancelled) return;
         setAssistantMessages(messages);
-        setAssistantStatus(messages.length > 0 ? "שיחת ה-AI נטענה מהענן." : "אפשר לשאול את העוזר על המשימות שלך.");
+        setAssistantStatus("");
         fetchDeletedAssistantThreads(cloudUser)
           .then((threads) => {
             if (!cancelled) {
@@ -4863,21 +4863,26 @@ export default function Home() {
               role="presentation"
               style={assistantViewport.height ? { height: `${assistantViewport.height}px`, top: `${assistantViewport.top}px` } : undefined}
             >
-              <section className="assistant-chat" role="dialog" aria-modal="true" aria-label="צ׳ט AI למשימות">
+              <section className="assistant-chat" role="dialog" aria-modal="true" aria-labelledby="assistant-chat-title">
                 <div className="assistant-chat-header">
-                  <div>
-                    <p className="eyebrow">עוזר משימות</p>
-                    <h2>צ׳ט AI</h2>
-                    <span>פעולות מוצעות בלבד, וכל שינוי דורש אישור שלך.</span>
+                  <div className="assistant-chat-identity">
+                    <span className="assistant-brand-mark" aria-hidden="true"><Sparkles size={18} strokeWidth={2} /></span>
+                    <div>
+                      <h2 id="assistant-chat-title">שיחת AI</h2>
+                      <span>עוזר המשימות שלך</span>
+                    </div>
                   </div>
-                  <button className="icon-button" onClick={() => setIsAssistantOpen(false)} aria-label="סגירת צ׳ט AI">×</button>
+                  <button className="icon-button" onClick={() => setIsAssistantOpen(false)} aria-label="סגירת שיחת AI" title="סגירה">
+                    <X size={20} aria-hidden="true" />
+                  </button>
                 </div>
 
-                <div className="assistant-messages" aria-live="polite" ref={assistantMessagesRef}>
+                <div className={`assistant-messages${assistantMessages.length === 0 ? " is-empty" : ""}`} aria-live="polite" ref={assistantMessagesRef}>
                   {assistantMessages.length === 0 ? (
                     <div className="assistant-empty">
-                      <strong>אפשר להתחיל בשאלה קצרה</strong>
-                      <span>למשל: מה כדאי לעשות עכשיו? או תוסיף משימה להתקשר לרואה חשבון.</span>
+                      <span className="assistant-empty-mark" aria-hidden="true"><Sparkles size={30} strokeWidth={1.8} /></span>
+                      <h3>{displayName ? `היי ${displayName}, במה נתחיל?` : "במה נתחיל?"}</h3>
+                      <p>אפשר לשאול על המשימות שלך או לבקש לבצע פעולה.</p>
                     </div>
                   ) : assistantMessages.map((message) => (
                     <article className={`assistant-message role-${message.role}`} key={message.id}>
@@ -4898,7 +4903,7 @@ export default function Home() {
                   ))}
                 </div>
 
-                <p className="assistant-status">{assistantStatus}</p>
+                {assistantStatus && <p className="assistant-status" role="status">{assistantStatus}</p>}
 
                 <form className="assistant-form" onSubmit={sendAssistantMessage}>
                   <input
@@ -4916,7 +4921,7 @@ export default function Home() {
                     aria-label="שליחת הודעה"
                     title="שליחה"
                   >
-                    <span aria-hidden="true">↑</span>
+                    <ArrowUp size={20} strokeWidth={2.25} aria-hidden="true" />
                   </button>
                 </form>
               </section>
