@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ChangeEvent, Dispatch, FormEvent, SetStateAction } from "react";
 import type { User } from "@supabase/supabase-js";
-import { ArrowUp, Bell, Check, ChevronDown, Pencil, Share2, Sparkles, Trash2, X } from "lucide-react";
+import { ArrowUp, Bell, Check, ChevronDown, CircleAlert, CircleCheck, LoaderCircle, Pencil, Share2, Sparkles, Trash2, X } from "lucide-react";
 import { useNotificationReceipts } from "@/lib/useNotificationReceipts";
 import type { AssistantMessage, AssistantProposedAction, AssistantThread } from "@/lib/assistant";
 import { canonicalTaskId, initialTasks, Task, TaskPrefix, TaskPriority, TaskStatus, TaskSubtask, TaskSubtaskStatus } from "@/lib/tasks";
@@ -837,6 +837,9 @@ export default function Home() {
   const [assistantInput, setAssistantInput] = useState("");
   const [assistantStatus, setAssistantStatus] = useState("הצ׳ט ייטען אחרי התחברות לענן.");
   const [assistantIsSending, setAssistantIsSending] = useState(false);
+  const [assistantMode, setAssistantMode] = useState<"ai" | "local" | "unavailable" | null>(null);
+  const [assistantActionErrors, setAssistantActionErrors] = useState<Record<string, string>>({});
+  const [assistantActionInFlightIds, setAssistantActionInFlightIds] = useState<Set<string>>(() => new Set());
   const [deletedAssistantThreads, setDeletedAssistantThreads] = useState<AssistantThread[]>([]);
   const [assistantRestoreStatus, setAssistantRestoreStatus] = useState("");
   const [activeNotificationId, setActiveNotificationId] = useState("");
@@ -853,6 +856,7 @@ export default function Home() {
   } | null>(null);
   const [modalTaskQuery, setModalTaskQuery] = useState("");
   const assistantMessagesRef = useRef<HTMLDivElement | null>(null);
+  const assistantActionsInFlightRef = useRef<Set<string>>(new Set());
   const heroCollapseSentinelRef = useRef<HTMLSpanElement | null>(null);
   const [cloudStatus, setCloudStatus] = useState(
     isSupabaseConfigured ? "בודק חיבור ל-Supabase..." : "Supabase עדיין לא מוגדר. עובדים במצב מקומי."
@@ -977,6 +981,10 @@ export default function Home() {
       setUserCloudSettingsLoaded(false);
       setAssistantThreadId(null);
       setAssistantMessages([]);
+      setAssistantMode(null);
+      setAssistantActionErrors({});
+      setAssistantActionInFlightIds(new Set());
+      assistantActionsInFlightRef.current.clear();
       setDeletedAssistantThreads([]);
       setAssistantRestoreStatus("");
       setAssistantStatus(user ? "טוען את שיחת ה-AI..." : "הצ׳ט ייטען אחרי התחברות לענן.");
@@ -3114,6 +3122,8 @@ export default function Home() {
       const messages = await fetchAssistantMessages(thread.id);
       setAssistantThreadId(thread.id);
       setAssistantMessages(messages);
+      setAssistantMode(null);
+      setAssistantActionErrors({});
       setIsAssistantOpen(true);
       await refreshDeletedAssistantThreadList();
       setAssistantStatus("שיחת ה-AI שוחזרה.");
@@ -3139,18 +3149,38 @@ export default function Home() {
     const thread = await getOrCreateAssistantThread(cloudUser);
     setAssistantThreadId(thread.id);
     setAssistantMessages([]);
+    setAssistantMode(null);
+    setAssistantActionErrors({});
     await refreshDeletedAssistantThreadList();
     setAssistantStatus("שיחת ה-AI נמחקה מהתצוגה ונשמרה לשחזור ל-30 יום.");
   }
 
   async function approveAssistantAction(message: AssistantMessage) {
-    if (!message.proposedAction) return;
+    if (
+      !message.proposedAction
+      || message.actionStatus === "done"
+      || message.actionStatus === "approved"
+      || assistantActionsInFlightRef.current.has(message.id)
+    ) return;
     if (isDestructiveAssistantAction(message.proposedAction)) {
       const approved = window.confirm(`לאשר פעולה רגישה?\n${assistantActionDescription(message.proposedAction)}`);
       if (!approved) return;
     }
 
+    assistantActionsInFlightRef.current.add(message.id);
+    setAssistantActionInFlightIds((current) => new Set(current).add(message.id));
+    setAssistantActionErrors((current) => {
+      const next = { ...current };
+      delete next[message.id];
+      return next;
+    });
+    setAssistantStatus("");
+    setAssistantMessages((current) => current.map((item) => item.id === message.id ? { ...item, actionStatus: "approved" } : item));
+
     try {
+      // Persist approval before changing task data so a reload cannot offer the same action twice.
+      await updateAssistantMessageActionStatus(message.id, "approved");
+
       if (message.proposedAction.type === "create_task") {
         createTaskFromAssistant(message.proposedAction);
       } else if (message.proposedAction.type === "update_task_status") {
@@ -3172,12 +3202,23 @@ export default function Home() {
       }
 
       setAssistantMessages((current) => current.map((item) => item.id === message.id ? { ...item, actionStatus: "done" } : item));
-      await updateAssistantMessageActionStatus(message.id, "done");
-      setAssistantStatus("הפעולה בוצעה.");
+      try {
+        await updateAssistantMessageActionStatus(message.id, "done");
+      } catch {
+        setAssistantStatus("הפעולה בוצעה, אך שמירת מצב האישור בצ׳ט נכשלה.");
+      }
     } catch (error) {
+      const failureMessage = errorMessage(error);
       setAssistantMessages((current) => current.map((item) => item.id === message.id ? { ...item, actionStatus: "failed" } : item));
+      setAssistantActionErrors((current) => ({ ...current, [message.id]: failureMessage }));
       await updateAssistantMessageActionStatus(message.id, "failed").catch(() => undefined);
-      setAssistantStatus(`הפעולה נכשלה: ${errorMessage(error)}`);
+    } finally {
+      assistantActionsInFlightRef.current.delete(message.id);
+      setAssistantActionInFlightIds((current) => {
+        const next = new Set(current);
+        next.delete(message.id);
+        return next;
+      });
     }
   }
 
@@ -3231,15 +3272,16 @@ export default function Home() {
         data.proposedAction ? "proposed" : undefined,
       );
       setAssistantMessages((current) => [...current, assistantMessage]);
+      setAssistantMode(data.mode ?? "ai");
       if (data.mode === "local") {
         setAssistantStatus("מצב מקומי: התשובה חושבה מנתוני האפליקציה בלבד, ללא ספק AI.");
       } else if (data.mode === "unavailable") {
         setAssistantStatus("ספק ה-AI אינו זמין כרגע. שאלות פשוטות על נתוני האפליקציה עדיין זמינות במצב מקומי.");
       } else {
-        const providerLabel = data.provider ? ` באמצעות ${data.provider}` : "";
-        setAssistantStatus(data.proposedAction ? `העוזר${providerLabel} הציע פעולה שמחכה לאישור.` : `העוזר${providerLabel} ענה.`);
+        setAssistantStatus("");
       }
     } catch (error) {
+      setAssistantMode("unavailable");
       setAssistantStatus(`שגיאת צ׳ט: ${errorMessage(error)}`);
     } finally {
       setAssistantIsSending(false);
@@ -3253,6 +3295,34 @@ export default function Home() {
     if (action.type === "add_subtask") return `הוספת צעד טיפול ל-${action.taskId}: ${action.subtask.title}`;
     if (action.type === "update_subtask_status") return `שינוי צעד ${action.subtaskNumber} ב-${action.taskId} ל-${subtaskStatusLabels[action.status]}`;
     return "החלת סינון על רשימת המשימות";
+  }
+
+  function assistantActionDetails(action: AssistantProposedAction) {
+    if (action.type === "create_task") {
+      return [
+        action.task.category && `נושא ${action.task.category}`,
+        action.task.actionType && `פעולה ${action.task.actionType}`,
+        `עדיפות ${priorityLabels[action.task.priority ?? "normal"]}`,
+        action.task.dueDate && `יעד ${formatDate(action.task.dueDate)}`,
+      ].filter(Boolean).join(" · ");
+    }
+
+    if (action.type === "add_subtask" && action.subtask.actionType) {
+      return `פעולה ${action.subtask.actionType}`;
+    }
+
+    if (action.type === "filter_tasks") {
+      const filter = action.filter;
+      return [
+        filter.query && `חיפוש: ${filter.query}`,
+        filter.statusFilter && `סטטוס: ${taskFilterLabel(filter.statusFilter as TaskFilter)}`,
+        filter.prefixFilter && filter.prefixFilter !== "all" && `סוג: ${filter.prefixFilter}`,
+        filter.topicFilter && filter.topicFilter !== "all" && `נושא: ${filter.topicFilter}`,
+        filter.actionFilter && filter.actionFilter !== "all" && `פעולה: ${filter.actionFilter}`,
+      ].filter(Boolean).join(" · ");
+    }
+
+    return "";
   }
 
   function updateTaskDraft(updates: Partial<TaskDraft>) {
@@ -4869,7 +4939,15 @@ export default function Home() {
                     <span className="assistant-brand-mark" aria-hidden="true"><Sparkles size={18} strokeWidth={2} /></span>
                     <div>
                       <h2 id="assistant-chat-title">שיחת AI</h2>
-                      <span>עוזר המשימות שלך</span>
+                      <div className="assistant-chat-subtitle">
+                        <span>עוזר המשימות שלך</span>
+                        {assistantMode && (
+                          <span className={`assistant-mode is-${assistantMode}`}>
+                            <i aria-hidden="true" />
+                            {assistantMode === "ai" ? "AI" : assistantMode === "local" ? "מצב מקומי" : "לא זמין"}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
                   <button className="icon-button" onClick={() => setIsAssistantOpen(false)} aria-label="סגירת שיחת AI" title="סגירה">
@@ -4884,23 +4962,43 @@ export default function Home() {
                       <h3>{displayName ? `היי ${displayName}, במה נתחיל?` : "במה נתחיל?"}</h3>
                       <p>אפשר לשאול על המשימות שלך או לבקש לבצע פעולה.</p>
                     </div>
-                  ) : assistantMessages.map((message) => (
-                    <article className={`assistant-message role-${message.role}`} key={message.id}>
-                      <span className="assistant-message-meta">{message.role === "user" ? "אני" : "עוזר המשימות"}</span>
-                      <p>{message.content}</p>
-                      {message.proposedAction && (
-                        <div className="assistant-action-card">
-                          <span>{assistantActionDescription(message.proposedAction)}</span>
-                          <button
-                            onClick={() => approveAssistantAction(message)}
-                            disabled={message.actionStatus === "done"}
-                          >
-                            {message.actionStatus === "done" ? "בוצע" : message.proposedAction.label}
-                          </button>
-                        </div>
-                      )}
-                    </article>
-                  ))}
+                  ) : assistantMessages.map((message) => {
+                    const actionStatus = message.actionStatus ?? "proposed";
+                    const actionIsRunning = actionStatus === "approved" && assistantActionInFlightIds.has(message.id);
+                    const actionDetails = message.proposedAction ? assistantActionDetails(message.proposedAction) : "";
+
+                    return (
+                      <article className={`assistant-message role-${message.role}`} key={message.id}>
+                        <span className="assistant-message-meta">{message.role === "user" ? "אני" : "עוזר המשימות"}</span>
+                        <p>{message.content}</p>
+                        {message.proposedAction && (
+                          <div className={`assistant-action-flow status-${actionStatus}`}>
+                            <div className="assistant-action-copy">
+                              <span className="assistant-action-kicker">
+                                {actionStatus === "done" ? <CircleCheck size={16} aria-hidden="true" /> : actionStatus === "failed" ? <CircleAlert size={16} aria-hidden="true" /> : actionStatus === "approved" ? (actionIsRunning ? <LoaderCircle className="assistant-action-spinner" size={16} aria-hidden="true" /> : <Check size={16} aria-hidden="true" />) : <Sparkles size={16} aria-hidden="true" />}
+                                {actionStatus === "done" ? "בוצע" : actionStatus === "failed" ? "הפעולה לא בוצעה" : actionStatus === "approved" ? (actionIsRunning ? "מבצע..." : "הפעולה אושרה") : "פעולה מוצעת"}
+                              </span>
+                              <strong>{assistantActionDescription(message.proposedAction)}</strong>
+                              {actionDetails && <small>{actionDetails}</small>}
+                              {actionStatus === "failed" && <small className="assistant-action-error">{assistantActionErrors[message.id] ?? "לא הצלחנו לבצע את הפעולה. אפשר לנסות שוב."}</small>}
+                            </div>
+
+                            {(actionStatus === "proposed" || actionStatus === "failed") && (
+                              <button
+                                type="button"
+                                onClick={() => approveAssistantAction(message)}
+                                aria-label={`${actionStatus === "failed" ? "ניסיון חוזר" : "אישור וביצוע"}: ${message.proposedAction.label}`}
+                              >
+                                <Check size={17} aria-hidden="true" />
+                                {actionStatus === "failed" ? "ניסיון חוזר" : "אישור וביצוע"}
+                              </button>
+                            )}
+
+                          </div>
+                        )}
+                      </article>
+                    );
+                  })}
                 </div>
 
                 {assistantStatus && <p className="assistant-status" role="status">{assistantStatus}</p>}
