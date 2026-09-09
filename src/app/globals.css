@@ -359,9 +359,9 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
 .assistant-form .assistant-send-button { align-items: center; border-radius: 50%; display: inline-flex; height: 46px; justify-content: center; padding: 0; width: 46px; }
 .assistant-main { max-width: min(1280px, calc(100% - 28px)); min-height: 100dvh; padding-top: 16px; }
 .assistant-main .view-tabs { margin-inline: auto; }
-.assistant-workspace { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow); display: grid; margin: 0 auto; max-width: 1080px; min-height: calc(100dvh - 106px); overflow: hidden; width: 100%; }
-.assistant-workspace-header { align-items: center; border-bottom: 1px solid var(--border); display: flex; gap: 16px; justify-content: space-between; padding: 16px 20px; }
-.assistant-workspace-header h1 { font-size: 1.1rem; line-height: 1.2; margin: 0; }
+.assistant-workspace { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow); display: grid; grid-template-rows: auto minmax(0, 1fr) auto; margin: 0 auto; max-width: 1080px; min-height: calc(100dvh - 106px); overflow: hidden; width: 100%; }
+.assistant-workspace-header { align-items: center; border-bottom: 1px solid var(--border); display: flex; gap: 12px; justify-content: space-between; padding: 10px 16px; }
+.assistant-workspace-header h1 { font-size: 1rem; line-height: 1.2; margin: 0; }
 .assistant-welcome { align-content: center; display: grid; justify-items: center; min-height: min(390px, 44dvh); padding: 44px 24px 34px; text-align: center; }
 .assistant-welcome-mark { align-items: center; background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border)); border-radius: 50%; color: var(--accent); display: inline-flex; height: 64px; justify-content: center; margin-bottom: 18px; width: 64px; }
 .assistant-welcome .eyebrow { margin-bottom: 6px; }
@@ -375,10 +375,10 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
 .assistant-starters span { display: grid; gap: 3px; min-width: 0; }
 .assistant-starters strong { font-size: .92rem; line-height: 1.35; overflow-wrap: anywhere; }
 .assistant-starters small { color: var(--muted); font-size: .8rem; line-height: 1.35; }
-.assistant-history { border-top: 1px solid var(--border); min-height: 0; }
+.assistant-history { border-top: 1px solid var(--border); display: grid; grid-template-rows: auto minmax(0, 1fr); min-height: 0; }
 .assistant-history-heading { align-items: center; color: var(--muted); display: flex; font-size: .82rem; font-weight: 800; justify-content: space-between; padding: 12px 20px 0; }
 .assistant-history-heading button { background: transparent; border: 0; color: var(--accent-dark); font-weight: 800; min-height: 28px; padding: 2px 0; }
-.assistant-history .assistant-messages { max-height: min(500px, 48dvh); padding: 18px 22px 24px; }
+.assistant-history .assistant-messages { max-height: none; min-height: 0; padding: 18px 22px 24px; }
 .assistant-workspace .assistant-form { position: sticky; bottom: 0; z-index: 2; }
 html.modal-open, html.modal-open body { overflow: hidden; overscroll-behavior: none; }
 .modal-backdrop { background: rgba(15, 23, 42, .34); bottom: 0; display: flex; justify-content: flex-start; left: 0; padding: 18px; position: fixed; right: 0; top: 0; z-index: 40; }
@@ -1049,13 +1049,13 @@ button.subtask-read-main { cursor: pointer; }
   .assistant-main .view-tabs { border-inline: 0; border-radius: 0; margin: 0; width: 100%; }
   .assistant-main .view-tabs button { font-size: .86rem; padding-inline: 8px; }
   .assistant-workspace { border: 0; border-radius: 0; box-shadow: none; min-height: calc(100dvh - 64px); }
-  .assistant-workspace-header { padding: 12px 14px; }
+  .assistant-workspace-header { padding: 10px 14px; }
   .assistant-welcome { min-height: 0; padding: 42px 18px 28px; }
   .assistant-welcome h2 { font-size: 1.8rem; }
   .assistant-starters { grid-template-columns: 1fr; }
   .assistant-starters button { min-height: 68px; }
   .assistant-history-heading { padding-inline: 14px; }
-  .assistant-history .assistant-messages { max-height: 42dvh; padding: 16px 14px 20px; }
+  .assistant-history .assistant-messages { padding: 16px 14px 20px; }
   .hero { align-items: stretch; flex-direction: column; min-height: 0; padding: 20px 18px 18px; position: sticky; top: 0; transition: margin .18s ease, min-height .18s ease, padding .18s ease; z-index: 12; }
   .hero > div { padding-inline-end: 112px; }
   .hero > .hero-tools { padding: 0; position: absolute; left: 18px; top: 28px; gap: 8px; }

@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ChangeEvent, Dispatch, FormEvent, SetStateAction } from "react";
 import type { User } from "@supabase/supabase-js";
-import { ArrowDown, ArrowRight, ArrowUp, Bell, Check, ChevronDown, CircleAlert, CircleCheck, History, ListChecks, LoaderCircle, Pencil, RotateCcw, Share2, Sparkles, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowRight, ArrowUp, Bell, Check, ChevronDown, CircleAlert, CircleCheck, ListChecks, LoaderCircle, Pencil, RotateCcw, Share2, Sparkles, Trash2, X } from "lucide-react";
 import { useNotificationReceipts } from "@/lib/useNotificationReceipts";
 import type { AssistantMessage, AssistantProposedAction, AssistantThread } from "@/lib/assistant";
 import { canonicalTaskId, initialTasks, Task, TaskPrefix, TaskPriority, TaskStatus, TaskSubtask, TaskSubtaskStatus } from "@/lib/tasks";
@@ -5084,32 +5084,28 @@ export default function Home() {
             </button>
           </header>
 
-          <section className="assistant-welcome" aria-label="פתיחת שיחה">
-            <span className="assistant-welcome-mark" aria-hidden="true"><Sparkles size={34} strokeWidth={1.65} /></span>
-            <p className="eyebrow">שיחה אישית</p>
-            <h2>{displayName ? `היי ${displayName}, במה נתמקד?` : "במה נתמקד?"}</h2>
-            <p>אפשר להמשיך את הרצף האחרון או להתחיל מכיוון חדש.</p>
-            <div className="assistant-starters" aria-label="הצעות לפתיחת שיחה">
-              {assistantMessages.length > 0 && (
-                <button type="button" onClick={scrollAssistantMessagesToBottom}>
-                  <History size={19} aria-hidden="true" />
-                  <span><strong>המשך את השיחה האחרונה</strong><small>חזרה לנקודה שבה עצרנו.</small></span>
+          {assistantMessages.length === 0 && (
+            <section className="assistant-welcome" aria-label="פתיחת שיחה">
+              <span className="assistant-welcome-mark" aria-hidden="true"><Sparkles size={34} strokeWidth={1.65} /></span>
+              <p className="eyebrow">שיחה אישית</p>
+              <h2>{displayName ? `היי ${displayName}, במה נתמקד?` : "במה נתמקד?"}</h2>
+              <p>אפשר להתחיל מכיוון חדש או לנסח את מה שעל הפרק.</p>
+              <div className="assistant-starters" aria-label="הצעות לפתיחת שיחה">
+                <button type="button" onClick={() => startAssistantPrompt("מה חשוב לי לקדם עכשיו?")} disabled={assistantIsSending || Boolean(assistantReplyRetry)}>
+                  <Sparkles size={19} aria-hidden="true" />
+                  <span><strong>מה חשוב לקדם עכשיו?</strong><small>נבחר משימה אחת עם סיבה ברורה.</small></span>
                 </button>
-              )}
-              <button type="button" onClick={() => startAssistantPrompt("מה חשוב לי לקדם עכשיו?")} disabled={assistantIsSending || Boolean(assistantReplyRetry)}>
-                <Sparkles size={19} aria-hidden="true" />
-                <span><strong>מה חשוב לקדם עכשיו?</strong><small>נבחר משימה אחת עם סיבה ברורה.</small></span>
-              </button>
-              <button type="button" onClick={() => startAssistantPrompt("עזור לי לתכנן את היום שלי.")} disabled={assistantIsSending || Boolean(assistantReplyRetry)}>
-                <ListChecks size={19} aria-hidden="true" />
-                <span><strong>לעזור לי לתכנן את היום</strong><small>נארגן התחלה מעשית ליום הזה.</small></span>
-              </button>
-              <button type="button" onClick={() => startAssistantPrompt(assistantPersonalizedStarter.prompt)} disabled={assistantIsSending || Boolean(assistantReplyRetry)}>
-                <ListChecks size={19} aria-hidden="true" />
-                <span><strong>{assistantPersonalizedStarter.label}</strong><small>{assistantPersonalizedStarter.detail}</small></span>
-              </button>
-            </div>
-          </section>
+                <button type="button" onClick={() => startAssistantPrompt("עזור לי לתכנן את היום שלי.")} disabled={assistantIsSending || Boolean(assistantReplyRetry)}>
+                  <ListChecks size={19} aria-hidden="true" />
+                  <span><strong>לעזור לי לתכנן את היום</strong><small>נארגן התחלה מעשית ליום הזה.</small></span>
+                </button>
+                <button type="button" onClick={() => startAssistantPrompt(assistantPersonalizedStarter.prompt)} disabled={assistantIsSending || Boolean(assistantReplyRetry)}>
+                  <ListChecks size={19} aria-hidden="true" />
+                  <span><strong>{assistantPersonalizedStarter.label}</strong><small>{assistantPersonalizedStarter.detail}</small></span>
+                </button>
+              </div>
+            </section>
+          )}
 
           {assistantMessages.length > 0 && (
             <section className="assistant-history" aria-label="היסטוריית שיחת AI">
