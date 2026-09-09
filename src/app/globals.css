@@ -159,7 +159,7 @@ h1 { line-height: 1.05; margin: 0; font-size: clamp(2.5rem, 6vw, 4.2rem); overfl
 .notification-danger { border-right: 5px solid var(--danger); }
 .notification-warn { border-right: 5px solid var(--waiting); }
 .notification-neutral { border-right: 5px solid var(--accent); }
-.view-tabs { display: grid; grid-template-columns: repeat(2, minmax(120px, 1fr)); gap: 6px; background: rgba(226, 232, 240, .66); border: 1px solid var(--border); border-radius: 16px; margin: 0 0 16px auto; padding: 6px; width: min(420px, 100%); }
+.view-tabs { display: grid; grid-template-columns: repeat(3, minmax(120px, 1fr)); gap: 6px; background: rgba(226, 232, 240, .66); border: 1px solid var(--border); border-radius: 16px; margin: 0 0 16px auto; padding: 6px; width: min(540px, 100%); }
 .view-tabs button { border: 0; border-radius: 12px; background: transparent; color: var(--muted); padding: 12px 16px; font-weight: 800; }
 .view-tabs button.active { background: var(--surface); color: var(--accent-dark); box-shadow: 0 8px 18px rgba(23, 32, 51, 0.10); }
 .controls { display: grid; grid-template-columns: 1fr 160px 140px 150px 150px; gap: 10px; padding: 14px; margin-bottom: 14px; }
@@ -357,6 +357,29 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
 .assistant-form { background: var(--surface); border-top: 1px solid var(--border); display: grid; gap: 9px; grid-template-columns: minmax(0, 1fr) 46px; padding: 14px 18px 18px; }
 .assistant-form input { background: var(--surface-soft); border-radius: 24px; min-height: 46px; min-width: 0; padding-inline: 16px; }
 .assistant-form .assistant-send-button { align-items: center; border-radius: 50%; display: inline-flex; height: 46px; justify-content: center; padding: 0; width: 46px; }
+.assistant-main { max-width: min(1280px, calc(100% - 28px)); min-height: 100dvh; padding-top: 16px; }
+.assistant-main .view-tabs { margin-inline: auto; }
+.assistant-workspace { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow); display: grid; margin: 0 auto; max-width: 1080px; min-height: calc(100dvh - 106px); overflow: hidden; width: 100%; }
+.assistant-workspace-header { align-items: center; border-bottom: 1px solid var(--border); display: flex; gap: 16px; justify-content: space-between; padding: 16px 20px; }
+.assistant-workspace-header h1 { font-size: 1.1rem; line-height: 1.2; margin: 0; }
+.assistant-welcome { align-content: center; display: grid; justify-items: center; min-height: min(390px, 44dvh); padding: 44px 24px 34px; text-align: center; }
+.assistant-welcome-mark { align-items: center; background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border)); border-radius: 50%; color: var(--accent); display: inline-flex; height: 64px; justify-content: center; margin-bottom: 18px; width: 64px; }
+.assistant-welcome .eyebrow { margin-bottom: 6px; }
+.assistant-welcome h2 { font-size: 2.2rem; line-height: 1.2; margin: 0; overflow-wrap: anywhere; }
+.assistant-welcome > p:not(.eyebrow) { color: var(--muted); margin: 10px 0 22px; }
+.assistant-starters { display: grid; gap: 8px; grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: 720px; text-align: right; width: 100%; }
+.assistant-starters button { align-items: flex-start; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); color: var(--text); display: flex; gap: 11px; min-height: 74px; padding: 13px 14px; text-align: right; }
+.assistant-starters button:hover { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 42%, var(--border)); }
+.assistant-starters button:disabled { cursor: default; opacity: .58; }
+.assistant-starters button svg { color: var(--accent-dark); flex: 0 0 auto; margin-top: 2px; }
+.assistant-starters span { display: grid; gap: 3px; min-width: 0; }
+.assistant-starters strong { font-size: .92rem; line-height: 1.35; overflow-wrap: anywhere; }
+.assistant-starters small { color: var(--muted); font-size: .8rem; line-height: 1.35; }
+.assistant-history { border-top: 1px solid var(--border); min-height: 0; }
+.assistant-history-heading { align-items: center; color: var(--muted); display: flex; font-size: .82rem; font-weight: 800; justify-content: space-between; padding: 12px 20px 0; }
+.assistant-history-heading button { background: transparent; border: 0; color: var(--accent-dark); font-weight: 800; min-height: 28px; padding: 2px 0; }
+.assistant-history .assistant-messages { max-height: min(500px, 48dvh); padding: 18px 22px 24px; }
+.assistant-workspace .assistant-form { position: sticky; bottom: 0; z-index: 2; }
 html.modal-open, html.modal-open body { overflow: hidden; overscroll-behavior: none; }
 .modal-backdrop { background: rgba(15, 23, 42, .34); bottom: 0; display: flex; justify-content: flex-start; left: 0; padding: 18px; position: fixed; right: 0; top: 0; z-index: 40; }
 .settings-drawer, .task-drawer { background: var(--bg); border: 1px solid var(--border); border-radius: 18px; box-shadow: 0 24px 70px rgba(15, 23, 42, .28); max-height: calc(100vh - 36px); overflow: auto; padding: 18px; width: min(620px, 100%); }
@@ -1022,6 +1045,17 @@ button.subtask-read-main { cursor: pointer; }
 }
 @media (max-width: 700px) {
   main { max-width: calc(100vw - 20px); width: calc(100vw - 20px); padding: 18px 0 calc(112px + env(safe-area-inset-bottom)); }
+  .assistant-main { max-width: 100%; padding: 0 0 calc(12px + env(safe-area-inset-bottom)); width: 100%; }
+  .assistant-main .view-tabs { border-inline: 0; border-radius: 0; margin: 0; width: 100%; }
+  .assistant-main .view-tabs button { font-size: .86rem; padding-inline: 8px; }
+  .assistant-workspace { border: 0; border-radius: 0; box-shadow: none; min-height: calc(100dvh - 64px); }
+  .assistant-workspace-header { padding: 12px 14px; }
+  .assistant-welcome { min-height: 0; padding: 42px 18px 28px; }
+  .assistant-welcome h2 { font-size: 1.8rem; }
+  .assistant-starters { grid-template-columns: 1fr; }
+  .assistant-starters button { min-height: 68px; }
+  .assistant-history-heading { padding-inline: 14px; }
+  .assistant-history .assistant-messages { max-height: 42dvh; padding: 16px 14px 20px; }
   .hero { align-items: stretch; flex-direction: column; min-height: 0; padding: 20px 18px 18px; position: sticky; top: 0; transition: margin .18s ease, min-height .18s ease, padding .18s ease; z-index: 12; }
   .hero > div { padding-inline-end: 112px; }
   .hero > .hero-tools { padding: 0; position: absolute; left: 18px; top: 28px; gap: 8px; }

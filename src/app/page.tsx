@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ChangeEvent, Dispatch, FormEvent, SetStateAction } from "react";
 import type { User } from "@supabase/supabase-js";
-import { ArrowDown, ArrowUp, Bell, Check, ChevronDown, CircleAlert, CircleCheck, LoaderCircle, Pencil, RotateCcw, Share2, Sparkles, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowRight, ArrowUp, Bell, Check, ChevronDown, CircleAlert, CircleCheck, History, ListChecks, LoaderCircle, Pencil, RotateCcw, Share2, Sparkles, Trash2, X } from "lucide-react";
 import { useNotificationReceipts } from "@/lib/useNotificationReceipts";
 import type { AssistantMessage, AssistantProposedAction, AssistantThread } from "@/lib/assistant";
 import { canonicalTaskId, initialTasks, Task, TaskPrefix, TaskPriority, TaskStatus, TaskSubtask, TaskSubtaskStatus } from "@/lib/tasks";
@@ -100,7 +100,7 @@ type ImportSummary = {
 type TaskFilter = TaskStatus | "active" | "all" | "overdue" | "today" | "week" | "no_due" | "high" | "subtasks_open" | "focused";
 type ShareFilter = "all" | "mine" | "shared_with_me" | "shared_by_me" | "shared_past";
 type AnalyticsRange = "week" | "month" | "all";
-type MainView = "tasks" | "stats";
+type MainView = "tasks" | "stats" | "assistant";
 type TaxonomyMode = "topics" | "actions";
 type SettingsTab = "appearance" | "taxonomy" | "notifications" | "sync" | "admin";
 type AppTheme = "light" | "dark";
@@ -835,8 +835,6 @@ export default function Home() {
   const [expandedSubtaskTaskIds, setExpandedSubtaskTaskIds] = useState<Set<string>>(() => new Set());
   const [inlineSubtaskDrafts, setInlineSubtaskDrafts] = useState<Record<string, string>>({});
   const [editingInlineSubtaskKey, setEditingInlineSubtaskKey] = useState<string | null>(null);
-  const [isAssistantOpen, setIsAssistantOpen] = useState(false);
-  const [assistantViewport, setAssistantViewport] = useState({ height: 0, top: 0 });
   const [assistantThreadId, setAssistantThreadId] = useState<string | null>(null);
   const [assistantMessages, setAssistantMessages] = useState<AssistantMessage[]>([]);
   const [assistantInput, setAssistantInput] = useState("");
@@ -870,6 +868,8 @@ export default function Home() {
   const assistantIsNearBottomRef = useRef(true);
   const assistantShouldScrollToBottomRef = useRef(false);
   const assistantWasOpenRef = useRef(false);
+  const assistantReturnViewRef = useRef<Exclude<MainView, "assistant">>("tasks");
+  const assistantReturnScrollYRef = useRef(0);
   const heroCollapseSentinelRef = useRef<HTMLSpanElement | null>(null);
   const [cloudStatus, setCloudStatus] = useState(
     isSupabaseConfigured ? "בודק חיבור ל-Supabase..." : "Supabase עדיין לא מוגדר. עובדים במצב מקומי."
@@ -976,6 +976,20 @@ export default function Home() {
     else window.localStorage.removeItem(key);
   }
 
+  function openAssistantWorkspace() {
+    if (activeView !== "assistant") {
+      assistantReturnViewRef.current = activeView;
+      assistantReturnScrollYRef.current = window.scrollY;
+    }
+    setActiveView("assistant");
+    window.scrollTo({ top: 0, behavior: "auto" });
+  }
+
+  function closeAssistantWorkspace() {
+    setActiveView(assistantReturnViewRef.current);
+    window.requestAnimationFrame(() => window.scrollTo({ top: assistantReturnScrollYRef.current, behavior: "auto" }));
+  }
+
   useEffect(() => {
     if (!cloudUser || !assistantThreadId) return;
     const timeoutId = window.setTimeout(() => {
@@ -985,17 +999,24 @@ export default function Home() {
   }, [assistantThreadId, cloudUser]);
 
   useEffect(() => {
-    const openedNow = isAssistantOpen && !assistantWasOpenRef.current;
-    assistantWasOpenRef.current = isAssistantOpen;
-    if (!isAssistantOpen) return;
+    const isAssistantWorkspace = activeView === "assistant";
+    const openedNow = isAssistantWorkspace && !assistantWasOpenRef.current;
+    assistantWasOpenRef.current = isAssistantWorkspace;
+    if (!isAssistantWorkspace) return;
 
-    if (openedNow || assistantShouldScrollToBottomRef.current || assistantIsNearBottomRef.current) {
+    if (openedNow) {
+      assistantIsNearBottomRef.current = false;
+      setAssistantHasUnreadMessages(false);
+      return;
+    }
+
+    if (assistantShouldScrollToBottomRef.current || assistantIsNearBottomRef.current) {
       const timeoutId = window.setTimeout(scrollAssistantMessagesToBottom, 0);
       return () => window.clearTimeout(timeoutId);
     }
 
     setAssistantHasUnreadMessages(true);
-  }, [assistantMessages.length, isAssistantOpen]);
+  }, [activeView, assistantMessages.length]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -1573,6 +1594,33 @@ export default function Home() {
     openSubtaskTasks: tasks.filter((t) => !["done", "cancelled"].includes(t.status) && subtaskProgress(t.subtasks).open > 0).length,
   }), [tasks]);
 
+  const assistantPersonalizedStarter = useMemo(() => {
+    const activeTasks = tasks.filter((task) => !["done", "cancelled"].includes(task.status));
+    const overdueCount = activeTasks.filter((task) => Boolean(task.dueDate && task.dueDate < todayIso())).length;
+
+    if (overdueCount > 0) {
+      return {
+        label: `${overdueCount} משימות באיחור`,
+        detail: "נחליט במה כדאי לטפל קודם.",
+        prompt: "הצג לי את המשימות באיחור והמלץ במה להתחיל עכשיו.",
+      };
+    }
+
+    if (counts.waiting > 0) {
+      return {
+        label: `${counts.waiting} משימות ממתינות`,
+        detail: "נבדוק מה אפשר לקדם בלי לחכות.",
+        prompt: "יש לי משימות ממתינות. מה אפשר לקדם עכשיו בלי לחכות לגורם חיצוני?",
+      };
+    }
+
+    return {
+      label: "מיקוד ליום הזה",
+      detail: "נבנה התחלה ברורה מהמשימות הפעילות.",
+      prompt: "עזור לי לבחור משימה אחת שכדאי לקדם עכשיו.",
+    };
+  }, [counts.waiting, tasks]);
+
   const pendingShareInvitations = useMemo(() => {
     if (!cloudUser) return [];
     return taskShares.filter((share) => share.status === "pending" && isShareRecipient(share, cloudUser));
@@ -1780,8 +1828,7 @@ export default function Home() {
     : visibleAppNotifications.some((notification) => notification.tone === "warn")
       ? "warn"
       : "neutral";
-  const hasBlockingOverlay = isAssistantOpen
-    || isSettingsOpen
+  const hasBlockingOverlay = isSettingsOpen
     || Boolean(taskEditor)
     || isDriveOnboardingOpen
     || Boolean(analyticsTaskModal)
@@ -1828,24 +1875,6 @@ export default function Home() {
       window.scrollTo(0, scrollY);
     };
   }, [hasBlockingOverlay]);
-
-  useEffect(() => {
-    if (!isAssistantOpen) return;
-    const viewport = window.visualViewport;
-    const syncViewport = () => setAssistantViewport({
-      height: Math.round(viewport?.height ?? window.innerHeight),
-      top: Math.round(viewport?.offsetTop ?? 0),
-    });
-    syncViewport();
-    viewport?.addEventListener("resize", syncViewport);
-    viewport?.addEventListener("scroll", syncViewport);
-    window.addEventListener("resize", syncViewport);
-    return () => {
-      viewport?.removeEventListener("resize", syncViewport);
-      viewport?.removeEventListener("scroll", syncViewport);
-      window.removeEventListener("resize", syncViewport);
-    };
-  }, [isAssistantOpen]);
 
   function tasksForAnalyticsAction(action: NonNullable<AnalyticsInsight["action"]>) {
     const normalized = canonicalTaskId(action.query ?? "");
@@ -3178,7 +3207,7 @@ export default function Home() {
       setAssistantHasUnreadMessages(false);
       setAssistantMode(null);
       setAssistantActionErrors({});
-      setIsAssistantOpen(true);
+      openAssistantWorkspace();
       await refreshDeletedAssistantThreadList();
       setAssistantStatus("שיחת ה-AI שוחזרה.");
       setAssistantRestoreStatus("השיחה שוחזרה ונפתחה בצ׳ט.");
@@ -3341,9 +3370,8 @@ export default function Home() {
     }
   }
 
-  async function sendAssistantMessage(event: FormEvent) {
-    event.preventDefault();
-    const message = assistantInput.trim();
+  async function sendAssistantText(rawMessage: string) {
+    const message = rawMessage.trim();
     if (!message || !cloudUser || !assistantThreadId || !supabase || assistantIsSending || assistantReplyRetry) return;
 
     const recentMessages = assistantMessages.slice(-8).map((item) => ({ role: item.role, content: item.content }));
@@ -3369,6 +3397,17 @@ export default function Home() {
     } finally {
       setAssistantIsSending(false);
     }
+  }
+
+  async function sendAssistantMessage(event: FormEvent) {
+    event.preventDefault();
+    await sendAssistantText(assistantInput);
+  }
+
+  function startAssistantPrompt(prompt: string) {
+    if (assistantIsSending || assistantReplyRetry) return;
+    updateAssistantDraft(prompt);
+    void sendAssistantText(prompt);
   }
 
   function assistantActionDescription(action: AssistantProposedAction) {
@@ -4166,7 +4205,9 @@ export default function Home() {
     : todayIso();
 
   return (
-    <main>
+    <main className={activeView === "assistant" ? "assistant-main" : undefined}>
+      {activeView !== "assistant" && (
+        <>
       <header className={`hero${isMobileHeroCompact ? " is-compact" : ""}`}>
         <div>
           <p className="eyebrow">מעקב משימות אישי</p>
@@ -4194,6 +4235,8 @@ export default function Home() {
         )}
       </header>
       <span className="hero-collapse-sentinel" ref={heroCollapseSentinelRef} aria-hidden="true" />
+        </>
+      )}
 
       {!authChecked ? (
         <LoadingSkeleton />
@@ -4223,6 +4266,8 @@ export default function Home() {
         <LoadingSkeleton />
       ) : (
         <>
+          {activeView !== "assistant" && (
+            <>
           <section className="stats" aria-label="סיכום משימות">
             <button onClick={() => showTaskList("active")}><strong>{counts.active}</strong><span>פעילות</span></button>
             <button onClick={() => showTaskList("waiting")}><strong>{counts.waiting}</strong><span>ממתינות</span></button>
@@ -4466,9 +4511,13 @@ export default function Home() {
             </section>
           )}
 
+            </>
+          )}
+
           <nav className="view-tabs" aria-label="מעבר בין תצוגות">
             <button className={activeView === "tasks" ? "active" : ""} onClick={() => setActiveView("tasks")}>משימות</button>
             <button className={activeView === "stats" ? "active" : ""} onClick={() => setActiveView("stats")}>סטטיסטיקות</button>
+            <button className={activeView === "assistant" ? "active" : ""} onClick={openAssistantWorkspace}>שיחת AI</button>
           </nav>
 
           {activeView === "tasks" ? (
@@ -4659,7 +4708,7 @@ export default function Home() {
                 <button className="floating-add" onClick={openCreateTask} aria-label="הוספת משימה חדשה">+</button>
               )}
             </>
-          ) : (
+          ) : activeView === "stats" ? (
             <section className="stats-view analytics-upgraded" aria-label="סטטיסטיקות משימות">
               <div className={`analytics-header${isMobileHeroCompact ? " is-compact" : ""}`}>
                 <div>
@@ -4997,138 +5046,152 @@ export default function Home() {
                 </aside>
               </div>
             </section>
-          )}
+          ) : null}
         </>
       )}
 
-      {cloudUser && (
-        <>
-          {!hasBlockingOverlay && (
-            <button
-              className="assistant-floating-button"
-              onClick={() => setIsAssistantOpen(true)}
-              aria-label="פתיחת צ׳ט AI"
-            >
-              AI
+      {cloudUser && activeView !== "assistant" && !hasBlockingOverlay && (
+        <button
+          className="assistant-floating-button"
+          onClick={openAssistantWorkspace}
+          aria-label="פתיחת שיחת AI"
+          title="שיחת AI"
+        >
+          AI
+        </button>
+      )}
+
+      {cloudUser && activeView === "assistant" && (
+        <section className="assistant-workspace" aria-labelledby="assistant-chat-title">
+          <header className="assistant-workspace-header">
+            <div className="assistant-chat-identity">
+              <span className="assistant-brand-mark" aria-hidden="true"><Sparkles size={18} strokeWidth={2} /></span>
+              <div>
+                <h1 id="assistant-chat-title">שיחת AI</h1>
+                <div className="assistant-chat-subtitle">
+                  <span>עוזר המשימות שלך</span>
+                  {assistantMode && (
+                    <span className={`assistant-mode is-${assistantMode}`}>
+                      <i aria-hidden="true" />
+                      {assistantMode === "ai" ? "AI" : assistantMode === "local" ? "מצב מקומי" : "לא זמין"}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+            <button className="icon-button" onClick={closeAssistantWorkspace} aria-label="חזרה לתצוגה הקודמת" title="חזרה">
+              <ArrowRight size={20} aria-hidden="true" />
+            </button>
+          </header>
+
+          <section className="assistant-welcome" aria-label="פתיחת שיחה">
+            <span className="assistant-welcome-mark" aria-hidden="true"><Sparkles size={34} strokeWidth={1.65} /></span>
+            <p className="eyebrow">שיחה אישית</p>
+            <h2>{displayName ? `היי ${displayName}, במה נתמקד?` : "במה נתמקד?"}</h2>
+            <p>אפשר להמשיך את הרצף האחרון או להתחיל מכיוון חדש.</p>
+            <div className="assistant-starters" aria-label="הצעות לפתיחת שיחה">
+              {assistantMessages.length > 0 && (
+                <button type="button" onClick={scrollAssistantMessagesToBottom}>
+                  <History size={19} aria-hidden="true" />
+                  <span><strong>המשך את השיחה האחרונה</strong><small>חזרה לנקודה שבה עצרנו.</small></span>
+                </button>
+              )}
+              <button type="button" onClick={() => startAssistantPrompt("מה חשוב לי לקדם עכשיו?")} disabled={assistantIsSending || Boolean(assistantReplyRetry)}>
+                <Sparkles size={19} aria-hidden="true" />
+                <span><strong>מה חשוב לקדם עכשיו?</strong><small>נבחר משימה אחת עם סיבה ברורה.</small></span>
+              </button>
+              <button type="button" onClick={() => startAssistantPrompt("עזור לי לתכנן את היום שלי.")} disabled={assistantIsSending || Boolean(assistantReplyRetry)}>
+                <ListChecks size={19} aria-hidden="true" />
+                <span><strong>לעזור לי לתכנן את היום</strong><small>נארגן התחלה מעשית ליום הזה.</small></span>
+              </button>
+              <button type="button" onClick={() => startAssistantPrompt(assistantPersonalizedStarter.prompt)} disabled={assistantIsSending || Boolean(assistantReplyRetry)}>
+                <ListChecks size={19} aria-hidden="true" />
+                <span><strong>{assistantPersonalizedStarter.label}</strong><small>{assistantPersonalizedStarter.detail}</small></span>
+              </button>
+            </div>
+          </section>
+
+          {assistantMessages.length > 0 && (
+            <section className="assistant-history" aria-label="היסטוריית שיחת AI">
+              <div className="assistant-history-heading">
+                <span>השיחה האחרונה</span>
+                <button type="button" onClick={scrollAssistantMessagesToBottom}>לסוף השיחה</button>
+              </div>
+              <div className="assistant-messages" aria-live="polite" ref={assistantMessagesRef} onScroll={handleAssistantMessagesScroll}>
+                {assistantMessages.map((message) => {
+                  const actionStatus = message.actionStatus ?? "proposed";
+                  const actionIsRunning = actionStatus === "approved" && assistantActionInFlightIds.has(message.id);
+                  const actionDetails = message.proposedAction ? assistantActionDetails(message.proposedAction) : "";
+
+                  return (
+                    <article className={`assistant-message role-${message.role}`} key={message.id}>
+                      <span className="assistant-message-meta">{message.role === "user" ? "אני" : "עוזר המשימות"}</span>
+                      <p>{message.content}</p>
+                      {message.proposedAction && (
+                        <div className={`assistant-action-flow status-${actionStatus}`}>
+                          <div className="assistant-action-copy">
+                            <span className="assistant-action-kicker">
+                              {actionStatus === "done" ? <CircleCheck size={16} aria-hidden="true" /> : actionStatus === "failed" ? <CircleAlert size={16} aria-hidden="true" /> : actionStatus === "approved" ? (actionIsRunning ? <LoaderCircle className="assistant-action-spinner" size={16} aria-hidden="true" /> : <Check size={16} aria-hidden="true" />) : <Sparkles size={16} aria-hidden="true" />}
+                              {actionStatus === "done" ? "בוצע" : actionStatus === "failed" ? "הפעולה לא בוצעה" : actionStatus === "approved" ? (actionIsRunning ? "מבצע..." : "הפעולה אושרה") : "פעולה מוצעת"}
+                            </span>
+                            <strong>{assistantActionDescription(message.proposedAction)}</strong>
+                            {actionDetails && <small>{actionDetails}</small>}
+                            {actionStatus === "failed" && <small className="assistant-action-error">{assistantActionErrors[message.id] ?? "לא הצלחנו לבצע את הפעולה. אפשר לנסות שוב."}</small>}
+                          </div>
+                          {(actionStatus === "proposed" || actionStatus === "failed") && (
+                            <button type="button" onClick={() => approveAssistantAction(message)} aria-label={`${actionStatus === "failed" ? "ניסיון חוזר" : "אישור וביצוע"}: ${message.proposedAction.label}`}>
+                              <Check size={17} aria-hidden="true" />
+                              {actionStatus === "failed" ? "ניסיון חוזר" : "אישור וביצוע"}
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
+          {assistantHasUnreadMessages && (
+            <button type="button" className="assistant-new-messages" onClick={scrollAssistantMessagesToBottom}>
+              <ArrowDown size={16} aria-hidden="true" />
+              הודעות חדשות
             </button>
           )}
 
-          {isAssistantOpen && (
-            <div
-              className="assistant-modal"
-              role="presentation"
-              style={assistantViewport.height ? { height: `${assistantViewport.height}px`, top: `${assistantViewport.top}px` } : undefined}
-            >
-              <section className="assistant-chat" role="dialog" aria-modal="true" aria-labelledby="assistant-chat-title">
-                <div className="assistant-chat-header">
-                  <div className="assistant-chat-identity">
-                    <span className="assistant-brand-mark" aria-hidden="true"><Sparkles size={18} strokeWidth={2} /></span>
-                    <div>
-                      <h2 id="assistant-chat-title">שיחת AI</h2>
-                      <div className="assistant-chat-subtitle">
-                        <span>עוזר המשימות שלך</span>
-                        {assistantMode && (
-                          <span className={`assistant-mode is-${assistantMode}`}>
-                            <i aria-hidden="true" />
-                            {assistantMode === "ai" ? "AI" : assistantMode === "local" ? "מצב מקומי" : "לא זמין"}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-                  <button className="icon-button" onClick={() => setIsAssistantOpen(false)} aria-label="סגירת שיחת AI" title="סגירה">
-                    <X size={20} aria-hidden="true" />
-                  </button>
-                </div>
-
-                <div className={`assistant-messages${assistantMessages.length === 0 ? " is-empty" : ""}`} aria-live="polite" ref={assistantMessagesRef} onScroll={handleAssistantMessagesScroll}>
-                  {assistantMessages.length === 0 ? (
-                    <div className="assistant-empty">
-                      <span className="assistant-empty-mark" aria-hidden="true"><Sparkles size={30} strokeWidth={1.8} /></span>
-                      <h3>{displayName ? `היי ${displayName}, במה נתחיל?` : "במה נתחיל?"}</h3>
-                      <p>אפשר לשאול על המשימות שלך או לבקש לבצע פעולה.</p>
-                    </div>
-                  ) : assistantMessages.map((message) => {
-                    const actionStatus = message.actionStatus ?? "proposed";
-                    const actionIsRunning = actionStatus === "approved" && assistantActionInFlightIds.has(message.id);
-                    const actionDetails = message.proposedAction ? assistantActionDetails(message.proposedAction) : "";
-
-                    return (
-                      <article className={`assistant-message role-${message.role}`} key={message.id}>
-                        <span className="assistant-message-meta">{message.role === "user" ? "אני" : "עוזר המשימות"}</span>
-                        <p>{message.content}</p>
-                        {message.proposedAction && (
-                          <div className={`assistant-action-flow status-${actionStatus}`}>
-                            <div className="assistant-action-copy">
-                              <span className="assistant-action-kicker">
-                                {actionStatus === "done" ? <CircleCheck size={16} aria-hidden="true" /> : actionStatus === "failed" ? <CircleAlert size={16} aria-hidden="true" /> : actionStatus === "approved" ? (actionIsRunning ? <LoaderCircle className="assistant-action-spinner" size={16} aria-hidden="true" /> : <Check size={16} aria-hidden="true" />) : <Sparkles size={16} aria-hidden="true" />}
-                                {actionStatus === "done" ? "בוצע" : actionStatus === "failed" ? "הפעולה לא בוצעה" : actionStatus === "approved" ? (actionIsRunning ? "מבצע..." : "הפעולה אושרה") : "פעולה מוצעת"}
-                              </span>
-                              <strong>{assistantActionDescription(message.proposedAction)}</strong>
-                              {actionDetails && <small>{actionDetails}</small>}
-                              {actionStatus === "failed" && <small className="assistant-action-error">{assistantActionErrors[message.id] ?? "לא הצלחנו לבצע את הפעולה. אפשר לנסות שוב."}</small>}
-                            </div>
-
-                            {(actionStatus === "proposed" || actionStatus === "failed") && (
-                              <button
-                                type="button"
-                                onClick={() => approveAssistantAction(message)}
-                                aria-label={`${actionStatus === "failed" ? "ניסיון חוזר" : "אישור וביצוע"}: ${message.proposedAction.label}`}
-                              >
-                                <Check size={17} aria-hidden="true" />
-                                {actionStatus === "failed" ? "ניסיון חוזר" : "אישור וביצוע"}
-                              </button>
-                            )}
-
-                          </div>
-                        )}
-                      </article>
-                    );
-                  })}
-                </div>
-
-                {assistantHasUnreadMessages && (
-                  <button type="button" className="assistant-new-messages" onClick={scrollAssistantMessagesToBottom}>
-                    <ArrowDown size={16} aria-hidden="true" />
-                    הודעות חדשות
-                  </button>
-                )}
-
-                {assistantReplyRetry && (
-                  <div className="assistant-retry" role="status">
-                    <span>ההודעה נשמרה. לא התקבלה עדיין תשובה מהעוזר.</span>
-                    <button type="button" onClick={retryAssistantResponse} disabled={assistantIsSending}>
-                      <RotateCcw size={16} aria-hidden="true" />
-                      נסה שוב
-                    </button>
-                  </div>
-                )}
-
-                {assistantStatus && <p className="assistant-status" role="status">{assistantStatus}</p>}
-
-                <form className="assistant-form" onSubmit={sendAssistantMessage}>
-                  <input
-                    {...freeTextInputProps}
-                    value={assistantInput}
-                    onChange={(event) => updateAssistantDraft(event.target.value)}
-                    placeholder="כתוב לעוזר המשימות..."
-                    aria-label="הודעה לצ׳ט AI"
-                    disabled={assistantIsSending || !assistantThreadId}
-                  />
-                  <button
-                    type="submit"
-                    className="assistant-send-button"
-                    disabled={assistantIsSending || Boolean(assistantReplyRetry) || !assistantInput.trim() || !assistantThreadId}
-                    aria-label="שליחת הודעה"
-                    title="שליחה"
-                  >
-                    <ArrowUp size={20} strokeWidth={2.25} aria-hidden="true" />
-                  </button>
-                </form>
-              </section>
+          {assistantReplyRetry && (
+            <div className="assistant-retry" role="status">
+              <span>ההודעה נשמרה. לא התקבלה עדיין תשובה מהעוזר.</span>
+              <button type="button" onClick={retryAssistantResponse} disabled={assistantIsSending}>
+                <RotateCcw size={16} aria-hidden="true" />
+                נסה שוב
+              </button>
             </div>
           )}
-        </>
+
+          {assistantStatus && <p className="assistant-status" role="status">{assistantStatus}</p>}
+
+          <form className="assistant-form" onSubmit={sendAssistantMessage}>
+            <input
+              {...freeTextInputProps}
+              value={assistantInput}
+              onChange={(event) => updateAssistantDraft(event.target.value)}
+              placeholder="כתוב לעוזר המשימות..."
+              aria-label="הודעה לצ׳ט AI"
+              disabled={assistantIsSending || !assistantThreadId}
+            />
+            <button
+              type="submit"
+              className="assistant-send-button"
+              disabled={assistantIsSending || Boolean(assistantReplyRetry) || !assistantInput.trim() || !assistantThreadId}
+              aria-label="שליחת הודעה"
+              title="שליחה"
+            >
+              <ArrowUp size={20} strokeWidth={2.25} aria-hidden="true" />
+            </button>
+          </form>
+        </section>
       )}
 
       {isDriveOnboardingOpen && cloudUser && (
