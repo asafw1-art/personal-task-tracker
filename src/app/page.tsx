@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ChangeEvent, Dispatch, FormEvent, SetStateAction } from "react";
 import type { User } from "@supabase/supabase-js";
-import { ArrowDown, ArrowRight, ArrowUp, Bell, Check, ChevronDown, CircleAlert, CircleCheck, ListChecks, LoaderCircle, Pencil, RotateCcw, Share2, Sparkles, Trash2, X } from "lucide-react";
+import { ArrowDown, ArrowRight, ArrowUp, Bell, Check, ChevronDown, CircleAlert, CircleCheck, History, ListChecks, LoaderCircle, Pencil, RotateCcw, Share2, Sparkles, Trash2, X } from "lucide-react";
 import { useNotificationReceipts } from "@/lib/useNotificationReceipts";
 import type { AssistantMessage, AssistantProposedAction, AssistantThread } from "@/lib/assistant";
 import { canonicalTaskId, initialTasks, Task, TaskPrefix, TaskPriority, TaskStatus, TaskSubtask, TaskSubtaskStatus } from "@/lib/tasks";
@@ -837,6 +837,7 @@ export default function Home() {
   const [editingInlineSubtaskKey, setEditingInlineSubtaskKey] = useState<string | null>(null);
   const [assistantThreadId, setAssistantThreadId] = useState<string | null>(null);
   const [assistantMessages, setAssistantMessages] = useState<AssistantMessage[]>([]);
+  const [assistantStarterOpen, setAssistantStarterOpen] = useState(false);
   const [assistantInput, setAssistantInput] = useState("");
   const [assistantStatus, setAssistantStatus] = useState("הצ׳ט ייטען אחרי התחברות לענן.");
   const [assistantIsSending, setAssistantIsSending] = useState(false);
@@ -980,6 +981,7 @@ export default function Home() {
     if (activeView !== "assistant") {
       assistantReturnViewRef.current = activeView;
       assistantReturnScrollYRef.current = window.scrollY;
+      setAssistantStarterOpen(true);
     }
     setActiveView("assistant");
     window.scrollTo({ top: 0, behavior: "auto" });
@@ -3376,6 +3378,7 @@ export default function Home() {
 
     const recentMessages = assistantMessages.slice(-8).map((item) => ({ role: item.role, content: item.content }));
     let userMessageSaved = false;
+    setAssistantStarterOpen(false);
     setAssistantIsSending(true);
     setAssistantStatus("שומר את ההודעה...");
     assistantShouldScrollToBottomRef.current = true;
@@ -3408,6 +3411,11 @@ export default function Home() {
     if (assistantIsSending || assistantReplyRetry) return;
     updateAssistantDraft(prompt);
     void sendAssistantText(prompt);
+  }
+
+  function continueAssistantConversation() {
+    setAssistantStarterOpen(false);
+    window.requestAnimationFrame(() => window.requestAnimationFrame(scrollAssistantMessagesToBottom));
   }
 
   function assistantActionDescription(action: AssistantProposedAction) {
@@ -5084,36 +5092,47 @@ export default function Home() {
             </button>
           </header>
 
-          {assistantMessages.length === 0 && (
-            <section className="assistant-welcome" aria-label="פתיחת שיחה">
-              <span className="assistant-welcome-mark" aria-hidden="true"><Sparkles size={34} strokeWidth={1.65} /></span>
-              <p className="eyebrow">שיחה אישית</p>
-              <h2>{displayName ? `היי ${displayName}, במה נתמקד?` : "במה נתמקד?"}</h2>
-              <p>אפשר להתחיל מכיוון חדש או לנסח את מה שעל הפרק.</p>
-              <div className="assistant-starters" aria-label="הצעות לפתיחת שיחה">
-                <button type="button" onClick={() => startAssistantPrompt("מה חשוב לי לקדם עכשיו?")} disabled={assistantIsSending || Boolean(assistantReplyRetry)}>
-                  <Sparkles size={19} aria-hidden="true" />
-                  <span><strong>מה חשוב לקדם עכשיו?</strong><small>נבחר משימה אחת עם סיבה ברורה.</small></span>
-                </button>
-                <button type="button" onClick={() => startAssistantPrompt("עזור לי לתכנן את היום שלי.")} disabled={assistantIsSending || Boolean(assistantReplyRetry)}>
-                  <ListChecks size={19} aria-hidden="true" />
-                  <span><strong>לעזור לי לתכנן את היום</strong><small>נארגן התחלה מעשית ליום הזה.</small></span>
-                </button>
-                <button type="button" onClick={() => startAssistantPrompt(assistantPersonalizedStarter.prompt)} disabled={assistantIsSending || Boolean(assistantReplyRetry)}>
-                  <ListChecks size={19} aria-hidden="true" />
-                  <span><strong>{assistantPersonalizedStarter.label}</strong><small>{assistantPersonalizedStarter.detail}</small></span>
-                </button>
-              </div>
-            </section>
-          )}
+          <div className={`assistant-workspace-content${assistantStarterOpen ? " has-starter" : ""}`}>
+            {assistantStarterOpen && (
+              <section className="assistant-welcome" aria-label="פתיחת שיחה">
+                <div className="assistant-welcome-copy">
+                  <span className="assistant-welcome-mark" aria-hidden="true"><Sparkles size={22} strokeWidth={1.75} /></span>
+                  <div>
+                    <p className="eyebrow">שיחה אישית</p>
+                    <h2>{displayName ? `היי ${displayName}, במה נתמקד?` : "במה נתמקד?"}</h2>
+                  </div>
+                </div>
+                <div className="assistant-starters" aria-label="הצעות לפתיחת שיחה">
+                  {assistantMessages.length > 0 && (
+                    <button type="button" onClick={continueAssistantConversation}>
+                      <History size={18} aria-hidden="true" />
+                      <strong>המשך שיחה</strong>
+                    </button>
+                  )}
+                  <button type="button" onClick={() => startAssistantPrompt("מה חשוב לי לקדם עכשיו?")} disabled={assistantIsSending || Boolean(assistantReplyRetry)}>
+                    <Sparkles size={18} aria-hidden="true" />
+                    <strong>מה לקדם עכשיו?</strong>
+                  </button>
+                  <button type="button" onClick={() => startAssistantPrompt("עזור לי לתכנן את היום שלי.")} disabled={assistantIsSending || Boolean(assistantReplyRetry)}>
+                    <ListChecks size={18} aria-hidden="true" />
+                    <strong>תכנון היום</strong>
+                  </button>
+                  <button type="button" onClick={() => startAssistantPrompt(assistantPersonalizedStarter.prompt)} disabled={assistantIsSending || Boolean(assistantReplyRetry)}>
+                    <ListChecks size={18} aria-hidden="true" />
+                    <strong>{assistantPersonalizedStarter.label}</strong>
+                  </button>
+                </div>
+              </section>
+            )}
 
-          {assistantMessages.length > 0 && (
-            <section className="assistant-history" aria-label="היסטוריית שיחת AI">
-              <div className="assistant-history-heading">
-                <span>השיחה האחרונה</span>
-                <button type="button" onClick={scrollAssistantMessagesToBottom}>לסוף השיחה</button>
-              </div>
-              <div className="assistant-messages" aria-live="polite" ref={assistantMessagesRef} onScroll={handleAssistantMessagesScroll}>
+            <div className="assistant-conversation">
+              {assistantMessages.length > 0 && (
+                <section className="assistant-history" aria-label="היסטוריית שיחת AI">
+                  <div className="assistant-history-heading">
+                    <span>השיחה האחרונה</span>
+                    <button type="button" onClick={scrollAssistantMessagesToBottom}>לסוף השיחה</button>
+                  </div>
+                  <div className="assistant-messages" aria-live="polite" ref={assistantMessagesRef} onScroll={handleAssistantMessagesScroll}>
                 {assistantMessages.map((message) => {
                   const actionStatus = message.actionStatus ?? "proposed";
                   const actionIsRunning = actionStatus === "approved" && assistantActionInFlightIds.has(message.id);
@@ -5144,29 +5163,31 @@ export default function Home() {
                       )}
                     </article>
                   );
-                })}
-              </div>
-            </section>
-          )}
+                    })}
+                  </div>
+                </section>
+              )}
 
-          {assistantHasUnreadMessages && (
-            <button type="button" className="assistant-new-messages" onClick={scrollAssistantMessagesToBottom}>
-              <ArrowDown size={16} aria-hidden="true" />
-              הודעות חדשות
-            </button>
-          )}
+              {assistantHasUnreadMessages && (
+                <button type="button" className="assistant-new-messages" onClick={scrollAssistantMessagesToBottom}>
+                  <ArrowDown size={16} aria-hidden="true" />
+                  הודעות חדשות
+                </button>
+              )}
 
-          {assistantReplyRetry && (
-            <div className="assistant-retry" role="status">
-              <span>ההודעה נשמרה. לא התקבלה עדיין תשובה מהעוזר.</span>
-              <button type="button" onClick={retryAssistantResponse} disabled={assistantIsSending}>
-                <RotateCcw size={16} aria-hidden="true" />
-                נסה שוב
-              </button>
+              {assistantReplyRetry && (
+                <div className="assistant-retry" role="status">
+                  <span>ההודעה נשמרה. לא התקבלה עדיין תשובה מהעוזר.</span>
+                  <button type="button" onClick={retryAssistantResponse} disabled={assistantIsSending}>
+                    <RotateCcw size={16} aria-hidden="true" />
+                    נסה שוב
+                  </button>
+                </div>
+              )}
+
+              {assistantStatus && <p className="assistant-status" role="status">{assistantStatus}</p>}
             </div>
-          )}
-
-          {assistantStatus && <p className="assistant-status" role="status">{assistantStatus}</p>}
+          </div>
 
           <form className="assistant-form" onSubmit={sendAssistantMessage}>
             <input
