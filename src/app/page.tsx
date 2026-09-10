@@ -983,6 +983,7 @@ export default function Home() {
       assistantReturnScrollYRef.current = window.scrollY;
       setAssistantStarterOpen(true);
     }
+    assistantShouldScrollToBottomRef.current = true;
     setActiveView("assistant");
     window.scrollTo({ top: 0, behavior: "auto" });
   }
@@ -1009,7 +1010,6 @@ export default function Home() {
     if (openedNow) {
       assistantIsNearBottomRef.current = false;
       setAssistantHasUnreadMessages(false);
-      return;
     }
 
     if (assistantShouldScrollToBottomRef.current || assistantIsNearBottomRef.current) {
@@ -3388,15 +3388,17 @@ export default function Home() {
       userMessageSaved = true;
       setAssistantMessages((current) => [...current, userMessage]);
       updateAssistantDraft("");
-      setAssistantReplyRetry({ message, recentMessages });
       setAssistantStatus("העוזר מכין תשובה...");
       await requestAssistantReply(message, recentMessages);
       setAssistantReplyRetry(null);
     } catch (error) {
       setAssistantMode("unavailable");
-      setAssistantStatus(userMessageSaved
-        ? `ההודעה נשמרה, אך לא התקבלה תשובה: ${errorMessage(error)}`
-        : `לא הצלחנו לשמור את ההודעה. הטקסט נשאר בשדה הכתיבה: ${errorMessage(error)}`);
+      if (userMessageSaved) {
+        setAssistantReplyRetry({ message, recentMessages });
+        setAssistantStatus(`ההודעה נשמרה, אך לא התקבלה תשובה: ${errorMessage(error)}`);
+      } else {
+        setAssistantStatus(`לא הצלחנו לשמור את ההודעה. הטקסט נשאר בשדה הכתיבה: ${errorMessage(error)}`);
+      }
     } finally {
       setAssistantIsSending(false);
     }

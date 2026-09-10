@@ -357,9 +357,9 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
 .assistant-form { background: var(--surface); border-top: 1px solid var(--border); display: grid; gap: 9px; grid-template-columns: minmax(0, 1fr) 46px; padding: 14px 18px 18px; }
 .assistant-form input { background: var(--surface-soft); border-radius: 24px; min-height: 46px; min-width: 0; padding-inline: 16px; }
 .assistant-form .assistant-send-button { align-items: center; border-radius: 50%; display: inline-flex; height: 46px; justify-content: center; padding: 0; width: 46px; }
-.assistant-main { max-width: min(1280px, calc(100% - 28px)); min-height: 100dvh; padding-top: 16px; }
+.assistant-main { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100dvh; max-width: min(1280px, calc(100% - 28px)); min-height: 0; padding: 16px 0; }
 .assistant-main .view-tabs { margin-inline: auto; }
-.assistant-workspace { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow); display: grid; grid-template-rows: auto minmax(0, 1fr) auto; height: calc(100dvh - 106px); margin: 0 auto; max-width: 1080px; min-height: calc(100dvh - 106px); overflow: hidden; width: 100%; }
+.assistant-workspace { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow); display: grid; grid-template-rows: auto minmax(0, 1fr) auto; height: auto; margin: 0 auto; max-width: 1080px; min-height: 0; overflow: hidden; width: 100%; }
 .assistant-workspace-header { align-items: center; border-bottom: 1px solid var(--border); display: flex; gap: 12px; justify-content: space-between; padding: 10px 16px; }
 .assistant-workspace-header h1 { font-size: 1rem; line-height: 1.2; margin: 0; }
 .assistant-workspace-content { display: grid; min-height: 0; }
@@ -1046,10 +1046,10 @@ button.subtask-read-main { cursor: pointer; }
 }
 @media (max-width: 700px) {
   main { max-width: calc(100vw - 20px); width: calc(100vw - 20px); padding: 18px 0 calc(112px + env(safe-area-inset-bottom)); }
-  .assistant-main { max-width: 100%; padding: 0 0 calc(12px + env(safe-area-inset-bottom)); width: 100%; }
+  .assistant-main { height: 100dvh; max-width: 100%; min-height: 0; padding: 0; width: 100%; }
   .assistant-main .view-tabs { border-inline: 0; border-radius: 0; margin: 0; width: 100%; }
   .assistant-main .view-tabs button { font-size: .86rem; padding-inline: 8px; }
-  .assistant-workspace { border: 0; border-radius: 0; box-shadow: none; height: calc(100dvh - 64px); min-height: calc(100dvh - 64px); }
+  .assistant-workspace { border: 0; border-radius: 0; box-shadow: none; height: auto; min-height: 0; }
   .assistant-workspace-header { padding: 10px 14px; }
   .assistant-welcome { align-items: start; grid-template-columns: 1fr; padding: 12px 14px; }
   .assistant-starters { grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
