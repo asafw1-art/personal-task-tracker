@@ -140,11 +140,27 @@ function listPreview(tasks: Task[]) {
   return tasks.slice(0, 5).map(taskDisplay).join("\n");
 }
 
+function isAssistantArchiveRequest(message: string) {
+  return /ארכי|archive/i.test(message);
+}
+
+function isExplicitAssistantHistoryRemovalRequest(message: string) {
+  return /צ[׳']?ט|שיח|שיחה|שיחות|chat|conversation|history|היסטור/i.test(message)
+    && /מחק|מחיקה|נקה|אפס|הסתר|הסר|delete|clear|reset|erase|remove/i.test(message);
+}
+
 function localAssistantResponse(message: string, tasks: Task[]): AssistantResponse | null {
   const normalized = message.toLowerCase();
   const today = new Date().toISOString().slice(0, 10);
 
-  if (/צ[׳']?ט|שיח|שיחה|שיחות|chat|conversation|history|היסטור/i.test(message) && /מחק|מחיקה|נקה|אפס|delete|clear|reset/i.test(message)) {
+  if (isAssistantArchiveRequest(message)) {
+    return {
+      reply: "ארכיון שיחות עדיין אינו זמין. אפשר להסיר את השיחה הפעילה מהתצוגה ולשמור אותה לשחזור אישי למשך 30 יום, אם תבקש להסיר או למחוק אותה.",
+      mode: "local",
+    };
+  }
+
+  if (isExplicitAssistantHistoryRemovalRequest(message)) {
     return {
       reply: "אפשר למחוק את שיחת ה-AI הפעילה. היא תוסתר עכשיו ותישמר לשחזור אישי למשך 30 יום.",
       proposedAction: { type: "delete_assistant_history", label: "אישור והעברה לשחזור" },
@@ -237,7 +253,8 @@ function buildSystemPrompt() {
     "{\"type\":\"update_subtask_status\",\"label\":\"אישור וביצוע\",\"taskId\":\"P20\",\"subtaskNumber\":1,\"status\":\"open|done|cancelled\"}",
     "{\"type\":\"filter_tasks\",\"label\":\"הצג משימות\",\"filter\":{\"query\":\"...\",\"statusFilter\":\"active|overdue|subtasks_open|waiting|done|all\",\"prefixFilter\":\"P|W|all\",\"topicFilter\":\"...\",\"actionFilter\":\"...\"}}",
     "{\"type\":\"delete_assistant_history\",\"label\":\"אישור והעברה לשחזור\"}",
-    "If the user asks to delete, clear, reset, erase, or remove the AI chat history, return proposedAction type delete_assistant_history. Explain that it will be hidden now and kept recoverable for 30 days.",
+    "If the user asks to archive the AI chat or conversation, do not return proposedAction. Explain in Hebrew that a true conversation archive is not available yet, and that hiding the active chat for personal recovery for 30 days is available only when they explicitly ask to remove or delete it.",
+    "Only if the user explicitly asks to delete, clear, reset, erase, remove, or hide the AI chat history, return proposedAction type delete_assistant_history. Explain that it will be hidden now and kept recoverable for 30 days.",
     "If the user asks to delete or clear all tasks, reply that this can only be done from settings and do not return proposedAction.",
     "אם המשתמש מבקש ניתוח או שאלה בלבד, אל תחזיר proposedAction.",
   ].join("\n");
@@ -308,7 +325,7 @@ function sanitizeAction(action: AssistantProposedAction | undefined, tasks: Task
   const looksLikeBulkTaskChange = /כל המשימות|כולן|כולם|איפוס|reset all|delete all|מחק הכל|לבטל הכל|סגור הכל|סגור את הכל|complete all|cancel all/i.test(userMessage);
 
   if (action.type === "delete_assistant_history") {
-    return /צ[׳']?ט|שיח|שיחה|שיחות|chat|conversation|history|היסטור/i.test(userMessage)
+    return !isAssistantArchiveRequest(userMessage) && isExplicitAssistantHistoryRemovalRequest(userMessage)
       ? { type: "delete_assistant_history", label: "אישור והעברה לשחזור" }
       : undefined;
   }
