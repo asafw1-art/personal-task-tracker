@@ -4,6 +4,7 @@ create table if not exists public.assistant_threads (
   title text not null default 'שיחה פעילה',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
+  archived_at timestamptz,
   deleted_at timestamptz,
   purge_after timestamptz
 );

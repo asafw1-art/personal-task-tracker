@@ -3,12 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ChangeEvent, Dispatch, FormEvent, SetStateAction } from "react";
 import type { User } from "@supabase/supabase-js";
-import { ArrowDown, ArrowRight, ArrowUp, Bell, Check, ChevronDown, CircleAlert, CircleCheck, History, ListChecks, LoaderCircle, Pencil, RotateCcw, Share2, Sparkles, Trash2, X } from "lucide-react";
+import { Archive, ArrowDown, ArrowRight, ArrowUp, Bell, Check, ChevronDown, CircleAlert, CircleCheck, History, ListChecks, LoaderCircle, Pencil, RotateCcw, Share2, Sparkles, Trash2, X } from "lucide-react";
 import { useNotificationReceipts } from "@/lib/useNotificationReceipts";
 import type { AssistantMessage, AssistantProposedAction, AssistantThread } from "@/lib/assistant";
 import { canonicalTaskId, initialTasks, Task, TaskPrefix, TaskPriority, TaskStatus, TaskSubtask, TaskSubtaskStatus } from "@/lib/tasks";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
-import { addAssistantMessage, fetchAssistantMessages, fetchDeletedAssistantThreads, getOrCreateAssistantThread, restoreAssistantThread, softDeleteAssistantHistory, updateAssistantMessageActionStatus } from "@/lib/supabaseAssistant";
+import { addAssistantMessage, archiveAssistantThread, fetchArchivedAssistantThreads, fetchAssistantMessages, fetchDeletedAssistantThreads, getOrCreateAssistantThread, restoreAssistantThread, softDeleteAssistantHistory, updateAssistantMessageActionStatus } from "@/lib/supabaseAssistant";
 import { fetchUserDevices, registerCurrentDevice, type UserDevice } from "@/lib/supabaseDevices";
 import { acceptTaskShare, createTaskShare, declineTaskShare, fetchTaskShares, fetchTaskSubtaskAssignments, historicalTaskFromShare, leaveTaskShare, revokeTaskShare, setSharedTaskFocus, setTaskSubtaskAssignment, updateSharedTaskSubtaskStatus, type TaskShare, type TaskSubtaskAssignment } from "@/lib/supabaseSharing";
 import { countCloudTasks, fetchCloudTasks, saveCloudTasks } from "@/lib/supabaseTasks";
@@ -704,6 +704,7 @@ function replaceValue(values: string[], oldValue: string, newValue: string) {
 function isDestructiveAssistantAction(action: AssistantProposedAction) {
   return (
     action.type === "delete_assistant_history"
+    || action.type === "archive_assistant_history"
     || (action.type === "update_task_status" && ["done", "cancelled"].includes(action.status))
     || (action.type === "update_subtask_status" && action.status === "cancelled")
   );
@@ -851,6 +852,10 @@ export default function Home() {
   const [assistantActionInFlightIds, setAssistantActionInFlightIds] = useState<Set<string>>(() => new Set());
   const [deletedAssistantThreads, setDeletedAssistantThreads] = useState<AssistantThread[]>([]);
   const [assistantRestoreStatus, setAssistantRestoreStatus] = useState("");
+  const [archivedAssistantThreads, setArchivedAssistantThreads] = useState<AssistantThread[]>([]);
+  const [assistantArchiveOpen, setAssistantArchiveOpen] = useState(false);
+  const [assistantArchivePreview, setAssistantArchivePreview] = useState<{ thread: AssistantThread; messages: AssistantMessage[] } | null>(null);
+  const [assistantArchiveStatus, setAssistantArchiveStatus] = useState("");
   const [activeNotificationId, setActiveNotificationId] = useState("");
   const [isNotificationDetailOpen, setIsNotificationDetailOpen] = useState(false);
   const [isNotificationCenterOpen, setIsNotificationCenterOpen] = useState(false);
@@ -1189,6 +1194,13 @@ export default function Home() {
           })
           .catch((error: unknown) => {
             if (!cancelled) setAssistantRestoreStatus(`שחזור שיחות עדיין לא פעיל: ${errorMessage(error)}`);
+          });
+        fetchArchivedAssistantThreads(cloudUser)
+          .then((threads) => {
+            if (!cancelled) setArchivedAssistantThreads(threads);
+          })
+          .catch((error: unknown) => {
+            if (!cancelled) setAssistantArchiveStatus(`הארכיון עדיין לא מוכן: ${errorMessage(error)}`);
           });
       })
       .catch((error: unknown) => {
@@ -3197,6 +3209,53 @@ export default function Home() {
     }
   }
 
+  async function refreshArchivedAssistantThreadList() {
+    if (!cloudUser) return;
+    try {
+      const threads = await fetchArchivedAssistantThreads(cloudUser);
+      setArchivedAssistantThreads(threads);
+      setAssistantArchiveStatus("");
+    } catch (error) {
+      setAssistantArchiveStatus(`לא הצלחתי לטעון את הארכיון: ${errorMessage(error)}`);
+    }
+  }
+
+  function openAssistantArchive() {
+    setAssistantArchiveOpen(true);
+    setAssistantArchivePreview(null);
+    setAssistantArchiveStatus("");
+    void refreshArchivedAssistantThreadList();
+  }
+
+  async function openArchivedAssistantThread(thread: AssistantThread) {
+    setAssistantArchiveStatus("טוען שיחה מהארכיון...");
+    try {
+      const messages = await fetchAssistantMessages(thread.id);
+      setAssistantArchivePreview({ thread, messages });
+      setAssistantArchiveStatus("");
+    } catch (error) {
+      setAssistantArchiveStatus(`לא הצלחתי לפתוח את השיחה: ${errorMessage(error)}`);
+    }
+  }
+
+  async function archiveActiveAssistantHistory() {
+    if (!cloudUser || !assistantThreadId) throw new Error("השיחה הפעילה אינה מוכנה להעברה לארכיון.");
+
+    setAssistantStatus("מעביר את שיחת ה-AI לארכיון...");
+    await archiveAssistantThread(assistantThreadId, cloudUser);
+    const thread = await getOrCreateAssistantThread(cloudUser);
+    updateAssistantDraft("");
+    setAssistantThreadId(thread.id);
+    setAssistantMessages([]);
+    setAssistantReplyRetry(null);
+    setAssistantHasUnreadMessages(false);
+    setAssistantMode(null);
+    setAssistantActionErrors({});
+    setAssistantStarterOpen(true);
+    await refreshArchivedAssistantThreadList();
+    setAssistantStatus("השיחה הועברה לארכיון.");
+  }
+
   async function restoreDeletedAssistantThread(threadId: string) {
     setAssistantRestoreStatus("משחזר שיחת AI...");
     try {
@@ -3286,6 +3345,12 @@ export default function Home() {
         setActiveView("tasks");
       } else if (message.proposedAction.type === "delete_assistant_history") {
         await clearAssistantHistory({ confirmBeforeDelete: false });
+        return;
+      } else if (message.proposedAction.type === "archive_assistant_history") {
+        await archiveActiveAssistantHistory();
+        await updateAssistantMessageActionStatus(message.id, "done").catch(() => {
+          setAssistantStatus("השיחה הועברה לארכיון, אך שמירת מצב האישור בצ׳ט נכשלה.");
+        });
         return;
       }
 
@@ -3422,6 +3487,7 @@ export default function Home() {
 
   function assistantActionDescription(action: AssistantProposedAction) {
     if (action.type === "delete_assistant_history") return "העברת שיחת ה-AI לשחזור למשך 30 יום";
+    if (action.type === "archive_assistant_history") return "העברת שיחת ה-AI לארכיון";
     if (action.type === "create_task") return `יצירת משימה: ${action.task.title}`;
     if (action.type === "update_task_status") return `שינוי ${action.taskId} לסטטוס ${statusLabels[action.status]}`;
     if (action.type === "add_subtask") return `הוספת צעד טיפול ל-${action.taskId}: ${action.subtask.title}`;
@@ -5077,10 +5143,10 @@ export default function Home() {
             <div className="assistant-chat-identity">
               <span className="assistant-brand-mark" aria-hidden="true"><Sparkles size={18} strokeWidth={2} /></span>
               <div>
-                <h1 id="assistant-chat-title">שיחת AI</h1>
+                <h1 id="assistant-chat-title">{assistantArchiveOpen ? "ארכיון שיחות AI" : "שיחת AI"}</h1>
                 <div className="assistant-chat-subtitle">
-                  <span>עוזר המשימות שלך</span>
-                  {assistantMode && (
+                  <span>{assistantArchiveOpen ? "שיחות שנשמרו" : "עוזר המשימות שלך"}</span>
+                  {!assistantArchiveOpen && assistantMode && (
                     <span className={`assistant-mode is-${assistantMode}`}>
                       <i aria-hidden="true" />
                       {assistantMode === "ai" ? "AI" : assistantMode === "local" ? "מצב מקומי" : "לא זמין"}
@@ -5089,11 +5155,78 @@ export default function Home() {
                 </div>
               </div>
             </div>
-            <button className="icon-button" onClick={closeAssistantWorkspace} aria-label="חזרה לתצוגה הקודמת" title="חזרה">
-              <ArrowRight size={20} aria-hidden="true" />
-            </button>
+            <div className="assistant-workspace-actions">
+              {!assistantArchiveOpen && (
+                <button className="icon-button assistant-archive-button" onClick={openAssistantArchive} aria-label="פתיחת ארכיון שיחות AI" title="ארכיון שיחות">
+                  <Archive size={19} aria-hidden="true" />
+                  {archivedAssistantThreads.length > 0 && <span className="assistant-archive-count">{archivedAssistantThreads.length}</span>}
+                </button>
+              )}
+              <button
+                className="icon-button"
+                onClick={assistantArchiveOpen ? () => setAssistantArchiveOpen(false) : closeAssistantWorkspace}
+                aria-label={assistantArchiveOpen ? "חזרה לשיחת AI" : "חזרה לתצוגה הקודמת"}
+                title="חזרה"
+              >
+                <ArrowRight size={20} aria-hidden="true" />
+              </button>
+            </div>
           </header>
 
+          {assistantArchiveOpen ? (
+            <div className="assistant-archive" aria-live="polite">
+              {assistantArchivePreview ? (
+                <>
+                  <div className="assistant-archive-heading">
+                    <div>
+                      <span>שיחה מהארכיון</span>
+                      <small>הועברה לארכיון {formatDateTime(assistantArchivePreview.thread.archivedAt ?? assistantArchivePreview.thread.updatedAt)}</small>
+                    </div>
+                    <button type="button" onClick={() => setAssistantArchivePreview(null)}>לכל השיחות</button>
+                  </div>
+                  <div className="assistant-archive-messages">
+                    {assistantArchivePreview.messages.map((message) => (
+                      <article className={`assistant-message role-${message.role}`} key={message.id}>
+                        <span className="assistant-message-meta">{message.role === "user" ? "אני" : "עוזר המשימות"}</span>
+                        <p>{message.content}</p>
+                        {message.proposedAction && (
+                          <div className={`assistant-action-flow status-${message.actionStatus ?? "proposed"}`}>
+                            <div className="assistant-action-copy">
+                              <span className="assistant-action-kicker"><Archive size={16} aria-hidden="true" />פעולה שנשמרה</span>
+                              <strong>{assistantActionDescription(message.proposedAction)}</strong>
+                            </div>
+                          </div>
+                        )}
+                      </article>
+                    ))}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="assistant-archive-heading">
+                    <div>
+                      <span>ארכיון</span>
+                      <small>שיחות שנשמרו לקריאה</small>
+                    </div>
+                  </div>
+                  <div className="assistant-archive-list">
+                    {archivedAssistantThreads.length > 0 ? archivedAssistantThreads.map((thread) => (
+                      <button className="assistant-archive-row" type="button" key={thread.id} onClick={() => void openArchivedAssistantThread(thread)}>
+                        <span>
+                          <strong>שיחה מ־{formatDateTime(thread.archivedAt ?? thread.updatedAt)}</strong>
+                          <small>עודכנה {formatDateTime(thread.updatedAt)}</small>
+                        </span>
+                        <ArrowRight size={18} aria-hidden="true" />
+                      </button>
+                    )) : (
+                      <p className="assistant-archive-empty">אין עדיין שיחות בארכיון.</p>
+                    )}
+                  </div>
+                </>
+              )}
+              {assistantArchiveStatus && <p className="assistant-status" role="status">{assistantArchiveStatus}</p>}
+            </div>
+          ) : (
           <div className={`assistant-workspace-content${assistantStarterOpen ? " has-starter" : ""}`}>
             {assistantStarterOpen && (
               <section className="assistant-welcome" aria-label="פתיחת שיחה">
@@ -5190,8 +5323,9 @@ export default function Home() {
               {assistantStatus && <p className="assistant-status" role="status">{assistantStatus}</p>}
             </div>
           </div>
+          )}
 
-          <form className="assistant-form" onSubmit={sendAssistantMessage}>
+          {!assistantArchiveOpen && <form className="assistant-form" onSubmit={sendAssistantMessage}>
             <input
               {...freeTextInputProps}
               value={assistantInput}
@@ -5210,6 +5344,7 @@ export default function Home() {
               <ArrowUp size={20} strokeWidth={2.25} aria-hidden="true" />
             </button>
           </form>
+          }
         </section>
       )}
 

@@ -53,6 +53,10 @@ export type AssistantProposedAction =
   | {
       type: "delete_assistant_history";
       label: string;
+    }
+  | {
+      type: "archive_assistant_history";
+      label: string;
     };
 
 export type AssistantThread = {
@@ -60,6 +64,7 @@ export type AssistantThread = {
   title: string;
   createdAt: string;
   updatedAt: string;
+  archivedAt?: string;
   deletedAt?: string;
   purgeAfter?: string;
 };

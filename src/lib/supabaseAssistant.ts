@@ -7,6 +7,7 @@ type AssistantThreadRow = {
   title: string;
   created_at: string;
   updated_at: string;
+  archived_at?: string | null;
   deleted_at?: string | null;
   purge_after?: string | null;
 };
@@ -32,6 +33,7 @@ function rowToThread(row: AssistantThreadRow): AssistantThread {
     title: row.title,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    archivedAt: row.archived_at ?? undefined,
     deletedAt: row.deleted_at ?? undefined,
     purgeAfter: row.purge_after ?? undefined,
   };
@@ -58,15 +60,16 @@ export async function getOrCreateAssistantThread(user: User) {
   const client = requireSupabase();
   const activeQuery = client
     .from("assistant_threads")
-    .select("id, title, created_at, updated_at, deleted_at, purge_after")
+    .select("id, title, created_at, updated_at, archived_at, deleted_at, purge_after")
     .eq("user_id", user.id)
     .is("deleted_at", null)
+    .is("archived_at", null)
     .order("updated_at", { ascending: false })
     .limit(1)
     .maybeSingle();
   let existing = await activeQuery;
 
-  if (existing.error && existing.error.message.includes("deleted_at")) {
+  if (existing.error && (existing.error.message.includes("deleted_at") || existing.error.message.includes("archived_at"))) {
     existing = await client
       .from("assistant_threads")
       .select("id, title, created_at, updated_at")
@@ -149,7 +152,7 @@ export async function softDeleteAssistantHistory(user: User) {
   const purgeAfter = new Date(deletedAt);
   purgeAfter.setDate(purgeAfter.getDate() + 30);
 
-  const { error } = await client
+  let result = await client
     .from("assistant_threads")
     .update({
       deleted_at: deletedAt.toISOString(),
@@ -157,9 +160,23 @@ export async function softDeleteAssistantHistory(user: User) {
       updated_at: deletedAt.toISOString(),
     })
     .eq("user_id", user.id)
-    .is("deleted_at", null);
+    .is("deleted_at", null)
+    .is("archived_at", null);
 
-  if (error) throw error;
+  // Keep existing installations usable until the archive migration is applied.
+  if (result.error?.message.includes("archived_at")) {
+    result = await client
+      .from("assistant_threads")
+      .update({
+        deleted_at: deletedAt.toISOString(),
+        purge_after: purgeAfter.toISOString(),
+        updated_at: deletedAt.toISOString(),
+      })
+      .eq("user_id", user.id)
+      .is("deleted_at", null);
+  }
+
+  if (result.error) throw result.error;
 }
 
 export async function fetchDeletedAssistantThreads(user: User) {
@@ -176,6 +193,37 @@ export async function fetchDeletedAssistantThreads(user: User) {
 
   if (error) throw error;
   return (data ?? []).map((row) => rowToThread(row as AssistantThreadRow));
+}
+
+export async function fetchArchivedAssistantThreads(user: User) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("assistant_threads")
+    .select("id, title, created_at, updated_at, archived_at, deleted_at, purge_after")
+    .eq("user_id", user.id)
+    .is("deleted_at", null)
+    .not("archived_at", "is", null)
+    .order("archived_at", { ascending: false });
+
+  if (error) throw error;
+  return (data ?? []).map((row) => rowToThread(row as AssistantThreadRow));
+}
+
+export async function archiveAssistantThread(threadId: string, user: User) {
+  const client = requireSupabase();
+  const archivedAt = new Date().toISOString();
+  const { data, error } = await client
+    .from("assistant_threads")
+    .update({ archived_at: archivedAt, updated_at: archivedAt })
+    .eq("id", threadId)
+    .eq("user_id", user.id)
+    .is("deleted_at", null)
+    .is("archived_at", null)
+    .select("id, title, created_at, updated_at, archived_at, deleted_at, purge_after")
+    .single();
+
+  if (error) throw error;
+  return rowToThread(data as AssistantThreadRow);
 }
 
 export async function restoreAssistantThread(threadId: string, user: User) {

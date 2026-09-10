@@ -155,7 +155,8 @@ function localAssistantResponse(message: string, tasks: Task[]): AssistantRespon
 
   if (isAssistantArchiveRequest(message)) {
     return {
-      reply: "ארכיון שיחות עדיין אינו זמין. אפשר להסיר את השיחה הפעילה מהתצוגה ולשמור אותה לשחזור אישי למשך 30 יום, אם תבקש להסיר או למחוק אותה.",
+      reply: "אפשר להעביר את שיחת ה-AI הפעילה לארכיון. היא תישמר במלואה ותהיה זמינה לקריאה מארכיון השיחות.",
+      proposedAction: { type: "archive_assistant_history", label: "אישור והעברה לארכיון" },
       mode: "local",
     };
   }
@@ -253,7 +254,8 @@ function buildSystemPrompt() {
     "{\"type\":\"update_subtask_status\",\"label\":\"אישור וביצוע\",\"taskId\":\"P20\",\"subtaskNumber\":1,\"status\":\"open|done|cancelled\"}",
     "{\"type\":\"filter_tasks\",\"label\":\"הצג משימות\",\"filter\":{\"query\":\"...\",\"statusFilter\":\"active|overdue|subtasks_open|waiting|done|all\",\"prefixFilter\":\"P|W|all\",\"topicFilter\":\"...\",\"actionFilter\":\"...\"}}",
     "{\"type\":\"delete_assistant_history\",\"label\":\"אישור והעברה לשחזור\"}",
-    "If the user asks to archive the AI chat or conversation, do not return proposedAction. Explain in Hebrew that a true conversation archive is not available yet, and that hiding the active chat for personal recovery for 30 days is available only when they explicitly ask to remove or delete it.",
+    "{\"type\":\"archive_assistant_history\",\"label\":\"אישור והעברה לארכיון\"}",
+    "If the user asks to archive the AI chat or conversation, return proposedAction type archive_assistant_history. Explain in Hebrew that it will remain available for reading in the personal conversation archive.",
     "Only if the user explicitly asks to delete, clear, reset, erase, remove, or hide the AI chat history, return proposedAction type delete_assistant_history. Explain that it will be hidden now and kept recoverable for 30 days.",
     "If the user asks to delete or clear all tasks, reply that this can only be done from settings and do not return proposedAction.",
     "אם המשתמש מבקש ניתוח או שאלה בלבד, אל תחזיר proposedAction.",
@@ -327,6 +329,12 @@ function sanitizeAction(action: AssistantProposedAction | undefined, tasks: Task
   if (action.type === "delete_assistant_history") {
     return !isAssistantArchiveRequest(userMessage) && isExplicitAssistantHistoryRemovalRequest(userMessage)
       ? { type: "delete_assistant_history", label: "אישור והעברה לשחזור" }
+      : undefined;
+  }
+
+  if (action.type === "archive_assistant_history") {
+    return isAssistantArchiveRequest(userMessage)
+      ? { type: "archive_assistant_history", label: "אישור והעברה לארכיון" }
       : undefined;
   }
 

@@ -362,6 +362,9 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
 .assistant-workspace { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow); display: grid; grid-template-rows: auto minmax(0, 1fr) auto; height: auto; margin: 0 auto; max-width: 1080px; min-height: 0; overflow: hidden; width: 100%; }
 .assistant-workspace-header { align-items: center; border-bottom: 1px solid var(--border); display: flex; gap: 12px; justify-content: space-between; padding: 10px 16px; }
 .assistant-workspace-header h1 { font-size: 1rem; line-height: 1.2; margin: 0; }
+.assistant-workspace-actions { align-items: center; display: flex; gap: 8px; }
+.assistant-archive-button { position: relative; }
+.assistant-archive-count { align-items: center; background: var(--accent); border: 2px solid var(--surface); border-radius: 999px; color: #fff; display: inline-flex; font-size: .65rem; font-weight: 800; height: 18px; justify-content: center; line-height: 1; min-width: 18px; padding-inline: 4px; position: absolute; right: -7px; top: -7px; }
 .assistant-workspace-content { display: grid; min-height: 0; }
 .assistant-workspace-content.has-starter { grid-template-rows: auto minmax(0, 1fr); }
 .assistant-welcome { align-items: center; border-bottom: 1px solid var(--border); display: grid; gap: 12px 20px; grid-template-columns: minmax(0, 1fr) auto; padding: 14px 20px; }
@@ -381,6 +384,22 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
 .assistant-history-heading button { background: transparent; border: 0; color: var(--accent-dark); font-weight: 800; min-height: 28px; padding: 2px 0; }
 .assistant-history .assistant-messages { max-height: none; min-height: 0; padding: 18px 22px 24px; }
 .assistant-workspace .assistant-form { position: sticky; bottom: 0; z-index: 2; }
+.assistant-archive { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; min-height: 0; }
+.assistant-archive-heading { align-items: center; border-bottom: 1px solid var(--border); display: flex; gap: 12px; justify-content: space-between; padding: 14px 20px; }
+.assistant-archive-heading div { display: grid; gap: 3px; }
+.assistant-archive-heading span { color: var(--text); font-size: .92rem; font-weight: 800; }
+.assistant-archive-heading small { color: var(--muted); font-size: .78rem; }
+.assistant-archive-heading button { background: transparent; border: 0; color: var(--accent-dark); font-weight: 800; min-height: 34px; padding: 4px 0; }
+.assistant-archive-list { align-content: start; display: grid; min-height: 0; overflow: auto; padding: 4px 20px 20px; }
+.assistant-archive-row { align-items: center; background: transparent; border: 0; border-bottom: 1px solid var(--border); color: var(--text); display: flex; gap: 16px; justify-content: space-between; min-height: 72px; padding: 12px 0; text-align: right; width: 100%; }
+.assistant-archive-row:hover { color: var(--accent-dark); }
+.assistant-archive-row > span { display: grid; gap: 4px; min-width: 0; }
+.assistant-archive-row strong { font-size: .9rem; overflow-wrap: anywhere; }
+.assistant-archive-row small { color: var(--muted); font-size: .78rem; }
+.assistant-archive-row svg { color: var(--muted); flex: 0 0 auto; }
+.assistant-archive-empty { color: var(--muted); font-size: .9rem; margin: 0; padding: 24px 0; }
+.assistant-archive-messages { display: grid; gap: 14px; min-height: 0; overflow: auto; padding: 18px 22px 24px; }
+.assistant-archive-messages .assistant-action-flow { margin-top: 10px; }
 html.modal-open, html.modal-open body { overflow: hidden; overscroll-behavior: none; }
 .modal-backdrop { background: rgba(15, 23, 42, .34); bottom: 0; display: flex; justify-content: flex-start; left: 0; padding: 18px; position: fixed; right: 0; top: 0; z-index: 40; }
 .settings-drawer, .task-drawer { background: var(--bg); border: 1px solid var(--border); border-radius: 18px; box-shadow: 0 24px 70px rgba(15, 23, 42, .28); max-height: calc(100vh - 36px); overflow: auto; padding: 18px; width: min(620px, 100%); }
@@ -1056,6 +1075,9 @@ button.subtask-read-main { cursor: pointer; }
   .assistant-starters button { min-height: 44px; padding-inline: 8px; }
   .assistant-history-heading { padding-inline: 14px; }
   .assistant-history .assistant-messages { padding: 16px 14px 20px; }
+  .assistant-archive-heading { padding-inline: 14px; }
+  .assistant-archive-list { padding-inline: 14px; }
+  .assistant-archive-messages { padding: 16px 14px 20px; }
   .hero { align-items: stretch; flex-direction: column; min-height: 0; padding: 20px 18px 18px; position: sticky; top: 0; transition: margin .18s ease, min-height .18s ease, padding .18s ease; z-index: 12; }
   .hero > div { padding-inline-end: 112px; }
   .hero > .hero-tools { padding: 0; position: absolute; left: 18px; top: 28px; gap: 8px; }
