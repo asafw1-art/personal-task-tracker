@@ -140,8 +140,12 @@ function listPreview(tasks: Task[]) {
   return tasks.slice(0, 5).map(taskDisplay).join("\n");
 }
 
+function isAssistantArchiveSearchRequest(message: string) {
+  return /(?:חפש|חיפוש|search).*(?:ארכי|archive)|(?:דיברנו|דברנו|שוחחנו|זוכר(?:ת)?).*(?:על|לגבי|אודות)/i.test(message);
+}
+
 function isAssistantArchiveRequest(message: string) {
-  return /ארכי|archive/i.test(message);
+  return !isAssistantArchiveSearchRequest(message) && /ארכי|archive/i.test(message);
 }
 
 function isExplicitAssistantHistoryRemovalRequest(message: string) {
@@ -152,6 +156,13 @@ function isExplicitAssistantHistoryRemovalRequest(message: string) {
 function localAssistantResponse(message: string, tasks: Task[]): AssistantResponse | null {
   const normalized = message.toLowerCase();
   const today = new Date().toISOString().slice(0, 10);
+
+  if (isAssistantArchiveSearchRequest(message)) {
+    return {
+      reply: "אפשר לחפש בשיחות הארכיון האישיות דרך מסך הארכיון. תוכן שיחה שמוצאים נשאר לקריאה עד שתבחר במפורש להשתמש בו.",
+      mode: "local",
+    };
+  }
 
   if (isAssistantArchiveRequest(message)) {
     return {
@@ -256,6 +267,7 @@ function buildSystemPrompt() {
     "{\"type\":\"delete_assistant_history\",\"label\":\"אישור והעברה לשחזור\"}",
     "{\"type\":\"archive_assistant_history\",\"label\":\"אישור והעברה לארכיון\"}",
     "If the user asks to archive the AI chat or conversation, return proposedAction type archive_assistant_history. Explain in Hebrew that it will remain available for reading in the personal conversation archive.",
+    "If the user asks to find or remember a prior archived conversation, do not propose an action. Explain briefly that archive search is personal and that the user chooses whether to use any found content.",
     "Only if the user explicitly asks to delete, clear, reset, erase, remove, or hide the AI chat history, return proposedAction type delete_assistant_history. Explain that it will be hidden now and kept recoverable for 30 days.",
     "If the user asks to delete or clear all tasks, reply that this can only be done from settings and do not return proposedAction.",
     "אם המשתמש מבקש ניתוח או שאלה בלבד, אל תחזיר proposedAction.",

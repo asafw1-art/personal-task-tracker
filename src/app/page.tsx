@@ -3,12 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ChangeEvent, Dispatch, FormEvent, SetStateAction } from "react";
 import type { User } from "@supabase/supabase-js";
-import { Archive, ArrowDown, ArrowRight, ArrowUp, Bell, Check, ChevronDown, CircleAlert, CircleCheck, History, ListChecks, LoaderCircle, Pencil, RotateCcw, Share2, Sparkles, Trash2, X } from "lucide-react";
+import { Archive, ArrowDown, ArrowRight, ArrowUp, Bell, Check, ChevronDown, CircleAlert, CircleCheck, History, ListChecks, LoaderCircle, Pencil, RotateCcw, Search, Share2, Sparkles, Trash2, X } from "lucide-react";
 import { useNotificationReceipts } from "@/lib/useNotificationReceipts";
-import type { AssistantMessage, AssistantProposedAction, AssistantThread } from "@/lib/assistant";
+import type { AssistantArchiveSearchResult, AssistantMessage, AssistantProposedAction, AssistantThread } from "@/lib/assistant";
 import { canonicalTaskId, initialTasks, Task, TaskPrefix, TaskPriority, TaskStatus, TaskSubtask, TaskSubtaskStatus } from "@/lib/tasks";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
-import { addAssistantMessage, archiveAssistantThread, fetchArchivedAssistantThreads, fetchAssistantMessages, fetchDeletedAssistantThreads, getOrCreateAssistantThread, restoreAssistantThread, softDeleteAssistantHistory, updateAssistantMessageActionStatus } from "@/lib/supabaseAssistant";
+import { addAssistantMessage, archiveAssistantThread, fetchArchivedAssistantThreads, fetchAssistantMessages, fetchDeletedAssistantThreads, getOrCreateAssistantThread, restoreAssistantThread, searchArchivedAssistantMessages, softDeleteAssistantHistory, updateAssistantMessageActionStatus } from "@/lib/supabaseAssistant";
 import { fetchUserDevices, registerCurrentDevice, type UserDevice } from "@/lib/supabaseDevices";
 import { acceptTaskShare, createTaskShare, declineTaskShare, fetchTaskShares, fetchTaskSubtaskAssignments, historicalTaskFromShare, leaveTaskShare, revokeTaskShare, setSharedTaskFocus, setTaskSubtaskAssignment, updateSharedTaskSubtaskStatus, type TaskShare, type TaskSubtaskAssignment } from "@/lib/supabaseSharing";
 import { countCloudTasks, fetchCloudTasks, saveCloudTasks } from "@/lib/supabaseTasks";
@@ -710,6 +710,19 @@ function isDestructiveAssistantAction(action: AssistantProposedAction) {
   );
 }
 
+function isAssistantArchiveRecallRequest(message: string) {
+  return /(?:דיברנו|דברנו|שוחחנו|זוכר(?:ת)?|חפש(?:י)?|חיפוש).*(?:ארכי|על|לגבי|אודות)|(?:ארכי).*(?:חפש(?:י)?|חיפוש)/i.test(message);
+}
+
+function assistantArchiveRecallQuery(message: string) {
+  const explicitSearch = message.match(/(?:חפש(?:י)?|חיפוש)\s+(?:ב|את\s+)?ארכי(?:ון)?\s*(?:על|לגבי|אודות)?\s*(.+)/i);
+  const priorConversation = message.match(/(?:דיברנו|דברנו|שוחחנו|זוכר(?:ת)?)\s*(?:כבר|פעם|בעבר)?\s*(?:על|לגבי|אודות)\s+(.+)/i);
+  const query = (explicitSearch?.[1] ?? priorConversation?.[1] ?? "")
+    .replace(/[?!.]+$/g, "")
+    .trim();
+  return /^(?:זה|כך)(?:\s+פעם)?$/.test(query) ? "" : query.slice(0, 80);
+}
+
 function isEmptyTaxonomy(taxonomy: TaskTaxonomy) {
   return taxonomy.topics.P.length === 0 && taxonomy.topics.W.length === 0 && taxonomy.actions.length === 0;
 }
@@ -856,6 +869,9 @@ export default function Home() {
   const [assistantArchiveOpen, setAssistantArchiveOpen] = useState(false);
   const [assistantArchivePreview, setAssistantArchivePreview] = useState<{ thread: AssistantThread; messages: AssistantMessage[] } | null>(null);
   const [assistantArchiveStatus, setAssistantArchiveStatus] = useState("");
+  const [assistantArchiveSearchQuery, setAssistantArchiveSearchQuery] = useState("");
+  const [assistantArchiveSearchResults, setAssistantArchiveSearchResults] = useState<AssistantArchiveSearchResult[]>([]);
+  const [assistantArchiveSearchActive, setAssistantArchiveSearchActive] = useState(false);
   const [activeNotificationId, setActiveNotificationId] = useState("");
   const [isNotificationDetailOpen, setIsNotificationDetailOpen] = useState(false);
   const [isNotificationCenterOpen, setIsNotificationCenterOpen] = useState(false);
@@ -1067,6 +1083,13 @@ export default function Home() {
       assistantActionsInFlightRef.current.clear();
       setDeletedAssistantThreads([]);
       setAssistantRestoreStatus("");
+      setArchivedAssistantThreads([]);
+      setAssistantArchiveOpen(false);
+      setAssistantArchivePreview(null);
+      setAssistantArchiveStatus("");
+      setAssistantArchiveSearchQuery("");
+      setAssistantArchiveSearchResults([]);
+      setAssistantArchiveSearchActive(false);
       setAssistantStatus(user ? "טוען את שיחת ה-AI..." : "הצ׳ט ייטען אחרי התחברות לענן.");
       setTaxonomyCloudReady(false);
       setTaxonomyStatus(user ? "טוען נושאים ופעולות מהענן..." : "נושאים ופעולות נשמרים מקומית עד להתחברות לענן.");
@@ -3224,7 +3247,58 @@ export default function Home() {
     setAssistantArchiveOpen(true);
     setAssistantArchivePreview(null);
     setAssistantArchiveStatus("");
+    setAssistantArchiveSearchQuery("");
+    setAssistantArchiveSearchResults([]);
+    setAssistantArchiveSearchActive(false);
     void refreshArchivedAssistantThreadList();
+  }
+
+  async function searchAssistantArchive(rawQuery: string) {
+    const query = rawQuery.trim().slice(0, 80);
+    setAssistantArchiveSearchQuery(query);
+    setAssistantArchivePreview(null);
+    setAssistantArchiveSearchResults([]);
+    setAssistantArchiveSearchActive(Boolean(query));
+
+    if (!query) {
+      setAssistantArchiveStatus("כתוב נושא, שם או ביטוי כדי לחפש בשיחות השמורות.");
+      return [] as AssistantArchiveSearchResult[];
+    }
+
+    if (!cloudUser) return null;
+    setAssistantArchiveStatus("מחפש בארכיון האישי...");
+    try {
+      const results = await searchArchivedAssistantMessages(cloudUser, query);
+      setAssistantArchiveSearchResults(results);
+      setAssistantArchiveStatus("");
+      return results;
+    } catch (error) {
+      setAssistantArchiveStatus(`לא הצלחתי לחפש בארכיון: ${errorMessage(error)}`);
+      return null;
+    }
+  }
+
+  async function openAssistantArchiveSearch(query: string) {
+    setAssistantArchiveOpen(true);
+    const results = await searchAssistantArchive(query);
+    return results;
+  }
+
+  async function answerAssistantArchiveRecall(message: string) {
+    if (!cloudUser || !assistantThreadId) throw new Error("השיחה אינה מוכנה לחיפוש בארכיון.");
+    const query = assistantArchiveRecallQuery(message);
+    const results = await openAssistantArchiveSearch(query);
+    const reply = !query
+      ? "אפשר לחפש בארכיון האישי. כתוב נושא, שם או ביטוי, למשל: חפש בארכיון לגבי איטליה."
+      : results === null
+        ? "לא הצלחתי לחפש בארכיון כרגע. אפשר לנסות שוב בעוד רגע."
+        : results.length
+          ? `מצאתי ${results.length} שיחות מתאימות בארכיון האישי. פתחתי את התוצאות כדי שתוכל לבחור שיחה לקריאה.`
+          : "לא מצאתי שיחה מתאימה בארכיון האישי. אפשר לנסות ביטוי אחר.";
+    const assistantMessage = await addAssistantMessage(assistantThreadId, cloudUser, "assistant", reply);
+    setAssistantMessages((current) => [...current, assistantMessage]);
+    setAssistantMode("local");
+    setAssistantStatus("מצב מקומי: החיפוש בוצע רק בשיחות הארכיון האישיות שלך.");
   }
 
   async function openArchivedAssistantThread(thread: AssistantThread) {
@@ -3441,6 +3515,7 @@ export default function Home() {
     const message = rawMessage.trim();
     if (!message || !cloudUser || !assistantThreadId || !supabase || assistantIsSending || assistantReplyRetry) return;
 
+    const isArchiveRecall = isAssistantArchiveRecallRequest(message);
     const recentMessages = assistantMessages.slice(-8).map((item) => ({ role: item.role, content: item.content }));
     let userMessageSaved = false;
     setAssistantStarterOpen(false);
@@ -3453,14 +3528,20 @@ export default function Home() {
       userMessageSaved = true;
       setAssistantMessages((current) => [...current, userMessage]);
       updateAssistantDraft("");
-      setAssistantStatus("העוזר מכין תשובה...");
-      await requestAssistantReply(message, recentMessages);
+      setAssistantStatus(isArchiveRecall ? "מחפש בשיחות הארכיון..." : "העוזר מכין תשובה...");
+      if (isArchiveRecall) await answerAssistantArchiveRecall(message);
+      else await requestAssistantReply(message, recentMessages);
       setAssistantReplyRetry(null);
     } catch (error) {
-      setAssistantMode("unavailable");
       if (userMessageSaved) {
-        setAssistantReplyRetry({ message, recentMessages });
-        setAssistantStatus(`ההודעה נשמרה, אך לא התקבלה תשובה: ${errorMessage(error)}`);
+        if (isArchiveRecall) {
+          setAssistantMode("local");
+          setAssistantStatus(`ההודעה נשמרה, אך החיפוש בארכיון נכשל: ${errorMessage(error)}`);
+        } else {
+          setAssistantMode("unavailable");
+          setAssistantReplyRetry({ message, recentMessages });
+          setAssistantStatus(`ההודעה נשמרה, אך לא התקבלה תשובה: ${errorMessage(error)}`);
+        }
       } else {
         setAssistantStatus(`לא הצלחנו לשמור את ההודעה. הטקסט נשאר בשדה הכתיבה: ${errorMessage(error)}`);
       }
@@ -5209,8 +5290,54 @@ export default function Home() {
                       <small>שיחות שנשמרו לקריאה</small>
                     </div>
                   </div>
+                  <form
+                    className="assistant-archive-search"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void searchAssistantArchive(assistantArchiveSearchQuery);
+                    }}
+                  >
+                    <input
+                      {...freeTextInputProps}
+                      value={assistantArchiveSearchQuery}
+                      onChange={(event) => setAssistantArchiveSearchQuery(event.target.value)}
+                      placeholder="חיפוש בשיחות השמורות"
+                      aria-label="חיפוש בארכיון שיחות AI"
+                    />
+                    {assistantArchiveSearchActive && (
+                      <button
+                        type="button"
+                        className="icon-button"
+                        onClick={() => {
+                          setAssistantArchiveSearchQuery("");
+                          setAssistantArchiveSearchResults([]);
+                          setAssistantArchiveSearchActive(false);
+                          setAssistantArchiveStatus("");
+                        }}
+                        aria-label="ניקוי חיפוש ארכיון"
+                        title="ניקוי חיפוש"
+                      >
+                        <X size={17} aria-hidden="true" />
+                      </button>
+                    )}
+                    <button type="submit" className="icon-button" aria-label="חיפוש בארכיון" title="חיפוש">
+                      <Search size={18} aria-hidden="true" />
+                    </button>
+                  </form>
                   <div className="assistant-archive-list">
-                    {archivedAssistantThreads.length > 0 ? archivedAssistantThreads.map((thread) => (
+                    {assistantArchiveSearchActive ? (
+                      assistantArchiveSearchResults.length > 0 ? assistantArchiveSearchResults.map((result) => (
+                        <button className="assistant-archive-row is-search-result" type="button" key={result.messageId} onClick={() => void openArchivedAssistantThread(result.thread)}>
+                          <span>
+                            <strong>שיחה מ־{formatDateTime(result.thread.archivedAt ?? result.thread.updatedAt)}</strong>
+                            <small>{result.excerpt}</small>
+                          </span>
+                          <ArrowRight size={18} aria-hidden="true" />
+                        </button>
+                      )) : (
+                        <p className="assistant-archive-empty">לא נמצאו שיחות מתאימות בארכיון.</p>
+                      )
+                    ) : archivedAssistantThreads.length > 0 ? archivedAssistantThreads.map((thread) => (
                       <button className="assistant-archive-row" type="button" key={thread.id} onClick={() => void openArchivedAssistantThread(thread)}>
                         <span>
                           <strong>שיחה מ־{formatDateTime(thread.archivedAt ?? thread.updatedAt)}</strong>

@@ -390,12 +390,17 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
 .assistant-archive-heading span { color: var(--text); font-size: .92rem; font-weight: 800; }
 .assistant-archive-heading small { color: var(--muted); font-size: .78rem; }
 .assistant-archive-heading button { background: transparent; border: 0; color: var(--accent-dark); font-weight: 800; min-height: 34px; padding: 4px 0; }
+.assistant-archive-search { align-items: center; border-bottom: 1px solid var(--border); display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr) auto auto; padding: 10px 20px; }
+.assistant-archive-search input { background: var(--surface-soft); min-width: 0; }
+.assistant-archive-search .icon-button { height: 36px; width: 36px; }
 .assistant-archive-list { align-content: start; display: grid; min-height: 0; overflow: auto; padding: 4px 20px 20px; }
 .assistant-archive-row { align-items: center; background: transparent; border: 0; border-bottom: 1px solid var(--border); color: var(--text); display: flex; gap: 16px; justify-content: space-between; min-height: 72px; padding: 12px 0; text-align: right; width: 100%; }
 .assistant-archive-row:hover { color: var(--accent-dark); }
 .assistant-archive-row > span { display: grid; gap: 4px; min-width: 0; }
 .assistant-archive-row strong { font-size: .9rem; overflow-wrap: anywhere; }
 .assistant-archive-row small { color: var(--muted); font-size: .78rem; }
+.assistant-archive-row.is-search-result { align-items: start; }
+.assistant-archive-row.is-search-result small { line-height: 1.45; overflow-wrap: anywhere; }
 .assistant-archive-row svg { color: var(--muted); flex: 0 0 auto; }
 .assistant-archive-empty { color: var(--muted); font-size: .9rem; margin: 0; padding: 24px 0; }
 .assistant-archive-messages { display: grid; gap: 14px; min-height: 0; overflow: auto; padding: 18px 22px 24px; }
@@ -1076,6 +1081,7 @@ button.subtask-read-main { cursor: pointer; }
   .assistant-history-heading { padding-inline: 14px; }
   .assistant-history .assistant-messages { padding: 16px 14px 20px; }
   .assistant-archive-heading { padding-inline: 14px; }
+  .assistant-archive-search { padding-inline: 14px; }
   .assistant-archive-list { padding-inline: 14px; }
   .assistant-archive-messages { padding: 16px 14px 20px; }
   .hero { align-items: stretch; flex-direction: column; min-height: 0; padding: 20px 18px 18px; position: sticky; top: 0; transition: margin .18s ease, min-height .18s ease, padding .18s ease; z-index: 12; }

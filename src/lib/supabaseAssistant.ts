@@ -1,5 +1,5 @@
 import type { User } from "@supabase/supabase-js";
-import type { AssistantActionStatus, AssistantMessage, AssistantMessageRole, AssistantProposedAction, AssistantThread } from "@/lib/assistant";
+import type { AssistantActionStatus, AssistantArchiveSearchResult, AssistantMessage, AssistantMessageRole, AssistantProposedAction, AssistantThread } from "@/lib/assistant";
 import { supabase } from "@/lib/supabase";
 
 type AssistantThreadRow = {
@@ -21,6 +21,8 @@ type AssistantMessageRow = {
   action_status: AssistantActionStatus | null;
   created_at: string;
 };
+
+type AssistantArchiveSearchMessageRow = Pick<AssistantMessageRow, "id" | "thread_id" | "content" | "created_at">;
 
 function requireSupabase() {
   if (!supabase) throw new Error("Supabase is not configured");
@@ -207,6 +209,53 @@ export async function fetchArchivedAssistantThreads(user: User) {
 
   if (error) throw error;
   return (data ?? []).map((row) => rowToThread(row as AssistantThreadRow));
+}
+
+function searchExcerpt(content: string, query: string) {
+  const normalizedContent = content.toLocaleLowerCase();
+  const term = query.toLocaleLowerCase().split(/\s+/).find(Boolean) ?? query.toLocaleLowerCase();
+  const matchIndex = normalizedContent.indexOf(term);
+  if (matchIndex < 0) return content.slice(0, 180).trim();
+
+  const start = Math.max(0, matchIndex - 64);
+  const end = Math.min(content.length, matchIndex + term.length + 116);
+  return `${start > 0 ? "..." : ""}${content.slice(start, end).trim()}${end < content.length ? "..." : ""}`;
+}
+
+export async function searchArchivedAssistantMessages(user: User, rawQuery: string) {
+  const query = rawQuery.trim().replace(/[\\%_]/g, " ").replace(/\s+/g, " ").slice(0, 80);
+  if (query.length < 2) return [] as AssistantArchiveSearchResult[];
+
+  const threads = await fetchArchivedAssistantThreads(user);
+  if (!threads.length) return [] as AssistantArchiveSearchResult[];
+
+  const client = requireSupabase();
+  const threadById = new Map(threads.map((thread) => [thread.id, thread]));
+  const { data, error } = await client
+    .from("assistant_messages")
+    .select("id, thread_id, content, created_at")
+    .eq("user_id", user.id)
+    .in("thread_id", threads.map((thread) => thread.id))
+    .ilike("content", `%${query}%`)
+    .order("created_at", { ascending: false })
+    .limit(32);
+
+  if (error) throw error;
+
+  const seenThreadIds = new Set<string>();
+  return (data ?? []).reduce<AssistantArchiveSearchResult[]>((results, row) => {
+    const message = row as AssistantArchiveSearchMessageRow;
+    const thread = threadById.get(message.thread_id);
+    if (!thread || seenThreadIds.has(thread.id)) return results;
+    seenThreadIds.add(thread.id);
+    results.push({
+      thread,
+      messageId: message.id,
+      excerpt: searchExcerpt(message.content, query),
+      matchedAt: message.created_at,
+    });
+    return results;
+  }, []).slice(0, 8);
 }
 
 export async function archiveAssistantThread(threadId: string, user: User) {

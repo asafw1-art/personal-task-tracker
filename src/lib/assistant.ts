@@ -69,6 +69,13 @@ export type AssistantThread = {
   purgeAfter?: string;
 };
 
+export type AssistantArchiveSearchResult = {
+  thread: AssistantThread;
+  messageId: string;
+  excerpt: string;
+  matchedAt: string;
+};
+
 export type AssistantMessage = {
   id: string;
   threadId: string;
