@@ -270,7 +270,7 @@ export async function fetchDeletedAssistantThreads(user: User) {
 
   const { data, error } = await client
     .from("assistant_threads")
-    .select("id, title, created_at, updated_at, deleted_at, purge_after")
+    .select("id, title, created_at, updated_at, continued_from_thread_id, archived_at, deleted_at, purge_after")
     .eq("user_id", user.id)
     .not("deleted_at", "is", null)
     .gt("purge_after", new Date().toISOString())
@@ -291,7 +291,29 @@ export async function fetchArchivedAssistantThreads(user: User) {
     .order("archived_at", { ascending: false });
 
   if (error) throw error;
-  return (data ?? []).map((row) => rowToThread(row as AssistantThreadRow));
+  const threads = (data ?? []).map((row) => rowToThread(row as AssistantThreadRow));
+  const genericThreads = threads.filter((thread) => ["שיחה פעילה", "המשך שיחה"].includes(thread.title));
+  if (!genericThreads.length) return threads;
+
+  const { data: firstMessages, error: firstMessagesError } = await client
+    .from("assistant_messages")
+    .select("thread_id, content, created_at")
+    .eq("user_id", user.id)
+    .eq("role", "user")
+    .in("thread_id", genericThreads.map((thread) => thread.id))
+    .order("created_at", { ascending: true });
+  if (firstMessagesError) return threads;
+
+  const firstMessageByThread = new Map<string, string>();
+  for (const message of firstMessages ?? []) {
+    if (!firstMessageByThread.has(message.thread_id)) firstMessageByThread.set(message.thread_id, message.content);
+  }
+
+  return threads.map((thread) => {
+    const firstMessage = firstMessageByThread.get(thread.id)?.replace(/\s+/g, " ").trim();
+    if (!firstMessage || !["שיחה פעילה", "המשך שיחה"].includes(thread.title)) return thread;
+    return { ...thread, title: firstMessage.length > 64 ? `${firstMessage.slice(0, 61).trim()}...` : firstMessage };
+  });
 }
 
 function searchExcerpt(content: string, query: string) {
@@ -341,12 +363,16 @@ export async function searchArchivedAssistantMessages(user: User, rawQuery: stri
   }, []).slice(0, 8);
 }
 
-export async function archiveAssistantThread(threadId: string, user: User) {
+export async function archiveAssistantThread(threadId: string, user: User, title?: string) {
   const client = requireSupabase();
   const archivedAt = new Date().toISOString();
   const { data, error } = await client
     .from("assistant_threads")
-    .update({ archived_at: archivedAt, updated_at: archivedAt })
+    .update({
+      archived_at: archivedAt,
+      updated_at: archivedAt,
+      ...(title ? { title } : {}),
+    })
     .eq("id", threadId)
     .eq("user_id", user.id)
     .is("deleted_at", null)
@@ -356,6 +382,27 @@ export async function archiveAssistantThread(threadId: string, user: User) {
 
   if (error) throw error;
   return rowToThread(data as AssistantThreadRow);
+}
+
+export async function softDeleteArchivedAssistantThread(threadId: string, user: User) {
+  const client = requireSupabase();
+  const deletedAt = new Date();
+  const purgeAfter = new Date(deletedAt);
+  purgeAfter.setDate(purgeAfter.getDate() + 30);
+
+  const { error } = await client
+    .from("assistant_threads")
+    .update({
+      deleted_at: deletedAt.toISOString(),
+      purge_after: purgeAfter.toISOString(),
+      updated_at: deletedAt.toISOString(),
+    })
+    .eq("id", threadId)
+    .eq("user_id", user.id)
+    .is("deleted_at", null)
+    .not("archived_at", "is", null);
+
+  if (error) throw error;
 }
 
 export async function restoreAssistantThread(threadId: string, user: User) {
@@ -372,7 +419,7 @@ export async function restoreAssistantThread(threadId: string, user: User) {
     .eq("user_id", user.id)
     .not("deleted_at", "is", null)
     .gt("purge_after", restoredAt)
-    .select("id, title, created_at, updated_at, deleted_at, purge_after")
+    .select("id, title, created_at, updated_at, continued_from_thread_id, archived_at, deleted_at, purge_after")
     .single();
 
   if (error) throw error;

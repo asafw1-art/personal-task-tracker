@@ -8,7 +8,7 @@ import { useNotificationReceipts } from "@/lib/useNotificationReceipts";
 import type { AssistantArchiveSearchResult, AssistantMessage, AssistantProposedAction, AssistantThread } from "@/lib/assistant";
 import { canonicalTaskId, initialTasks, Task, TaskPrefix, TaskPriority, TaskStatus, TaskSubtask, TaskSubtaskStatus } from "@/lib/tasks";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
-import { addAssistantMessage, archiveAssistantThread, assertAssistantContinuationReady, continueAssistantThreadFromArchive, fetchArchivedAssistantThreads, fetchAssistantMessages, fetchDeletedAssistantThreads, getOrCreateAssistantThread, restoreAssistantThread, searchArchivedAssistantMessages, softDeleteAssistantHistory, updateAssistantMessageActionStatus } from "@/lib/supabaseAssistant";
+import { addAssistantMessage, archiveAssistantThread, assertAssistantContinuationReady, continueAssistantThreadFromArchive, fetchArchivedAssistantThreads, fetchAssistantMessages, fetchDeletedAssistantThreads, getOrCreateAssistantThread, restoreAssistantThread, searchArchivedAssistantMessages, softDeleteArchivedAssistantThread, softDeleteAssistantHistory, updateAssistantMessageActionStatus } from "@/lib/supabaseAssistant";
 import { fetchUserDevices, registerCurrentDevice, type UserDevice } from "@/lib/supabaseDevices";
 import { acceptTaskShare, createTaskShare, declineTaskShare, fetchTaskShares, fetchTaskSubtaskAssignments, historicalTaskFromShare, leaveTaskShare, revokeTaskShare, setSharedTaskFocus, setTaskSubtaskAssignment, updateSharedTaskSubtaskStatus, type TaskShare, type TaskSubtaskAssignment } from "@/lib/supabaseSharing";
 import { countCloudTasks, fetchCloudTasks, saveCloudTasks } from "@/lib/supabaseTasks";
@@ -721,6 +721,12 @@ function assistantArchiveRecallQuery(message: string) {
     .replace(/[?!.]+$/g, "")
     .trim();
   return /^(?:זה|כך)(?:\s+פעם)?$/.test(query) ? "" : query.slice(0, 80);
+}
+
+function assistantConversationTitle(messages: AssistantMessage[]) {
+  const firstUserMessage = messages.find((message) => message.role === "user")?.content.replace(/\s+/g, " ").trim();
+  if (!firstUserMessage) return "שיחה ללא כותרת";
+  return firstUserMessage.length > 64 ? `${firstUserMessage.slice(0, 61).trim()}...` : firstUserMessage;
 }
 
 function isEmptyTaxonomy(taxonomy: TaskTaxonomy) {
@@ -3287,7 +3293,7 @@ export default function Home() {
     return results;
   }
 
-  async function answerAssistantArchiveRecall(message: string) {
+  async function answerAssistantArchiveRecall(message: string, persistReply = true) {
     if (!cloudUser || !assistantThreadId) throw new Error("השיחה אינה מוכנה לחיפוש בארכיון.");
     const query = assistantArchiveRecallQuery(message);
     const results = await openAssistantArchiveSearch(query);
@@ -3298,8 +3304,10 @@ export default function Home() {
         : results.length
           ? `מצאתי ${results.length} שיחות מתאימות בארכיון האישי. פתחתי את התוצאות כדי שתוכל לבחור שיחה לקריאה.`
           : "לא מצאתי שיחה מתאימה בארכיון האישי. אפשר לנסות ביטוי אחר.";
-    const assistantMessage = await addAssistantMessage(assistantThreadId, cloudUser, "assistant", reply);
-    setAssistantMessages((current) => [...current, assistantMessage]);
+    if (persistReply) {
+      const assistantMessage = await addAssistantMessage(assistantThreadId, cloudUser, "assistant", reply);
+      setAssistantMessages((current) => [...current, assistantMessage]);
+    }
     setAssistantMode("local");
     setAssistantStatus("מצב מקומי: החיפוש בוצע רק בשיחות הארכיון האישיות שלך.");
   }
@@ -3328,7 +3336,7 @@ export default function Home() {
     try {
       // Verify the migration before archiving the current conversation.
       await assertAssistantContinuationReady(assistantThreadId, cloudUser);
-      if (hasActiveMessages) await archiveAssistantThread(assistantThreadId, cloudUser);
+      if (hasActiveMessages) await archiveAssistantThread(assistantThreadId, cloudUser, assistantConversationTitle(assistantMessages));
       const thread = await continueAssistantThreadFromArchive(assistantThreadId, sourceThread.id, cloudUser, !hasActiveMessages);
 
       updateAssistantDraft("");
@@ -3349,11 +3357,26 @@ export default function Home() {
     }
   }
 
+  async function removeArchivedAssistantThread(thread: AssistantThread) {
+    if (!cloudUser) return;
+    if (!window.confirm(`להסיר את "${thread.title}" מהארכיון? השיחה תישמר לשחזור למשך 30 יום.`)) return;
+
+    setAssistantArchiveStatus("מסיר את השיחה מהארכיון...");
+    try {
+      await softDeleteArchivedAssistantThread(thread.id, cloudUser);
+      setAssistantArchivePreview(null);
+      await Promise.all([refreshArchivedAssistantThreadList(), refreshDeletedAssistantThreadList()]);
+      setAssistantArchiveStatus("השיחה הוסרה מהארכיון ונשמרה לשחזור ל-30 יום.");
+    } catch (error) {
+      setAssistantArchiveStatus(`לא הצלחתי להסיר את השיחה מהארכיון: ${errorMessage(error)}`);
+    }
+  }
+
   async function archiveActiveAssistantHistory() {
     if (!cloudUser || !assistantThreadId) throw new Error("השיחה הפעילה אינה מוכנה להעברה לארכיון.");
 
     setAssistantStatus("מעביר את שיחת ה-AI לארכיון...");
-    await archiveAssistantThread(assistantThreadId, cloudUser);
+    await archiveAssistantThread(assistantThreadId, cloudUser, assistantConversationTitle(assistantMessages));
     const thread = await getOrCreateAssistantThread(cloudUser);
     updateAssistantDraft("");
     setAssistantThreadId(thread.id);
@@ -3373,6 +3396,11 @@ export default function Home() {
     try {
       if (!cloudUser) throw new Error("יש להתחבר לענן כדי לשחזר שיחה.");
       const thread = await restoreAssistantThread(threadId, cloudUser);
+      if (thread.archivedAt) {
+        await Promise.all([refreshArchivedAssistantThreadList(), refreshDeletedAssistantThreadList()]);
+        setAssistantRestoreStatus("השיחה שוחזרה לארכיון.");
+        return;
+      }
       const messages = await fetchAssistantMessages(thread.id);
       setAssistantThreadId(thread.id);
       setAssistantContinuationSourceId(null);
@@ -3556,6 +3584,7 @@ export default function Home() {
     if (!message || !cloudUser || !assistantThreadId || !supabase || assistantIsSending || assistantReplyRetry) return;
 
     const isArchiveRecall = isAssistantArchiveRecallRequest(message);
+    const isArchiveNavigationOnly = isArchiveRecall && assistantMessages.length === 0;
     const recentMessages = assistantMessages.slice(-8).map((item) => ({ role: item.role, content: item.content }));
     let userMessageSaved = false;
     setAssistantStarterOpen(false);
@@ -3564,6 +3593,14 @@ export default function Home() {
     assistantShouldScrollToBottomRef.current = true;
 
     try {
+      if (isArchiveNavigationOnly) {
+        updateAssistantDraft("");
+        setAssistantStatus("מחפש בשיחות הארכיון...");
+        await answerAssistantArchiveRecall(message, false);
+        setAssistantReplyRetry(null);
+        return;
+      }
+
       const userMessage = await addAssistantMessage(assistantThreadId, cloudUser, "user", message);
       userMessageSaved = true;
       setAssistantMessages((current) => [...current, userMessage]);
@@ -3582,6 +3619,9 @@ export default function Home() {
           setAssistantReplyRetry({ message, recentMessages });
           setAssistantStatus(`ההודעה נשמרה, אך לא התקבלה תשובה: ${errorMessage(error)}`);
         }
+      } else if (isArchiveNavigationOnly) {
+        setAssistantMode("local");
+        setAssistantStatus(`החיפוש בארכיון נכשל: ${errorMessage(error)}`);
       } else {
         setAssistantStatus(`לא הצלחנו לשמור את ההודעה. הטקסט נשאר בשדה הכתיבה: ${errorMessage(error)}`);
       }
@@ -5304,13 +5344,17 @@ export default function Home() {
                 <>
                   <div className="assistant-archive-heading">
                     <div>
-                      <span>שיחה מהארכיון</span>
+                      <span>{assistantArchivePreview.thread.title}</span>
                       <small>הועברה לארכיון {formatDateTime(assistantArchivePreview.thread.archivedAt ?? assistantArchivePreview.thread.updatedAt)}</small>
                     </div>
                     <div className="assistant-archive-heading-actions">
                       <button type="button" className="assistant-continue-button" onClick={() => void continueArchivedAssistantThread(assistantArchivePreview.thread)}>
                         <MessageCirclePlus size={17} aria-hidden="true" />
                         המשך מכאן
+                      </button>
+                      <button type="button" className="assistant-remove-button" onClick={() => void removeArchivedAssistantThread(assistantArchivePreview.thread)}>
+                        <Trash2 size={16} aria-hidden="true" />
+                        הסרה
                       </button>
                       <button type="button" onClick={() => setAssistantArchivePreview(null)}>לכל השיחות</button>
                     </div>
@@ -5379,7 +5423,8 @@ export default function Home() {
                       assistantArchiveSearchResults.length > 0 ? assistantArchiveSearchResults.map((result) => (
                         <button className="assistant-archive-row is-search-result" type="button" key={result.messageId} onClick={() => void openArchivedAssistantThread(result.thread)}>
                           <span>
-                            <strong>שיחה מ־{formatDateTime(result.thread.archivedAt ?? result.thread.updatedAt)}</strong>
+                            <strong>{result.thread.title}</strong>
+                            <small>נשמרה {formatDateTime(result.thread.archivedAt ?? result.thread.updatedAt)}</small>
                             <small>{result.excerpt}</small>
                           </span>
                           <ArrowRight size={18} aria-hidden="true" />
@@ -5390,8 +5435,8 @@ export default function Home() {
                     ) : archivedAssistantThreads.length > 0 ? archivedAssistantThreads.map((thread) => (
                       <button className="assistant-archive-row" type="button" key={thread.id} onClick={() => void openArchivedAssistantThread(thread)}>
                         <span>
-                          <strong>שיחה מ־{formatDateTime(thread.archivedAt ?? thread.updatedAt)}</strong>
-                          <small>עודכנה {formatDateTime(thread.updatedAt)}</small>
+                          <strong>{thread.title}</strong>
+                          <small>נשמרה {formatDateTime(thread.archivedAt ?? thread.updatedAt)}</small>
                         </span>
                         <ArrowRight size={18} aria-hidden="true" />
                       </button>
@@ -6026,6 +6071,7 @@ export default function Home() {
                       <article className="assistant-restore-card" key={thread.id}>
                         <div>
                           <h3>{thread.title}</h3>
+                          {thread.archivedAt && <p>תחזור לארכיון לאחר השחזור.</p>}
                           {thread.deletedAt && <p>נמחקה: {formatDateTime(thread.deletedAt)}</p>}
                           {thread.purgeAfter && <p>זמינה לשחזור עד: {formatDateTime(thread.purgeAfter)}</p>}
                         </div>

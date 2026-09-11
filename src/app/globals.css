@@ -397,6 +397,7 @@ button:disabled, input:disabled, select:disabled, textarea:disabled { cursor: no
 .assistant-archive-heading button { background: transparent; border: 0; color: var(--accent-dark); font-weight: 800; min-height: 34px; padding: 4px 0; }
 .assistant-archive-heading-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
 .assistant-archive-heading .assistant-continue-button { align-items: center; background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border)); border-radius: var(--radius-md); color: var(--accent-dark); display: inline-flex; gap: 6px; min-height: 36px; padding: 7px 10px; }
+.assistant-archive-heading .assistant-remove-button { align-items: center; color: var(--danger); display: inline-flex; gap: 5px; }
 .assistant-archive-search { align-items: center; border-bottom: 1px solid var(--border); display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr) auto auto; padding: 10px 20px; }
 .assistant-archive-search input { background: var(--surface-soft); min-width: 0; }
 .assistant-archive-search .icon-button { height: 36px; width: 36px; }
