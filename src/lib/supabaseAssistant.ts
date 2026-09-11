@@ -7,6 +7,7 @@ type AssistantThreadRow = {
   title: string;
   created_at: string;
   updated_at: string;
+  continued_from_thread_id?: string | null;
   archived_at?: string | null;
   deleted_at?: string | null;
   purge_after?: string | null;
@@ -35,6 +36,7 @@ function rowToThread(row: AssistantThreadRow): AssistantThread {
     title: row.title,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    continuedFromThreadId: row.continued_from_thread_id ?? undefined,
     archivedAt: row.archived_at ?? undefined,
     deletedAt: row.deleted_at ?? undefined,
     purgeAfter: row.purge_after ?? undefined,
@@ -62,7 +64,7 @@ export async function getOrCreateAssistantThread(user: User) {
   const client = requireSupabase();
   const activeQuery = client
     .from("assistant_threads")
-    .select("id, title, created_at, updated_at, archived_at, deleted_at, purge_after")
+    .select("id, title, created_at, updated_at, continued_from_thread_id, archived_at, deleted_at, purge_after")
     .eq("user_id", user.id)
     .is("deleted_at", null)
     .is("archived_at", null)
@@ -71,7 +73,17 @@ export async function getOrCreateAssistantThread(user: User) {
     .maybeSingle();
   let existing = await activeQuery;
 
-  if (existing.error && (existing.error.message.includes("deleted_at") || existing.error.message.includes("archived_at"))) {
+  if (existing.error?.message.includes("continued_from_thread_id")) {
+    existing = await client
+      .from("assistant_threads")
+      .select("id, title, created_at, updated_at, archived_at, deleted_at, purge_after")
+      .eq("user_id", user.id)
+      .is("deleted_at", null)
+      .is("archived_at", null)
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+  } else if (existing.error && (existing.error.message.includes("deleted_at") || existing.error.message.includes("archived_at"))) {
     existing = await client
       .from("assistant_threads")
       .select("id, title, created_at, updated_at")
@@ -87,11 +99,82 @@ export async function getOrCreateAssistantThread(user: User) {
   const created = await client
     .from("assistant_threads")
     .insert({ user_id: user.id, title: "שיחה פעילה" })
-    .select("id, title, created_at, updated_at")
+    .select("id, title, created_at, updated_at, continued_from_thread_id")
     .single();
 
   if (created.error) throw created.error;
   return rowToThread(created.data as AssistantThreadRow);
+}
+
+async function assertArchivedAssistantThread(threadId: string, user: User) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("assistant_threads")
+    .select("id")
+    .eq("id", threadId)
+    .eq("user_id", user.id)
+    .is("deleted_at", null)
+    .not("archived_at", "is", null)
+    .maybeSingle();
+
+  if (error) throw error;
+  if (!data) throw new Error("שיחת המקור אינה זמינה בארכיון האישי שלך.");
+}
+
+export async function assertAssistantContinuationReady(activeThreadId: string, user: User) {
+  const client = requireSupabase();
+  const { error } = await client
+    .from("assistant_threads")
+    .select("continued_from_thread_id")
+    .eq("id", activeThreadId)
+    .eq("user_id", user.id)
+    .maybeSingle();
+
+  if (error) throw error;
+}
+
+export async function continueAssistantThreadFromArchive(
+  activeThreadId: string,
+  sourceThreadId: string,
+  user: User,
+  reuseEmptyActiveThread: boolean,
+) {
+  const client = requireSupabase();
+  await assertArchivedAssistantThread(sourceThreadId, user);
+  await assertAssistantContinuationReady(activeThreadId, user);
+  const updatedAt = new Date().toISOString();
+
+  if (reuseEmptyActiveThread) {
+    const { data, error } = await client
+      .from("assistant_threads")
+      .update({
+        title: "המשך שיחה",
+        continued_from_thread_id: sourceThreadId,
+        updated_at: updatedAt,
+      })
+      .eq("id", activeThreadId)
+      .eq("user_id", user.id)
+      .is("deleted_at", null)
+      .is("archived_at", null)
+      .select("id, title, created_at, updated_at, continued_from_thread_id, archived_at, deleted_at, purge_after")
+      .single();
+
+    if (error) throw error;
+    return rowToThread(data as AssistantThreadRow);
+  }
+
+  const { data, error } = await client
+    .from("assistant_threads")
+    .insert({
+      user_id: user.id,
+      title: "המשך שיחה",
+      continued_from_thread_id: sourceThreadId,
+    })
+    .select("id, title, created_at, updated_at, continued_from_thread_id, archived_at, deleted_at, purge_after")
+    .single();
+
+  if (error) throw error;
+  return rowToThread(data as AssistantThreadRow);
 }
 
 export async function fetchAssistantMessages(threadId: string) {

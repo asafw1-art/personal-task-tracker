@@ -64,6 +64,7 @@ export type AssistantThread = {
   title: string;
   createdAt: string;
   updatedAt: string;
+  continuedFromThreadId?: string;
   archivedAt?: string;
   deletedAt?: string;
   purgeAfter?: string;

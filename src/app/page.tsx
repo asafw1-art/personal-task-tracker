@@ -3,12 +3,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { ChangeEvent, Dispatch, FormEvent, SetStateAction } from "react";
 import type { User } from "@supabase/supabase-js";
-import { Archive, ArrowDown, ArrowRight, ArrowUp, Bell, Check, ChevronDown, CircleAlert, CircleCheck, History, ListChecks, LoaderCircle, Pencil, RotateCcw, Search, Share2, Sparkles, Trash2, X } from "lucide-react";
+import { Archive, ArrowDown, ArrowRight, ArrowUp, Bell, Check, ChevronDown, CircleAlert, CircleCheck, History, ListChecks, LoaderCircle, MessageCirclePlus, Pencil, RotateCcw, Search, Share2, Sparkles, Trash2, X } from "lucide-react";
 import { useNotificationReceipts } from "@/lib/useNotificationReceipts";
 import type { AssistantArchiveSearchResult, AssistantMessage, AssistantProposedAction, AssistantThread } from "@/lib/assistant";
 import { canonicalTaskId, initialTasks, Task, TaskPrefix, TaskPriority, TaskStatus, TaskSubtask, TaskSubtaskStatus } from "@/lib/tasks";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
-import { addAssistantMessage, archiveAssistantThread, fetchArchivedAssistantThreads, fetchAssistantMessages, fetchDeletedAssistantThreads, getOrCreateAssistantThread, restoreAssistantThread, searchArchivedAssistantMessages, softDeleteAssistantHistory, updateAssistantMessageActionStatus } from "@/lib/supabaseAssistant";
+import { addAssistantMessage, archiveAssistantThread, assertAssistantContinuationReady, continueAssistantThreadFromArchive, fetchArchivedAssistantThreads, fetchAssistantMessages, fetchDeletedAssistantThreads, getOrCreateAssistantThread, restoreAssistantThread, searchArchivedAssistantMessages, softDeleteAssistantHistory, updateAssistantMessageActionStatus } from "@/lib/supabaseAssistant";
 import { fetchUserDevices, registerCurrentDevice, type UserDevice } from "@/lib/supabaseDevices";
 import { acceptTaskShare, createTaskShare, declineTaskShare, fetchTaskShares, fetchTaskSubtaskAssignments, historicalTaskFromShare, leaveTaskShare, revokeTaskShare, setSharedTaskFocus, setTaskSubtaskAssignment, updateSharedTaskSubtaskStatus, type TaskShare, type TaskSubtaskAssignment } from "@/lib/supabaseSharing";
 import { countCloudTasks, fetchCloudTasks, saveCloudTasks } from "@/lib/supabaseTasks";
@@ -850,6 +850,7 @@ export default function Home() {
   const [inlineSubtaskDrafts, setInlineSubtaskDrafts] = useState<Record<string, string>>({});
   const [editingInlineSubtaskKey, setEditingInlineSubtaskKey] = useState<string | null>(null);
   const [assistantThreadId, setAssistantThreadId] = useState<string | null>(null);
+  const [assistantContinuationSourceId, setAssistantContinuationSourceId] = useState<string | null>(null);
   const [assistantMessages, setAssistantMessages] = useState<AssistantMessage[]>([]);
   const [assistantStarterOpen, setAssistantStarterOpen] = useState(false);
   const [assistantInput, setAssistantInput] = useState("");
@@ -1073,6 +1074,7 @@ export default function Home() {
       setIsDriveOnboardingOpen(false);
       setUserCloudSettingsLoaded(false);
       setAssistantThreadId(null);
+      setAssistantContinuationSourceId(null);
       setAssistantMessages([]);
       setAssistantInput("");
       setAssistantReplyRetry(null);
@@ -1204,6 +1206,7 @@ export default function Home() {
       .then(async (thread) => {
         if (cancelled) return;
         setAssistantThreadId(thread.id);
+        setAssistantContinuationSourceId(thread.continuedFromThreadId ?? null);
         const messages = await fetchAssistantMessages(thread.id);
         if (cancelled) return;
         setAssistantMessages(messages);
@@ -3312,6 +3315,40 @@ export default function Home() {
     }
   }
 
+  async function continueArchivedAssistantThread(sourceThread: AssistantThread) {
+    if (!cloudUser || !assistantThreadId) {
+      setAssistantArchiveStatus("השיחה הפעילה עדיין לא מוכנה. אפשר לנסות שוב בעוד רגע.");
+      return;
+    }
+
+    const hasActiveMessages = assistantMessages.length > 0;
+    if (hasActiveMessages && !window.confirm("פתיחת המשך לשיחה מהארכיון תעביר את השיחה הפעילה הנוכחית לארכיון ותפתח שיחה חדשה. שיחת המקור נשארת בארכיון, ותוכנה לא יישלח ל-AI אוטומטית. להמשיך?")) return;
+
+    setAssistantArchiveStatus("פותח המשך אישי לשיחה...");
+    try {
+      // Verify the migration before archiving the current conversation.
+      await assertAssistantContinuationReady(assistantThreadId, cloudUser);
+      if (hasActiveMessages) await archiveAssistantThread(assistantThreadId, cloudUser);
+      const thread = await continueAssistantThreadFromArchive(assistantThreadId, sourceThread.id, cloudUser, !hasActiveMessages);
+
+      updateAssistantDraft("");
+      setAssistantThreadId(thread.id);
+      setAssistantContinuationSourceId(thread.continuedFromThreadId ?? null);
+      setAssistantMessages([]);
+      setAssistantReplyRetry(null);
+      setAssistantHasUnreadMessages(false);
+      setAssistantMode(null);
+      setAssistantActionErrors({});
+      setAssistantStarterOpen(true);
+      setAssistantArchiveOpen(false);
+      setAssistantArchivePreview(null);
+      await refreshArchivedAssistantThreadList();
+      setAssistantStatus("נפתח המשך חדש מהארכיון. תוכן השיחה המקורית לא נשלח ל-AI.");
+    } catch (error) {
+      setAssistantArchiveStatus(`לא הצלחתי לפתוח המשך לשיחה: ${errorMessage(error)}`);
+    }
+  }
+
   async function archiveActiveAssistantHistory() {
     if (!cloudUser || !assistantThreadId) throw new Error("השיחה הפעילה אינה מוכנה להעברה לארכיון.");
 
@@ -3320,6 +3357,7 @@ export default function Home() {
     const thread = await getOrCreateAssistantThread(cloudUser);
     updateAssistantDraft("");
     setAssistantThreadId(thread.id);
+    setAssistantContinuationSourceId(null);
     setAssistantMessages([]);
     setAssistantReplyRetry(null);
     setAssistantHasUnreadMessages(false);
@@ -3337,6 +3375,7 @@ export default function Home() {
       const thread = await restoreAssistantThread(threadId, cloudUser);
       const messages = await fetchAssistantMessages(thread.id);
       setAssistantThreadId(thread.id);
+      setAssistantContinuationSourceId(null);
       setAssistantMessages(messages);
       setAssistantReplyRetry(null);
       setAssistantHasUnreadMessages(false);
@@ -3367,6 +3406,7 @@ export default function Home() {
     const thread = await getOrCreateAssistantThread(cloudUser);
     updateAssistantDraft("");
     setAssistantThreadId(thread.id);
+    setAssistantContinuationSourceId(null);
     setAssistantMessages([]);
     setAssistantReplyRetry(null);
     setAssistantHasUnreadMessages(false);
@@ -3990,6 +4030,7 @@ export default function Home() {
     setCloudDevices([]);
     setDevicesStatus("");
     setAssistantThreadId(null);
+    setAssistantContinuationSourceId(null);
     setAssistantMessages([]);
     setAssistantInput("");
     setAssistantReplyRetry(null);
@@ -4360,6 +4401,9 @@ export default function Home() {
   const taskEditorMinDueDate = taskEditorOriginalDueDate && taskEditorOriginalDueDate < todayIso()
     ? taskEditorOriginalDueDate
     : todayIso();
+  const assistantContinuationSource = assistantThreadId
+    ? archivedAssistantThreads.find((thread) => thread.id === assistantContinuationSourceId)
+    : undefined;
 
   return (
     <main className={activeView === "assistant" ? "assistant-main" : undefined}>
@@ -5263,7 +5307,13 @@ export default function Home() {
                       <span>שיחה מהארכיון</span>
                       <small>הועברה לארכיון {formatDateTime(assistantArchivePreview.thread.archivedAt ?? assistantArchivePreview.thread.updatedAt)}</small>
                     </div>
-                    <button type="button" onClick={() => setAssistantArchivePreview(null)}>לכל השיחות</button>
+                    <div className="assistant-archive-heading-actions">
+                      <button type="button" className="assistant-continue-button" onClick={() => void continueArchivedAssistantThread(assistantArchivePreview.thread)}>
+                        <MessageCirclePlus size={17} aria-hidden="true" />
+                        המשך מכאן
+                      </button>
+                      <button type="button" onClick={() => setAssistantArchivePreview(null)}>לכל השיחות</button>
+                    </div>
                   </div>
                   <div className="assistant-archive-messages">
                     {assistantArchivePreview.messages.map((message) => (
@@ -5387,7 +5437,21 @@ export default function Home() {
               </section>
             )}
 
-            <div className="assistant-conversation">
+            <div className={`assistant-conversation${assistantContinuationSource ? " has-continuation-source" : ""}`}>
+              {assistantContinuationSource && (
+                <button
+                  type="button"
+                  className="assistant-continuation-source"
+                  onClick={() => {
+                    setAssistantArchiveOpen(true);
+                    void openArchivedAssistantThread(assistantContinuationSource);
+                  }}
+                >
+                  <Archive size={16} aria-hidden="true" />
+                  <span>המשך אישי משיחה בארכיון</span>
+                  <small>פתיחת שיחת המקור</small>
+                </button>
+              )}
               {assistantMessages.length > 0 && (
                 <section className="assistant-history" aria-label="היסטוריית שיחת AI">
                   <div className="assistant-history-heading">
