@@ -6,24 +6,27 @@ import ts from "typescript";
 
 // Isolated, synthetic provider evaluation. Never calls the app or its database.
 const mode = process.argv[2];
-if (!["probe", "run"].includes(mode) || !process.argv[3]) {
-  throw new Error("Usage: node scripts/ai-provider-benchmark.mjs probe|run <credentials-file>");
+const profile = process.argv[4] ?? "dual";
+if (!["probe", "run"].includes(mode) || !process.argv[3] || !["dual", "gemini38"].includes(profile)) {
+  throw new Error("Usage: node scripts/ai-provider-benchmark.mjs probe|run <credentials-file> [dual|gemini38]");
 }
 const secrets = parseEnv(await readFile(process.argv[3], "utf8"));
-for (const name of ["GEMINI_API_KEY", "GROQ_API_KEY"]) {
+for (const name of profile === "gemini38" ? ["GEMINI_API_KEY"] : ["GEMINI_API_KEY", "GROQ_API_KEY"]) {
   if (!secrets[name]?.trim()) throw new Error(`Missing ${name}`);
 }
 function scrub(value, limit = 1600) {
   let text = String(value);
-  for (const name of ["GEMINI_API_KEY", "GROQ_API_KEY"]) text = text.replaceAll(secrets[name], "[REDACTED]");
+  for (const name of ["GEMINI_API_KEY", "GROQ_API_KEY"]) {
+    if (secrets[name]) text = text.replaceAll(secrets[name], "[REDACTED]");
+  }
   return text.slice(0, limit);
 }
 const providers = [
-  { name: "Gemini", model: "gemini-3.6-flash", key: "GEMINI_API_KEY",
+  { name: "Gemini", model: profile === "gemini38" ? "gemini-3.8-flash" : "gemini-3.6-flash", key: "GEMINI_API_KEY",
     list: "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000" },
   { name: "Groq", model: "qwen/qwen3.8-27b", key: "GROQ_API_KEY",
     list: "https://api.groq.com/openai/v1/models" },
-];
+].filter(provider => profile !== "gemini38" || provider.name === "Gemini");
 function headers(provider) {
   return provider.name === "Gemini"
     ? { "Content-Type": "application/json", "x-goog-api-key": secrets[provider.key] }
