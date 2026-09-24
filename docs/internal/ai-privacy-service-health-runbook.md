@@ -36,6 +36,7 @@
 
 ## Verification / rollout
 
+- Completed acceptance evidence: `ai-privacy-health-acceptance-2026-09-24.md`. Production application release `c49ca75`; review, cancellation, approved synthetic reply, persistence and observed service-health recording verified.
 - `node scripts/test-assistant-privacy.mjs`: mocked auth, ownership, request limits, exact preview approval, changed context, details opt-in, fallback controls, local answers, safe errors and admin isolation.
 - `node scripts/test-service-health-sql.mjs <pglite-dist-index-path>`: isolated database, repeatable migration, RLS and server-only writes, incident lifecycle and observation ordering.
 - `npm run lint` and `npm run build` are required.
