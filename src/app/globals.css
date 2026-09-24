@@ -1292,6 +1292,32 @@ button.subtask-read-main { cursor: pointer; }
   .assistant-chat { max-height: none; }
   .assistant-messages { max-height: none; }
 }
+.assistant-context-review { border-block: 1px solid var(--border); padding: 14px 0; min-width: 0; overflow-wrap: anywhere; }
+.assistant-context-heading, .service-health-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.assistant-context-review p { font-size: .88rem; line-height: 1.5; }
+.assistant-context-message, .assistant-context-review dd { white-space: pre-wrap; }
+.assistant-context-data { max-height: 260px; overflow: auto; overscroll-behavior: contain; border-block: 1px solid var(--border); padding-block: 10px; }
+.assistant-context-data dl, .service-health-row dl { display: grid; grid-template-columns: minmax(72px, auto) minmax(0, 1fr); gap: 6px 12px; font-size: .84rem; }
+.assistant-context-data dl + dl { border-top: 1px solid var(--border); padding-top: 10px; }
+.assistant-context-data dt, .service-health-row dt { color: var(--muted); }
+.assistant-context-data dd, .service-health-row dd { margin: 0; overflow-wrap: anywhere; }
+.assistant-context-step { display: contents; }
+.assistant-context-options { display: flex; align-items: center; gap: 10px; padding-block: 12px; font-size: .88rem; }
+.assistant-context-options input { width: 20px; height: 20px; flex: 0 0 auto; }
+.assistant-context-confirm, .service-health-row button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; border-radius: 6px; padding: 8px 14px; }
+.assistant-context-confirm { border: 0; color: var(--surface); background: var(--accent-dark); font-weight: 700; }
+.service-warning { color: var(--waiting); }
+.service-health-panel { margin-top: 24px; border-top: 1px solid var(--border); padding-top: 16px; }
+.service-health-row { padding: 16px 0; border-bottom: 1px solid var(--border); min-width: 0; }
+.service-health-heading span { font-weight: 700; color: var(--waiting); }
+.service-healthy .service-health-heading span { color: var(--success); }
+.service-error .service-health-heading span { color: var(--danger); }
+.service-health-row p { font-size: .9rem; overflow-wrap: anywhere; }
+@media (max-width: 560px) {
+  .assistant-context-data { max-height: 220px; }
+  .service-health-row dl { grid-template-columns: 1fr; gap: 4px; }
+  .service-health-row dd { margin-bottom: 6px; }
+}
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: .01ms !important;

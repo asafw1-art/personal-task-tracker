@@ -5,6 +5,10 @@ import type { ChangeEvent, Dispatch, FormEvent, SetStateAction } from "react";
 import type { User } from "@supabase/supabase-js";
 import { Archive, ArrowDown, ArrowRight, ArrowUp, Bell, Check, ChevronDown, CircleAlert, CircleCheck, History, ListChecks, LoaderCircle, MessageCirclePlus, Pencil, RotateCcw, Search, Share2, Sparkles, Trash2, X } from "lucide-react";
 import { useNotificationReceipts } from "@/lib/useNotificationReceipts";
+import { useServiceHealth } from "@/lib/useServiceHealth";
+import { ServiceHealthPanel } from "@/components/ServiceHealthPanel";
+import { AssistantContextReview } from "@/components/AssistantContextReview";
+import type { AssistantContextPreview } from "@/lib/assistantPrivacy";
 import type { AssistantArchiveSearchResult, AssistantMessage, AssistantProposedAction, AssistantThread } from "@/lib/assistant";
 import { canonicalTaskId, initialTasks, Task, TaskPrefix, TaskPriority, TaskStatus, TaskSubtask, TaskSubtaskStatus } from "@/lib/tasks";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
@@ -88,7 +92,8 @@ type AppNotification = {
   action:
     | { type?: "tasks"; statusFilter: TaskFilter }
     | { type: "share_invitations" }
-    | { type: "share_ended" };
+    | { type: "share_ended" }
+    | { type: "service_health"; keys: string[] };
 };
 
 type ImportSummary = {
@@ -841,6 +846,8 @@ export default function Home() {
   const [devicesStatus, setDevicesStatus] = useState("");
   const [adminOverview, setAdminOverview] = useState<AdminOverview | null>(null);
   const [adminOverviewStatus, setAdminOverviewStatus] = useState("");
+  const serviceHealth = useServiceHealth(cloudUser?.id, cloudUser?.email?.toLowerCase() === "asafw1@gmail.com");
+  const [assistantContextPreview, setAssistantContextPreview] = useState<(AssistantContextPreview & { userId: string; threadId: string }) | null>(null);
   const [driveBackupOverview, setDriveBackupOverview] = useState<DriveBackupOverview | null>(null);
   const [driveBackupStatus, setDriveBackupStatus] = useState("");
   const [driveBackupPreview, setDriveBackupPreview] = useState<DriveBackupPreview | null>(null);
@@ -864,8 +871,8 @@ export default function Home() {
   const [assistantIsSending, setAssistantIsSending] = useState(false);
   const [assistantReplyRetry, setAssistantReplyRetry] = useState<{
     message: string;
-    recentMessages: Array<{ role: "user" | "assistant"; content: string }>;
   } | null>(null);
+  const visibleAssistantContextPreview = assistantContextPreview?.userId === cloudUser?.id && assistantContextPreview?.threadId === assistantThreadId ? assistantContextPreview : null;
   const [assistantHasUnreadMessages, setAssistantHasUnreadMessages] = useState(false);
   const [assistantMode, setAssistantMode] = useState<"ai" | "local" | "unavailable" | null>(null);
   const [assistantActionErrors, setAssistantActionErrors] = useState<Record<string, string>>({});
@@ -1046,7 +1053,7 @@ export default function Home() {
     }
 
     setAssistantHasUnreadMessages(true);
-  }, [activeView, assistantMessages.length]);
+  }, [activeView, assistantMessages.length, visibleAssistantContextPreview?.digest]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -1792,8 +1799,15 @@ export default function Home() {
   }
 
   const receipts = useNotificationReceipts(cloudUser?.id);
-  const visibleAppNotifications = appNotifications;
+  const serviceIssues = serviceHealth.overview?.services.filter((service) => service.incidentId || service.privacyVerified === false) ?? [];
+  const serviceIncidentKeys = serviceIssues.map((service) => `service:${service.id}:${service.incidentId || "privacy_unverified"}`);
+  if (serviceHealth.error || (serviceHealth.overview && !serviceHealth.overview.monitoringAvailable)) serviceIncidentKeys.push("service:monitoring_unavailable");
+  const visibleAppNotifications: AppNotification[] = serviceIncidentKeys.length ? [{
+    id: "service-health", title: "שירותים דורשים בדיקה", body: "נמצאו שירותים שלא נבדקו, תקלה או הגדרת פרטיות שטרם אומתה. פרטים במסך הניהול.",
+    tone: "warn", actionLabel: "מצב שירותים", action: { type: "service_health", keys: serviceIncidentKeys },
+  }, ...appNotifications] : appNotifications;
   function notificationKeys(notification: AppNotification): string[] {
+    if (notification.action.type === "service_health") return notification.action.keys;
     if (notification.action.type === "share_invitations") return pendingShareInvitations.map((share) => `invitation:${share.id}:${share.createdAt}`);
     if (notification.action.type === "share_ended") return unseenEndedShares.map((share) => `ended:${share.id}:${share.endedAt}`);
     if (notification.id === "no-weekly-closures") {
@@ -1865,9 +1879,9 @@ export default function Home() {
     ? selectedAppNotification ?? visibleAppNotifications[0]
     : null;
   const activeNotificationDetailTasks = activeNotificationDetail
-    ? activeNotificationDetail.action.type === "share_invitations" || activeNotificationDetail.action.type === "share_ended"
-      ? []
-      : tasksForNotificationFilter(activeNotificationDetail.action.statusFilter)
+    ? "statusFilter" in activeNotificationDetail.action
+      ? tasksForNotificationFilter(activeNotificationDetail.action.statusFilter)
+      : []
     : [];
   const notificationModalTone = visibleAppNotifications.some((notification) => notification.tone === "danger")
     ? "danger"
@@ -3519,7 +3533,7 @@ export default function Home() {
 
   async function requestAssistantReply(
     message: string,
-    recentMessages: Array<{ role: "user" | "assistant"; content: string }>,
+    context: { includeDetails?: boolean; approvedDigest?: string } = {},
   ) {
     if (!cloudUser || !assistantThreadId || !supabase) throw new Error("השיחה אינה מוכנה עדיין.");
 
@@ -3533,7 +3547,7 @@ export default function Home() {
         Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ message, tasks, taxonomy, recentMessages }),
+      body: JSON.stringify({ message, ...context }),
     });
 
     const data = await response.json() as {
@@ -3541,8 +3555,17 @@ export default function Home() {
       proposedAction?: AssistantProposedAction;
       mode?: "ai" | "local" | "unavailable";
       error?: string;
+      preview?: AssistantContextPreview;
+      contextChanged?: boolean;
     };
     if (!response.ok || data.error) throw new Error(data.error ?? "העוזר החזיר שגיאה.");
+    if (data.preview) {
+      assistantShouldScrollToBottomRef.current = true;
+      setAssistantContextPreview({ ...data.preview, userId: cloudUser.id, threadId: assistantThreadId });
+      setAssistantStatus(data.contextChanged ? "המידע או הספקים השתנו. נדרש אישור לתצוגה המעודכנת." : "ההודעה נשמרה. ממתין לאישור לפני שליחה לספק חיצוני.");
+      return;
+    }
+    setAssistantContextPreview(null);
 
     const assistantMessage = await addAssistantMessage(
       assistantThreadId,
@@ -3555,12 +3578,23 @@ export default function Home() {
     setAssistantMessages((current) => [...current, assistantMessage]);
     setAssistantMode(data.mode ?? "ai");
     if (data.mode === "local") {
-      setAssistantStatus("מצב מקומי: התשובה חושבה מנתוני האפליקציה בלבד, ללא ספק AI.");
+      setAssistantStatus("ללא ספק AI: התשובה חושבה ממשימות הענן שבבעלותך בלבד.");
     } else if (data.mode === "unavailable") {
       setAssistantStatus("ספק ה-AI אינו זמין כרגע. שאלות פשוטות על נתוני האפליקציה עדיין זמינות במצב מקומי.");
     } else {
       setAssistantStatus("");
     }
+  }
+
+  async function reviewAssistantContext(includeDetails: boolean, confirm = false) {
+    if (!visibleAssistantContextPreview || assistantIsSending) return;
+    setAssistantIsSending(true);
+    try {
+      await requestAssistantReply(visibleAssistantContextPreview.message, {
+        includeDetails, ...(confirm ? { approvedDigest: visibleAssistantContextPreview.digest } : {}),
+      });
+    } catch (error) { setAssistantStatus(`לא הושלמה השליחה: ${errorMessage(error)}`); }
+    finally { setAssistantIsSending(false); }
   }
 
   async function retryAssistantResponse() {
@@ -3569,7 +3603,7 @@ export default function Home() {
     setAssistantStatus("מנסה לקבל תשובה מחדש...");
 
     try {
-      await requestAssistantReply(assistantReplyRetry.message, assistantReplyRetry.recentMessages);
+      await requestAssistantReply(assistantReplyRetry.message);
       setAssistantReplyRetry(null);
     } catch (error) {
       setAssistantMode("unavailable");
@@ -3581,11 +3615,10 @@ export default function Home() {
 
   async function sendAssistantText(rawMessage: string) {
     const message = rawMessage.trim();
-    if (!message || !cloudUser || !assistantThreadId || !supabase || assistantIsSending || assistantReplyRetry) return;
+    if (!message || !cloudUser || !assistantThreadId || !supabase || assistantIsSending || assistantReplyRetry || visibleAssistantContextPreview) return;
 
     const isArchiveRecall = isAssistantArchiveRecallRequest(message);
     const isArchiveNavigationOnly = isArchiveRecall && assistantMessages.length === 0;
-    const recentMessages = assistantMessages.slice(-8).map((item) => ({ role: item.role, content: item.content }));
     let userMessageSaved = false;
     setAssistantStarterOpen(false);
     setAssistantIsSending(true);
@@ -3607,7 +3640,7 @@ export default function Home() {
       updateAssistantDraft("");
       setAssistantStatus(isArchiveRecall ? "מחפש בשיחות הארכיון..." : "העוזר מכין תשובה...");
       if (isArchiveRecall) await answerAssistantArchiveRecall(message);
-      else await requestAssistantReply(message, recentMessages);
+      else await requestAssistantReply(message);
       setAssistantReplyRetry(null);
     } catch (error) {
       if (userMessageSaved) {
@@ -3616,7 +3649,7 @@ export default function Home() {
           setAssistantStatus(`ההודעה נשמרה, אך החיפוש בארכיון נכשל: ${errorMessage(error)}`);
         } else {
           setAssistantMode("unavailable");
-          setAssistantReplyRetry({ message, recentMessages });
+          setAssistantReplyRetry({ message });
           setAssistantStatus(`ההודעה נשמרה, אך לא התקבלה תשובה: ${errorMessage(error)}`);
         }
       } else if (isArchiveNavigationOnly) {
@@ -4559,9 +4592,8 @@ export default function Home() {
                 {visibleAppNotifications.length === 0 && <p className="notification-modal-empty">אין התראות כרגע.</p>}
                 <div className="notification-summary-list">
                   {visibleAppNotifications.map((notification) => {
-                    const notificationTasks = notification.action.type === "share_invitations" || notification.action.type === "share_ended"
-                      ? []
-                      : tasksForNotificationFilter(notification.action.statusFilter);
+                    const notificationTasks = "statusFilter" in notification.action
+                      ? tasksForNotificationFilter(notification.action.statusFilter) : [];
                     const notificationOpenSubtasks = notificationTasks.reduce((sum, task) => sum + subtaskProgress(task.subtasks).open, 0);
                     const isActiveDetail = activeNotificationDetail?.id === notification.id;
 
@@ -4572,7 +4604,7 @@ export default function Home() {
                           {unreadKeys(notification).length > 0 && <span className="notification-unread">חדש</span>}
                           <p>{notification.body}</p>
                           <span>
-                            {notification.action.type === "share_invitations"
+                            {notification.action.type === "service_health" ? "ניהול מערכת" : notification.action.type === "share_invitations"
                               ? `${pendingShareInvitations.length} הזמנות`
                               : notification.action.type === "share_ended"
                                 ? `${unseenEndedShares.length} שיתופים שהסתיימו`
@@ -4585,6 +4617,12 @@ export default function Home() {
                           className="notification-detail-button"
                           onClick={() => {
                             receipts.markRead(notificationKeys(notification));
+                            if (notification.action.type === "service_health") {
+                              closeNotificationCenter();
+                              setSettingsTab("admin");
+                              setIsSettingsOpen(true);
+                              return;
+                            }
                             setModalTaskQuery("");
                             setActiveNotificationId(notification.id);
                             setIsNotificationDetailOpen((isOpen) => !(isOpen && activeNotificationDetail?.id === notification.id));
@@ -5535,6 +5573,12 @@ export default function Home() {
                     </article>
                   );
                     })}
+                    {visibleAssistantContextPreview && <AssistantContextReview
+                      preview={visibleAssistantContextPreview} busy={assistantIsSending}
+                      onConfirm={() => void reviewAssistantContext(visibleAssistantContextPreview.includeDetails, true)}
+                      onDetails={(include) => void reviewAssistantContext(include)}
+                      onCancel={() => { setAssistantContextPreview(null); setAssistantStatus("השליחה לספק בוטלה. ההודעה נשארה בשיחה בלבד."); }}
+                    />}
                   </div>
                 </section>
               )}
@@ -5568,12 +5612,12 @@ export default function Home() {
               onChange={(event) => updateAssistantDraft(event.target.value)}
               placeholder="כתוב לעוזר המשימות..."
               aria-label="הודעה לצ׳ט AI"
-              disabled={assistantIsSending || !assistantThreadId}
+              disabled={assistantIsSending || Boolean(visibleAssistantContextPreview) || !assistantThreadId}
             />
             <button
               type="submit"
               className="assistant-send-button"
-              disabled={assistantIsSending || Boolean(assistantReplyRetry) || !assistantInput.trim() || !assistantThreadId}
+              disabled={assistantIsSending || Boolean(visibleAssistantContextPreview) || Boolean(assistantReplyRetry) || !assistantInput.trim() || !assistantThreadId}
               aria-label="שליחת הודעה"
               title="שליחה"
             >
@@ -5880,6 +5924,7 @@ export default function Home() {
                   </div>
                 )}
                 <p className="admin-overview-note">משתמש פעיל הוא משתמש שמכשיר שלו נרשם באפליקציה במהלך התקופה. זהו מדד שימוש משוער, לא מעקב אחר זמן מסך.</p>
+                <ServiceHealthPanel overview={serviceHealth.overview} error={serviceHealth.error} busy={serviceHealth.busy} onRefresh={(probe) => void serviceHealth.refresh(probe)} />
               </section>
               ) : (
               <>

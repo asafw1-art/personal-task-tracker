@@ -1,0 +1,21 @@
+export type ServiceId = "gemini" | "gateway" | "database" | "drive" | "scheduler";
+export type ServiceState = "healthy" | "degraded" | "error" | "disabled" | "unconfigured" | "unknown";
+export type ServiceHealth = {
+  id: ServiceId; label: string; configured: boolean; enabled: boolean;
+  state: ServiceState; reason: string; checkedAt: string | null; lastSuccessAt: string | null;
+  incidentId: string | null; source: string; model?: string; privacyVerified?: boolean;
+};
+export type ServiceHealthOverview = { services: ServiceHealth[]; generatedAt: string; monitoringAvailable: boolean };
+export const serviceStateLabels: Record<ServiceState, string> = {
+  healthy: "תקין", degraded: "מוגבל", error: "תקלה", disabled: "מושבת", unconfigured: "לא מוגדר", unknown: "לא נבדק",
+};
+export const serviceReasonLabels: Record<string, string> = {
+  ok: "בדיקה הצליחה", disabled_by_operator: "הספק הושבת במפורש בידי המפעיל",
+  not_configured: "חסרה הגדרת שירות", not_checked: "טרם נרשמה בדיקת תקינות",
+  stale: "הבדיקה האחרונה אינה עדכנית", rate_limited: "מכסת הספק הוגבלה",
+  unauthorized: "פרטי הגישה נדחו", timeout: "הספק לא ענה בזמן", provider_error: "שגיאה אצל הספק",
+  invalid_response: "התקבלה תשובה שאינה תקינה", network_error: "החיבור לספק נכשל",
+  database_error: "בדיקת מסד הנתונים נכשלה", monitoring_unavailable: "רישום הניטור אינו זמין",
+  backup_failed: "קיים גיבוי שנכשל", backup_stale: "קיים חשבון ללא גיבוי מוצלח ביממה האחרונה",
+  backup_not_checked: "לא אומתה זמינות הגיבוי מול ספק האחסון", no_connections: "אין חיבורי גיבוי פעילים",
+};
