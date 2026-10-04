@@ -194,7 +194,7 @@ function buildSystemPrompt() {
 }
 
 function isAssistantResponse(value: unknown): value is AssistantResponse {
-  return Boolean(value && typeof value === "object" && "reply" in value && typeof (value as { reply?: unknown }).reply === "string");
+  return Boolean(value && typeof value === "object" && "reply" in value && typeof (value as { reply?: unknown }).reply === "string" && (value as { reply: string }).reply.trim());
 }
 
 function parseAssistantResponse(text: string): AssistantResponse | null {
@@ -403,6 +403,7 @@ function normalizeAssistantRequestBody(body: AssistantRequestBody): Required<Ass
 }
 
 export async function POST(request: Request) {
+  const deadline = Date.now() + 19_000;
   try {
     checkRequestSize(request);
     const user = await verifyRequestUser(request);
@@ -422,7 +423,7 @@ export async function POST(request: Request) {
     const preview = makeContextPreview(user.id, userMessage, tasks, body.includeDetails, providers);
     if (body.approvedDigest !== preview.digest) return jsonResponse({ preview, contextChanged: Boolean(body.approvedDigest) });
     const payload = { userMessage, taskSnapshot: preview.tasks };
-    const result = await callApprovedProviders(buildSystemPrompt(), payload, preview.providers, (content) => Boolean(parseAssistantResponse(content) || parseAssistantResponse(content.replace(/^```(?:json)?\s*|\s*```$/g, ""))));
+    const result = await callApprovedProviders(buildSystemPrompt(), payload, preview.providers, (content) => Boolean(parseAssistantResponse(content) || parseAssistantResponse(content.replace(/^```(?:json)?\s*|\s*```$/g, ""))), false, deadline);
     if (!result?.content) return jsonResponse({ mode: "unavailable", reply: "העוזר החכם לא זמין כרגע. אפשר עדיין לשאול על משימות פעילות, איחורים או צעדים פתוחים ללא ספק חיצוני." });
     const assistantResponse = extractJson(result.content);
     assistantResponse.mode = "ai";

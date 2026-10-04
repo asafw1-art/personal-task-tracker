@@ -13,7 +13,7 @@ let rows = [{ prefix: "P", task_number: 19, title: "Synthetic task", category: "
 const queries = [], health = [], calls = [];
 const client = {
   auth: { getUser: async () => ({ data: { user }, error: null }) },
-  rpc: async (name, args) => { health.push({ name, ...args }); return { error: null }; },
+  rpc: (name, args) => { health.push({ name, ...args }); return { abortSignal: async () => ({ error: null }) }; },
   from: (table) => {
     const query = { table, filters: [] }; queries.push(query);
     const chain = {

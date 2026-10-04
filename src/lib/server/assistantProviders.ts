@@ -2,6 +2,29 @@ import type { AssistantContextPreview } from "@/lib/assistantPrivacy";
 import { recordServiceHealth } from "@/lib/server/serviceHealth";
 
 export type ProviderId = "gemini" | "gateway";
+const PROVIDER_BUDGET_MS = 18_000;
+const ATTEMPT_TIMEOUT_MS = 12_000;
+// Best-effort protection within a warm server instance, not a distributed quota.
+const cooldowns = new Map<ProviderId, { model: string; until: number }>();
+
+export function retryAfterMs(value: string | null, now = Date.now()) {
+  if (!value?.trim()) return 0;
+  const seconds = Number(value);
+  const duration = Number.isFinite(seconds) ? seconds * 1000 : Date.parse(value) - now;
+  return Number.isFinite(duration) ? Math.max(0, duration) : 0;
+}
+
+export function providerHttpError(status: number) {
+  if (status === 429) return "rate_limited";
+  if (status === 402) return "credits_exhausted";
+  if (status === 404) return "model_unavailable";
+  if (status === 401) return "unauthorized";
+  if (status === 403) return "access_denied";
+  if ([400, 422].includes(status)) return "invalid_request";
+  if ([502, 503].includes(status)) return "overloaded";
+  if ([408, 504].includes(status)) return "timeout";
+  return "provider_error";
+}
 export function normalizeGeminiModel(model: string | undefined) {
   const value = model?.trim().replace(/^models\//, "");
   if (!value || ["3.6", "gemini-2.0-flash", "gemini-2.5-flash", "gemini-3-flash-preview"].includes(value)) return "gemini-3.6-flash";
@@ -29,7 +52,7 @@ export function providerErrorCode(error: unknown): string {
   return "network_error";
 }
 
-async function callProvider(id: ProviderId, systemPrompt: string, payload: unknown) {
+async function callProvider(id: ProviderId, systemPrompt: string, payload: unknown, timeoutMs: number) {
   const config = providerConfiguration().find((item) => item.id === id)!;
   if (!config.enabled || !config.configured) return { error: config.enabled ? "not_configured" : "disabled_by_operator" };
   const isGemini = id === "gemini";
@@ -49,28 +72,48 @@ async function callProvider(id: ProviderId, systemPrompt: string, payload: unkno
         model: config.model, stream: false, temperature: 0.2, max_tokens: 2048,
         messages: [{ role: "system", content: systemPrompt }, { role: "user", content: JSON.stringify(payload) }],
       }),
-      signal: AbortSignal.timeout(12_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
-    if (!response.ok) return { error: response.status === 429 ? "rate_limited" : [401, 403].includes(response.status) ? "unauthorized" : "provider_error" };
+    if (!response.ok) {
+      const error = providerHttpError(response.status);
+      const retryMs = retryAfterMs(response.headers.get("retry-after"));
+      if (retryMs || [429, 503].includes(response.status)) {
+        cooldowns.set(id, { model: config.model, until: Date.now() + (retryMs || 30_000) });
+      }
+      // Never read or log a provider error body: it can echo private input.
+      await response.body?.cancel();
+      return { error, httpStatus: response.status };
+    }
     const data = await response.json();
+    if (isGemini ? data.candidates?.[0]?.finishReason === "MAX_TOKENS" : data.choices?.[0]?.finish_reason === "length") return { error: "truncated_response" };
     const content = isGemini
-      ? data.candidates?.[0]?.content?.parts?.map((part: { text?: string }) => part.text ?? "").join("").trim()
+      ? data.candidates?.[0]?.content?.parts?.filter((part: { thought?: boolean }) => !part.thought).map((part: { text?: string }) => part.text ?? "").join("").trim()
       : data.choices?.[0]?.message?.content;
-    if (typeof content !== "string" || !content || content.length > 20000) return { error: "invalid_response" };
+    if (typeof content !== "string" || !content.trim() || content.length > 20000) return { error: "invalid_response" };
     return { content, provider: config.label };
   } catch (error) {
-    return { error: providerErrorCode(error) };
+    return { error: error instanceof SyntaxError ? "invalid_response" : providerErrorCode(error) };
   }
 }
 
-export async function callApprovedProviders(systemPrompt: string, payload: unknown, approved: AssistantContextPreview["providers"], validate: (content: string) => boolean, probe = false) {
+export async function callApprovedProviders(systemPrompt: string, payload: unknown, approved: AssistantContextPreview["providers"], validate: (content: string) => boolean, probe = false, requestDeadline = Infinity) {
+  const deadline = Math.min(requestDeadline, Date.now() + PROVIDER_BUDGET_MS);
   for (const config of providerConfiguration()) {
     // Recheck policy at the actual outbound boundary, including fallback.
     if (!config.configured || !config.enabled || !approved.some((item) => item.id === config.id && item.model === config.model)) continue;
-    const checkedAt = new Date().toISOString();
-    const result = await callProvider(config.id, systemPrompt, payload);
-    const valid = Boolean(result.content && validate(result.content));
-    await recordServiceHealth(config.id, valid ? "healthy" : result.error === "rate_limited" ? "degraded" : "error", valid ? "ok" : result.error || "invalid_response", probe ? "probe" : "request", checkedAt);
+    const cooldown = cooldowns.get(config.id);
+    if (cooldown?.model === config.model && cooldown.until > Date.now()) continue;
+    const remaining = deadline - Date.now();
+    if (remaining < 100) break;
+    const checkedAt = new Date(Date.now()).toISOString();
+    const result = await callProvider(config.id, systemPrompt, payload, Math.min(ATTEMPT_TIMEOUT_MS, remaining));
+    let valid = false;
+    try { valid = Boolean(result.content && validate(result.content)); } catch { /* Invalid output must still reach fallback. */ }
+    const reason = valid ? "ok" : result.error || "invalid_response";
+    // Metadata only; a monitoring outage must not indefinitely delay an answer.
+    console.info("assistant_provider_attempt", { provider: config.id, reason, httpStatus: result.httpStatus, elapsedMs: Date.now() - Date.parse(checkedAt) });
+    const healthBudget = Math.min(750, deadline - Date.now());
+    if (healthBudget > 0) await recordServiceHealth(config.id, valid ? "healthy" : ["rate_limited", "overloaded"].includes(reason) ? "degraded" : "error", reason, probe ? "probe" : "request", checkedAt, healthBudget);
     if (valid) return result;
   }
   return null;

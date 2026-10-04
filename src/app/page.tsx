@@ -3548,6 +3548,12 @@ export default function Home() {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ message, ...context }),
+      signal: AbortSignal.timeout(25_000),
+    }).catch((error: unknown) => {
+      if (error instanceof Error && ["TimeoutError", "AbortError"].includes(error.name)) {
+        throw new Error("לא התקבלה תשובה בזמן. אפשר לנסות שוב; לא בוצע שינוי במשימות.");
+      }
+      throw error;
     });
 
     const data = await response.json() as {
