@@ -1,6 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 import { createSupabaseAdmin } from "@/lib/server/supabaseServer";
+import { DriveTokenError, driveTokenError, driveConnectionHealth } from "@/lib/driveBackupHealth";
 
 export type BackupKind = "hourly" | "daily" | "manual" | "pre_restore";
 
@@ -120,9 +121,14 @@ async function googleTokenRequest(params: URLSearchParams) {
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: params,
     cache: "no-store",
+    signal: AbortSignal.timeout(15_000),
+  }).catch((error: unknown) => {
+    throw driveTokenError(error instanceof Error && ["TimeoutError", "AbortError"].includes(error.name) ? "timeout" : "network_error");
   });
-  const body = await response.json() as { access_token?: string; refresh_token?: string; error_description?: string };
-  if (!response.ok || !body.access_token) throw new Error(body.error_description || "Google token request failed");
+  const body = await response.json().catch(() => null) as { access_token?: string; refresh_token?: string; error?: string } | null;
+  if (!body) throw driveTokenError("invalid_response");
+  if (!response.ok) throw driveTokenError(body.error);
+  if (typeof body.access_token !== "string" || !body.access_token.trim()) throw driveTokenError("invalid_response");
   return body;
 }
 
@@ -136,14 +142,23 @@ export async function exchangeGoogleCode(code: string, origin: string) {
   }));
 }
 
-async function refreshAccessToken(encryptedRefreshToken: string) {
-  const tokens = await googleTokenRequest(new URLSearchParams({
-    refresh_token: decryptToken(encryptedRefreshToken),
-    client_id: env("GOOGLE_CLIENT_ID"),
-    client_secret: env("GOOGLE_CLIENT_SECRET"),
-    grant_type: "refresh_token",
-  }));
-  return tokens.access_token!;
+async function refreshAccessToken(connection: DriveConnection) {
+  try {
+    const tokens = await googleTokenRequest(new URLSearchParams({
+      refresh_token: decryptToken(connection.encrypted_refresh_token!),
+      client_id: env("GOOGLE_CLIENT_ID"),
+      client_secret: env("GOOGLE_CLIENT_SECRET"),
+      grant_type: "refresh_token",
+    }));
+    return tokens.access_token!;
+  } catch (error) {
+    if (error instanceof DriveTokenError && error.code === "invalid_grant") {
+      await createSupabaseAdmin().from("drive_backup_connections").update({
+        status: "error", last_error: error.message, updated_at: new Date().toISOString(),
+      }).eq("user_id", connection.user_id);
+    }
+    throw error;
+  }
 }
 
 async function googleJson<T>(url: string, accessToken: string, init?: RequestInit): Promise<T> {
@@ -325,11 +340,12 @@ function isQuotaError(error: unknown) {
 
 export async function createBackupForConnection(connection: DriveConnection, kind: BackupKind) {
   if (!connection.encrypted_refresh_token || connection.status === "disconnected") throw new Error("Drive is not connected");
+  if (driveConnectionHealth({ status: connection.status, lastError: connection.last_error, lastSuccessAt: connection.last_success_at }).reconnectRequired) throw driveTokenError("invalid_grant");
   const admin = createSupabaseAdmin();
   const attemptedAt = new Date().toISOString();
   await admin.from("drive_backup_connections").update({ last_attempt_at: attemptedAt, updated_at: attemptedAt }).eq("user_id", connection.user_id);
   try {
-    const accessToken = await refreshAccessToken(connection.encrypted_refresh_token);
+    const accessToken = await refreshAccessToken(connection);
     const folderId = await ensureFolder(connection, accessToken, admin);
     const snapshot = await buildSnapshot(admin, connection.user_id, kind);
     let uploaded;
@@ -405,6 +421,7 @@ export async function driveBackupOverview(userId: string) {
     && (!connection?.remind_after || new Date(connection.remind_after).getTime() <= now);
   return {
     connection: {
+      ...driveConnectionHealth({ status: connection?.status ?? "disconnected", lastError: connection?.last_error ?? null, lastSuccessAt: connection?.last_success_at ?? null }, now),
       connected: Boolean(connection?.encrypted_refresh_token && connection.status !== "disconnected"),
       status: connection?.status ?? "disconnected",
       googleEmail: connection?.google_email ?? null,
@@ -437,7 +454,7 @@ async function downloadSnapshot(connection: DriveConnection, runId: string) {
   const admin = createSupabaseAdmin();
   const { data: run, error } = await admin.from("drive_backup_runs").select("*").eq("id", runId).eq("user_id", connection.user_id).is("deleted_at", null).single();
   if (error) throw error;
-  const accessToken = await refreshAccessToken(connection.encrypted_refresh_token);
+  const accessToken = await refreshAccessToken(connection);
   const response = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(run.file_id)}?alt=media`, {
     headers: { Authorization: `Bearer ${accessToken}` }, cache: "no-store",
   });
@@ -529,7 +546,7 @@ export async function deleteAllDriveBackups(userId: string) {
   const admin = createSupabaseAdmin();
   const connection = await getConnection(admin, userId);
   if (!connection?.encrypted_refresh_token) throw new Error("יש למחוק את הגיבויים לפני ניתוק חשבון Drive.");
-  const accessToken = await refreshAccessToken(connection.encrypted_refresh_token);
+  const accessToken = await refreshAccessToken(connection);
   const { data, error } = await admin.from("drive_backup_runs").select("id,file_id").eq("user_id", userId).is("deleted_at", null);
   if (error) throw error;
   for (const run of data ?? []) {

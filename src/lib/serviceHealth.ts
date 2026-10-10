@@ -21,5 +21,6 @@ export const serviceReasonLabels: Record<string, string> = {
   truncated_response: "תשובת הספק נקטעה לפני שהושלמה",
   database_error: "בדיקת מסד הנתונים נכשלה", monitoring_unavailable: "רישום הניטור אינו זמין",
   backup_failed: "קיים גיבוי שנכשל", backup_stale: "קיים חשבון ללא גיבוי מוצלח ביממה האחרונה",
+  drive_reconnect_required: "הרשאת Google אינה תקפה; נדרש חיבור מחדש של חשבון Drive",
   backup_not_checked: "לא אומתה זמינות הגיבוי מול ספק האחסון", no_connections: "אין חיבורי גיבוי פעילים",
 };

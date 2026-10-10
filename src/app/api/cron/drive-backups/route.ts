@@ -15,6 +15,10 @@ async function run(request: Request) {
     const results = await runScheduledBackups();
     const failed = results.some((result) => result.hourly !== "ok" || (result.daily && !["ok", "already-created"].includes(result.daily)));
     await recordServiceHealth("scheduler", failed ? "degraded" : "healthy", failed ? "backup_failed" : "ok", "scheduler");
+    if (results.length) {
+      const reconnectRequired = results.some((result) => [result.hourly, result.daily].some((message) => message?.includes("[drive_oauth:invalid_grant]")));
+      await recordServiceHealth("drive", failed ? "error" : "healthy", reconnectRequired ? "drive_reconnect_required" : failed ? "backup_failed" : "ok", "scheduler");
+    }
     return Response.json({ ok: !failed, attempted: results.length, failed: results.filter((result) => result.hourly !== "ok" || (result.daily && !["ok", "already-created"].includes(result.daily))).length }, { headers: { "Cache-Control": "no-store" } });
   } catch {
     await recordServiceHealth("scheduler", "error", "backup_failed", "scheduler");

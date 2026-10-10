@@ -2,6 +2,7 @@ import { createSupabaseAdmin, verifyRequestUser, RequestAuthError } from "@/lib/
 import { providerConfiguration, callApprovedProviders } from "@/lib/server/assistantProviders";
 import { recordServiceHealth } from "@/lib/server/serviceHealth";
 import type { ServiceHealth, ServiceState } from "@/lib/serviceHealth";
+import { driveConnectionHealth } from "@/lib/driveBackupHealth";
 
 export const runtime = "nodejs";
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: { "Cache-Control": "no-store" } });
@@ -35,10 +36,11 @@ async function overview() {
     state: databaseError ? "error" : "healthy", reason: databaseError ? "database_error" : "ok", checkedAt: now,
     lastSuccessAt: databaseError ? rows?.find((row) => row.service_id === "database")?.last_success_at ?? null : now,
     incidentId: databaseError ? rows?.find((row) => row.service_id === "database")?.incident_id || "database:error" : null, source: "probe" });
-  const drive = await admin.from("drive_backup_connections").select("status,last_success_at").neq("status", "disconnected").limit(1001);
+  const drive = await admin.from("drive_backup_connections").select("status,last_success_at,last_error").neq("status", "disconnected").limit(1001);
   const active = drive.data ?? [];
   const staleBackup = active.some((row) => !row.last_success_at || Date.now() - Date.parse(row.last_success_at) > 86400000);
-  const driveReason = drive.error || active.length > 1000 ? "backup_not_checked" : active.some((row) => row.status === "error") ? "backup_failed"
+  const reconnectRequired = active.some((row) => driveConnectionHealth({ status: row.status, lastError: row.last_error, lastSuccessAt: row.last_success_at }).reconnectRequired);
+  const driveReason = drive.error || active.length > 1000 ? "backup_not_checked" : reconnectRequired ? "drive_reconnect_required" : active.some((row) => row.status === "error") ? "backup_failed"
     : staleBackup ? "backup_stale" : !active.length ? "no_connections" : "ok";
   const successes = active.map((row) => row.last_success_at).filter(Boolean).sort();
   const driveState: ServiceState = driveReason === "ok" ? "healthy" : driveReason === "no_connections" ? "unconfigured" : driveReason === "backup_not_checked" ? "unknown" : "error";

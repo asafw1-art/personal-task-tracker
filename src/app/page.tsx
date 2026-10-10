@@ -925,8 +925,10 @@ export default function Home() {
     try {
       const overview = await fetchDriveBackupOverview();
       setDriveBackupOverview(overview);
-      setDriveBackupStatus(overview.connection.connected
-        ? "גיבוי Google Drive מחובר."
+      setDriveBackupStatus(overview.connection.reconnectRequired ? "הרשאת Google אינה תקפה. יש לחבר מחדש את חשבון Drive."
+        : overview.connection.status === "error" ? "הגיבוי אינו תקין. יש לבדוק את התקלה המוצגת."
+        : overview.connection.backupOverdue ? "לא הושלם גיבוי מוצלח ביממה האחרונה."
+        : overview.connection.healthy ? "גיבוי Google Drive תקין לפי הגיבוי האחרון."
         : "אין כרגע גיבוי חיצוני פעיל.");
       if (allowPrompt && overview.connection.shouldPrompt) setIsDriveOnboardingOpen(true);
     } catch (error) {
@@ -4223,6 +4225,7 @@ export default function Home() {
       await refreshDriveBackups(false);
       setDriveBackupStatus("הגיבוי הידני הושלם בהצלחה.");
     } catch (error) {
+      await fetchDriveBackupOverview().then(setDriveBackupOverview).catch(() => undefined);
       setDriveBackupStatus(`הגיבוי נכשל: ${errorMessage(error)}`);
     } finally {
       setDriveBackupBusy(false);
@@ -4237,6 +4240,7 @@ export default function Home() {
       setDriveBackupPreview(preview);
       setDriveBackupStatus("בדיקת התקינות הסתיימה בהצלחה.");
     } catch (error) {
+      await fetchDriveBackupOverview().then(setDriveBackupOverview).catch(() => undefined);
       setDriveBackupStatus(`בדיקת הגיבוי נכשלה: ${errorMessage(error)}`);
     } finally {
       setDriveBackupBusy(false);
@@ -5941,8 +5945,11 @@ export default function Home() {
                     <h2>גיבוי Google Drive</h2>
                     <span>גיבוי חיצוני אופציונלי: 5 עותקים שעתיים ו-5 עותקים יומיים סביב 03:00.</span>
                   </div>
-                  <span className={`drive-status-badge ${driveBackupOverview?.connection.connected ? "connected" : ""}`}>
-                    {driveBackupOverview?.connection.connected ? "מחובר" : "לא מחובר"}
+                  <span className={`drive-status-badge ${driveBackupOverview?.connection.healthy ? "connected" : ""}`}>
+                    {driveBackupOverview?.connection.reconnectRequired ? "נדרש חיבור מחדש"
+                      : driveBackupOverview?.connection.status === "error" ? "תקלה"
+                      : driveBackupOverview?.connection.backupOverdue ? "גיבוי לא עדכני"
+                      : driveBackupOverview?.connection.healthy ? "תקין" : "לא מחובר"}
                   </span>
                 </div>
                 <p className="drive-backup-status">{driveBackupStatus || "טוען את מצב הגיבוי..."}</p>
@@ -5956,12 +5963,12 @@ export default function Home() {
                       <strong>{driveBackupOverview.connection.lastSuccessAt ? formatDateTime(driveBackupOverview.connection.lastSuccessAt) : "עדיין לא הושלם"}</strong>
                     </div>
                     {driveBackupOverview.connection.lastError && (
-                      <p className="drive-error">התקלה האחרונה: {driveBackupOverview.connection.lastError}</p>
+                      <p className="drive-error">התקלה האחרונה: {driveBackupOverview.connection.lastError.replace(/^\[drive_oauth:[a-z_]+\]\s*/, "")}</p>
                     )}
                     <div className="drive-actions">
-                      <button type="button" onClick={runManualDriveBackup} disabled={driveBackupBusy}>גיבוי עכשיו</button>
+                      <button type="button" onClick={runManualDriveBackup} disabled={driveBackupBusy || driveBackupOverview.connection.reconnectRequired}>גיבוי עכשיו</button>
                       <button type="button" className="secondary-action" onClick={() => refreshDriveBackups(false)} disabled={driveBackupBusy}>רענון</button>
-                      <button type="button" className="secondary-action" onClick={connectGoogleDrive} disabled={driveBackupBusy}>החלפת חשבון</button>
+                      <button type="button" className="secondary-action" onClick={connectGoogleDrive} disabled={driveBackupBusy}>{driveBackupOverview.connection.status === "error" ? "חיבור מחדש" : "החלפת חשבון"}</button>
                     </div>
 
                     <div className="drive-backup-list" aria-label="גיבויים זמינים לשחזור">

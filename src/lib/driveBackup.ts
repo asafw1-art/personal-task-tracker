@@ -2,6 +2,9 @@ import { supabase } from "@/lib/supabase";
 
 export type DriveBackupConnectionStatus = {
   connected: boolean;
+  healthy: boolean;
+  reconnectRequired: boolean;
+  backupOverdue: boolean;
   status: "connected" | "disconnected" | "error";
   googleEmail: string | null;
   timezone: string;
@@ -52,7 +55,7 @@ async function requestDrive<T>(method: "GET" | "POST", body?: Record<string, unk
     cache: "no-store",
   });
   const result = await response.json() as T & { error?: string };
-  if (!response.ok) throw new Error(result.error || "פעולת Google Drive נכשלה.");
+  if (!response.ok) throw new Error(result.error?.replace(/^\[drive_oauth:[a-z_]+\]\s*/, "") || "פעולת Google Drive נכשלה.");
   return result;
 }
 
