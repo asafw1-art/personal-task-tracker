@@ -16,6 +16,8 @@ The live browser inspection was blocked by the Computer Use URL-identification s
 
 ## Remaining completion gates
 
+Release verification: commit `52aad094139a28fb45594d30f823a3dd854bb018` received a successful Vercel deployment check (https://vercel.com/weizman1/personal-task-tracker/G9asqYuufLJEmoum56w6C9RnJKmg). Lint, TypeScript, synthetic Drive authorization tests and the existing privacy/admin tests passed. Local Next build was blocked by Windows Application Control when loading SWC; the build was verified by Vercel instead. Public HTTP smoke checks returned 200 for the app and 401 for unauthenticated Drive/admin endpoints. Authenticated UI QA, current OAuth settings, reconnection and a real backup/preview remain unverified because browser control was stopped. The overall task is incomplete.
+
 1. Inspect the current live OAuth Audience/Branding and the actual failure after browser access resumes.
 2. Resolve C01: prior written Google consent for this application's backup use case. No evidence of consent exists in the project record. Asaf was asked whether consent has since been obtained.
 3. Review and approve the existing public information/privacy/terms drafts for publication; they remain unpublished. Inspect actual Google publication requirements before changing Audience.
