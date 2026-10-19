@@ -1,4 +1,5 @@
 import type { User } from "@supabase/supabase-js";
+import { currentPersistenceUser, loadVersionedTasks, versionedPersistenceEnabled } from "@/lib/persistenceWriters";
 import { Task, TaskPrefix, TaskPriority, TaskStatus, TaskSubtask, TaskSubtaskStatus } from "@/lib/tasks";
 import { supabase } from "@/lib/supabase";
 
@@ -158,6 +159,7 @@ function requireSupabase() {
 }
 
 export async function fetchCloudTasks(user?: User) {
+  if (versionedPersistenceEnabled) return loadVersionedTasks((user ?? await currentPersistenceUser()).id);
   const client = requireSupabase();
   let lastError: unknown;
 
@@ -187,6 +189,7 @@ export async function countCloudTasks() {
 }
 
 export async function saveCloudTasks(tasks: Task[], user: User) {
+  if (versionedPersistenceEnabled) throw new Error("שמירת רשימה שלמה חסומה. יש לשלוח פקודה מפורשת עם גרסת בסיס.");
   const ownTasks = tasks.filter((task) => !task.sharedWithMe && (!task.ownerUserId || task.ownerUserId === user.id));
   if (ownTasks.length === 0) return;
   const client = requireSupabase();

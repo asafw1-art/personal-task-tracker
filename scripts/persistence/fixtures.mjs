@@ -45,6 +45,15 @@ export function canonicalIds() {
   assert.ok(node, "Canonical ID function moved: update the adapter explicitly");
   return compile(node.getText(source)).canonicalTaskId;
 }
+export function importNormalizers() {
+  const source = ts.createSourceFile("page.tsx", readFileSync("src/app/page.tsx", "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const names = new Set(["isTaskPrefix", "isTaskPriority", "isTaskStatus", "isTaskSubtaskStatus", "optionalString", "normalizeImportedSubtasks", "normalizeImportedTask"]);
+  const functions = source.statements.filter((node) => ts.isFunctionDeclaration(node) && names.has(node.name?.text));
+  assert.equal(functions.length, names.size);
+  const labels = source.statements.filter((node) => ts.isVariableStatement(node) && node.declarationList.declarations.some((item) =>
+    ["priorityLabels", "statusLabels", "subtaskStatusLabels"].includes(item.name.getText(source))));
+  return compile('const versionedPersistenceEnabled=true; const canonicalTaskId=require("ids");\n' + labels.map((node) => node.getText(source)).join("\n") + functions.map((node) => `export ${node.getText(source)}`).join("\n"), () => canonicalIds());
+}
 
 // This transport models ordered REST upserts, not PostgreSQL locking or RLS.
 export function legacyHarness() {
@@ -77,6 +86,7 @@ export function legacyHarness() {
     },
   };
   const api = compile(readFileSync("src/lib/supabaseTasks.ts", "utf8"), (name) => {
+    if (name === "@/lib/persistenceWriters") return { versionedPersistenceEnabled: false };
     assert.equal(name, "@/lib/supabase", "No real Supabase client may be loaded");
     return { supabase: client };
   });

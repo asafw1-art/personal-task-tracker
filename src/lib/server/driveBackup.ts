@@ -38,6 +38,7 @@ type SnapshotData = {
   taxonomy: Record<string, unknown>[];
   settings: Record<string, unknown> | null;
   shareHistory: Record<string, unknown>[];
+  persistence?: Record<string, unknown>;
 };
 
 type DriveSnapshot = {
@@ -238,6 +239,18 @@ function signaturesMatch(actual: string | undefined, expected: string) {
 }
 
 async function buildSnapshot(admin: SupabaseClient, userId: string, kind: BackupKind): Promise<DriveSnapshot> {
+  if (process.env.PERSISTENCE_V1_ENABLED === "true") {
+    const { data: snapshot, error } = await admin.rpc("persistence_export_account_v1", { p_user_id: userId });
+    if (error) throw error;
+    if (snapshot?.version !== 2 || snapshot.owner_user_id !== userId || !snapshot.persistence || !snapshot.data) throw new Error("Incompatible persistence backup");
+    const rows = snapshot.data;
+    const data: SnapshotData = { tasks: rows.tasks, taxonomy: rows.task_taxonomy_items, settings: rows.user_settings[0] ?? null,
+      shareHistory: [...rows.task_shares.map((row: Record<string, unknown>) => ({ ...row, record_type: "task_share" })),
+        ...rows.task_subtask_assignments.map((row: Record<string, unknown>) => ({ ...row, record_type: "subtask_assignment" }))], persistence: snapshot };
+    const exportedAt = new Date().toISOString(), dataChecksum = checksum(data);
+    return { format: "personal-task-tracker-backup", version: 2, exportedAt, kind, ownerUserId: userId, data,
+      integrity: { algorithm: "SHA-256", checksum: dataChecksum, signature: snapshotSignature(userId, exportedAt, kind, dataChecksum) } };
+  }
   const [tasksResult, taxonomyResult, settingsResult, sharesResult, assignmentsResult] = await Promise.all([
     admin.from("tasks").select("*").eq("user_id", userId).order("prefix").order("task_number"),
     admin.from("task_taxonomy_items").select("*").eq("user_id", userId).order("item_type").order("name"),
@@ -496,6 +509,18 @@ export async function restoreBackup(userId: string, runId: string) {
   const connection = await getConnection(admin, userId);
   if (!connection) throw new Error("Google Drive is not connected");
   const snapshot = await downloadSnapshot(connection, runId);
+  if (process.env.PERSISTENCE_V1_ENABLED === "true") {
+    if (!snapshot.data.persistence) throw new Error("גיבוי זה קודם למנגנון השמירה החדש. נדרש שחזור מפוקח; לא בוצע שינוי.");
+    const { data: fresh, error: exportError } = await admin.rpc("persistence_export_account_v1", { p_user_id: userId });
+    if (exportError) throw exportError;
+    const account = fresh?.persistence?.accounts?.[0];
+    if (!account?.read_only) throw new Error("שחזור מחייב מצב תחזוקה וגיבוי מקומי עדכני. פנה למנהל.");
+    const { data: restored, error } = await admin.rpc("persistence_restore_account_v1", { p_user_id: userId, p_snapshot: snapshot.data.persistence,
+      p_operation_id: runId, p_expected_epoch: String(account.write_epoch) });
+    if (error) throw error;
+    if (restored?.status !== "committed") throw new Error("לא התקבל אישור שחזור.");
+    return { restoredAt: new Date().toISOString(), taskCount: snapshot.data.tasks.length };
+  }
   await createBackupForConnection(connection, "pre_restore");
   const { error } = await admin.rpc("restore_drive_backup_snapshot", { p_user_id: userId, p_data: snapshot.data });
   if (error) throw error;

@@ -38,7 +38,7 @@ export async function createHarness(seed) {
     for (const prefix of ["P", "W"]) await db.query(`insert into public.task_taxonomy_items(user_id,item_type,prefix,name)
       values($1,'topic',$2,'Synthetic topic')`, [seed.owner, prefix]);
 
-    let tail = Promise.resolve(), nextFault = null, transportInstalled = false, collaborationInstalled = false, lastShareId;
+    let tail = Promise.resolve(), nextFault = null, transportInstalled = false, collaborationInstalled = false, domainsInstalled = false, lastShareId;
     const serialize = (fn) => {
       const result = tail.then(fn);
       tail = result.catch(() => {});
@@ -58,9 +58,15 @@ export async function createHarness(seed) {
         return serialize(async () => {
           const fault = nextFault;
           nextFault = null;
-          let inTransaction = false, trigger = false;
+          let inTransaction = false, trigger = false, importTrigger = false;
           try {
             await admin();
+            if (fault?.point === "import_after_first_write") {
+              await db.exec(`create function persistence_v1.synthetic_import_fault() returns trigger language plpgsql as $$ begin
+                if new.id='${seed.tasks[1].id}'::uuid then raise exception 'Synthetic import constraint' using errcode='23514'; end if; return new; end $$;
+                create trigger synthetic_import_fault before update on public.tasks for each row execute function persistence_v1.synthetic_import_fault();`);
+              importTrigger = true;
+            }
             if (fault && ["receipt_insert_failure", "deadlock"].includes(fault.reason)) {
               assert.equal(fault.point, "before_commit");
               await db.exec(`create or replace function persistence_v1.synthetic_receipt_fault() returns trigger
@@ -88,10 +94,12 @@ export async function createHarness(seed) {
             if (trigger && ["P0001", "40P01"].includes(error.code)) {
               throw Object.assign(new Error("Injected transaction abort", { cause: error }), { code: "SYNTHETIC_TRANSACTION_ABORT" });
             }
+            if (importTrigger && error.code === "23514") throw Object.assign(new Error("Synthetic import constraint", { cause: error }), { code: "SYNTHETIC_CONSTRAINT_FAILURE" });
             throw error;
           } finally {
             await admin();
             if (trigger) await db.exec("drop trigger synthetic_receipt_fault on persistence_v1.receipts; drop function persistence_v1.synthetic_receipt_fault()");
+            if (importTrigger) await db.exec("drop trigger synthetic_import_fault on public.tasks; drop function persistence_v1.synthetic_import_fault()");
           }
         });
       },
@@ -124,11 +132,21 @@ export async function createHarness(seed) {
         });
       },
       async fault(point, reason) {
-        assert.ok(["before_commit", "after_commit"].includes(point));
-        assert.ok(["lose_response", "receipt_insert_failure", "deadlock"].includes(reason));
+        assert.ok(["before_commit", "after_commit", "import_after_first_write"].includes(point));
+        assert.ok(["lose_response", "receipt_insert_failure", "deadlock", "constraint_failure"].includes(reason));
         nextFault = { point, reason };
       },
       async fixture(name, payload = {}) {
+        if (domainsInstalled && name === "taxonomy_version") return { revision: "1" };
+        if (domainsInstalled && name === "restore_older_snapshot") {
+          const snapshot = (await h.admin("select public.persistence_export_account_v1($1) value", [seed.owner])).rows[0].value;
+          snapshot.data.tasks[0].title = "Synthetic older title";
+          await h.admin("update persistence_v1.accounts set read_only=true where user_id=$1", [seed.owner]);
+          const reply = (await h.admin("select public.persistence_restore_account_v1($1,$2::jsonb,$3,'1') value", [seed.owner, JSON.stringify(snapshot), command().operationId])).rows[0].value;
+          assert.equal(reply.status, "committed");
+          await h.admin("update persistence_v1.accounts set read_only=false where user_id=$1", [seed.owner]);
+          return reply;
+        }
         if (collaborationInstalled && name === "accepted_assignment") {
           let current = await h.read(seed.owner, payload.taskId);
           const invite = await h.send(seed.owner, command(current, { kind: "invite_share", patch: undefined, email: "recipient@example.invalid", role: "contributor" }));
@@ -186,6 +204,12 @@ export async function createHarness(seed) {
           await db.exec(await readFile(`supabase/${file}`, "utf8"));
         }
         collaborationInstalled = true;
+      }),
+      stageDomains: () => serialize(async () => {
+        await admin();
+        for (const file of ["add-focus-and-user-settings.sql", "add-google-drive-backups.sql", "add-user-devices.sql", "add-notification-receipts.sql",
+          "staged/persistence-domains-v1.sql", "staged/persistence-recovery-v1.sql"]) await db.exec(await readFile(`supabase/${file}`, "utf8"));
+        domainsInstalled = true;
       }),
       page: (actor, { limit = 100, cursor = null } = {}) => serialize(async () => {
         assert.ok(transportInstalled);

@@ -1,4 +1,5 @@
 import type { User } from "@supabase/supabase-js";
+import { observedContext, versionedPersistenceEnabled } from "@/lib/persistenceWriters";
 import type { AssistantActionStatus, AssistantArchiveSearchResult, AssistantMessage, AssistantMessageRole, AssistantProposedAction, AssistantThread } from "@/lib/assistant";
 import { supabase } from "@/lib/supabase";
 
@@ -207,6 +208,7 @@ export async function addAssistantMessage(
       content,
       proposed_action: proposedAction ?? null,
       action_status: actionStatus ?? null,
+      ...(versionedPersistenceEnabled ? { persistence_epoch: observedContext(user.id).writeEpoch } : {}),
     })
     .select("id, thread_id, role, content, proposed_action, action_status, created_at")
     .single();

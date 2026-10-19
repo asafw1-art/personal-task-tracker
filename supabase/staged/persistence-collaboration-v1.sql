@@ -242,6 +242,8 @@ begin
       or (c ? 'role' and jsonb_typeof(c->'role') is distinct from 'string')
       or not(coalesce(c->>'role','contributor')=any(array['viewer','contributor'])) then return jsonb_build_object('status','validation_failed'); end if;
     if lower(btrim(c->>'email'))=lower(coalesce(auth.jwt()->>'email','')) then return jsonb_build_object('status','validation_failed'); end if;
+    if exists(select 1 from public.task_shares where task_id=target and shared_with_email=lower(btrim(c->>'email')) and status in ('pending','accepted')) then
+      return jsonb_build_object('status','validation_failed'); end if;
     insert into public.task_shares(task_id,owner_user_id,shared_with_email,role,owner_email,task_title,task_prefix,task_number)
       values(target,actor,lower(btrim(c->>'email')),coalesce(c->>'role','contributor'),auth.jwt()->>'email',t.title,t.prefix,t.task_number) returning * into s;
   elsif kind in ('assign_subtask','unassign_subtask') then
@@ -250,7 +252,7 @@ begin
     if not found then return jsonb_build_object('status','validation_failed'); end if;
     begin
       if kind='assign_subtask' then
-        select * into s from public.task_shares where id=(c->>'shareId')::uuid and task_id=target and status='accepted';
+        select * into s from public.task_shares where id=(c->>'shareId')::uuid and task_id=target and status='accepted' and role='contributor';
         if not found then return jsonb_build_object('status','not_found_or_forbidden'); end if;
       end if;
     exception when invalid_text_representation then return jsonb_build_object('status','validation_failed'); end;
@@ -271,7 +273,8 @@ begin
     elsif kind='decline_share' then perform public.decline_task_share(s.id);
     elsif kind='leave_share' then perform public.leave_task_share(s.id);
     elsif kind='set_shared_focus' then
-      if jsonb_typeof(c->'focused') is distinct from 'boolean' or c->>'expectedShareRevision' is distinct from s.revision::text then return jsonb_build_object('status','validation_failed'); end if;
+      if jsonb_typeof(c->'focused') is distinct from 'boolean' or jsonb_typeof(c->'expectedShareRevision') is distinct from 'string'
+        or c->>'expectedShareRevision' is distinct from s.revision::text then return jsonb_build_object('status','validation_failed'); end if;
       if s.focused is distinct from (c->>'focused')::boolean then
         perform public.set_shared_task_focus(s.id,(c->>'focused')::boolean);
         update public.task_shares set revision=revision+1 where id=s.id;

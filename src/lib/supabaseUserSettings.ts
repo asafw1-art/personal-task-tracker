@@ -1,5 +1,7 @@
 import type { User } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
+import { loadPersistenceContext, versionedPersistenceEnabled, writeVersioned } from "@/lib/persistenceWriters";
+const settingsBases = new Map<string, { revision: string; epoch: string; value: Record<string, unknown> }>();
 
 export type UserSettings = {
   displayName?: string;
@@ -34,6 +36,14 @@ function missingSettingsTableError() {
 }
 
 export async function fetchUserSettings(user: User): Promise<UserSettings> {
+  if (versionedPersistenceEnabled) {
+    const context = await loadPersistenceContext(user.id);
+    const row = context.settings ?? {};
+    settingsBases.set(user.id, { revision: context.settingsRevision, epoch: context.writeEpoch, value: { ...row } });
+    return { displayName: (row.display_name as string | null)?.trim() || undefined,
+      notificationPreferences: row.notification_preferences as UserSettings["notificationPreferences"],
+      analyticsPreferences: row.analytics_preferences as UserSettings["analyticsPreferences"], theme: row.theme as UserSettings["theme"] };
+  }
   const client = requireSupabase();
   const { data, error } = await client
     .from("user_settings")
@@ -56,6 +66,22 @@ export async function fetchUserSettings(user: User): Promise<UserSettings> {
 }
 
 export async function saveUserSettings(user: User, settings: UserSettings) {
+  if (versionedPersistenceEnabled) {
+    const base = settingsBases.get(user.id);
+    if (!base) throw new Error("יש לטעון את ההגדרות לפני שמירה.");
+    const patch: Record<string, unknown> = {};
+    for (const [key, column] of [["displayName", "display_name"], ["notificationPreferences", "notification_preferences"], ["analyticsPreferences", "analytics_preferences"], ["theme", "theme"]] as const) {
+      if (key in settings) {
+        const value = settings[key] ?? null;
+        if (JSON.stringify(value) !== JSON.stringify(base.value[column] ?? null)) patch[column] = value;
+      }
+    }
+    if (!Object.keys(patch).length) return;
+    const result = await writeVersioned(user.id, { kind: "save_settings", expectedWriteEpoch: base.epoch,
+      expectedDomainRevision: base.revision, patch });
+    settingsBases.set(user.id, { ...base, revision: String(result.revision), value: { ...base.value, ...patch } });
+    return;
+  }
   const client = requireSupabase();
   const row: Record<string, unknown> = {
     user_id: user.id,

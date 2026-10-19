@@ -205,3 +205,18 @@ test("C08: only ending access can acknowledge commit without returning task cont
   assert.equal((await h.api.sendPersistenceCommand(value, seed.owner)).status, "committed");
   assert.equal((await h.api.sendPersistenceCommand({ ...value, kind: "set_subtask_status" }, seed.owner)).status, "unknown");
 });
+test("H09: context and backup reads use only actor-scoped RPCs and reject query mixing", async () => {
+  const h = server();
+  h.use(async (name) => ({ data: { status: name === "persistence_context_v1" ? "context" : "backup" }, error: null }));
+  assert.equal((await h.api.handlePersistenceRequest(get("?context=1"), "GET")).status, 200);
+  assert.equal((await h.api.handlePersistenceRequest(get("?export=1"), "GET")).status, 200);
+  assert.deepEqual(h.calls.map((call) => [call.name, call.args]), [["persistence_context_v1", {}], ["persistence_export_self_v1", {}]]);
+  assert.equal((await h.api.handlePersistenceRequest(get("?export=1&context=1"), "GET")).status, 400);
+});
+test("C09: backup replies must belong to the authenticated account", async () => {
+  const h = client();
+  globalThis.fetch = async () => Response.json({ status: "backup", snapshot: { version: 2, owner_user_id: seed.outsider } });
+  assert.equal((await h.api.fetchPersistenceBackup(seed.owner)).status, "unknown");
+  globalThis.fetch = async () => Response.json({ status: "backup", snapshot: { version: 2, owner_user_id: seed.owner } });
+  assert.equal((await h.api.fetchPersistenceBackup(seed.owner)).status, "backup");
+});

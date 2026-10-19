@@ -176,21 +176,22 @@ define("T17", "import fault rolls back every row, never matches by display ID al
   const before = await h.inspect();
   await h.fault("import_after_first_write", "constraint_failure");
   await assert.rejects(h.send(syntheticSeed.owner, command(undefined, { kind: "import", patch: undefined,
-    items: syntheticSeed.tasks.map((task) => ({ ...task, title: "Synthetic imported title" })) })), { code: "SYNTHETIC_CONSTRAINT_FAILURE" });
+    targetTaskUuid: undefined, expectedRevision: undefined,
+    items: syntheticSeed.tasks.map((task) => ({ kind: "patch_task", targetTaskUuid: task.id, expectedRevision: task.revision, patch: { title: "Synthetic imported title" } })) })), { code: "SYNTHETIC_CONSTRAINT_FAILURE" });
   assert.deepEqual(await h.inspect(), before);
   assert.equal((await h.send(syntheticSeed.owner, command(undefined, { kind: "import", patch: undefined,
-    items: [{ displayId: "P1", title: "Unmapped legacy record" }] }))).status, "validation_failed");
+    targetTaskUuid: undefined, expectedRevision: undefined, items: [{ displayId: "P1", title: "Unmapped legacy record" }] }))).status, "validation_failed");
 });
 define("T18", "rename-before-create schedule cannot reintroduce removed category", async (h) => {
   const taxonomy = await h.fixture("taxonomy_version", {});
   const rename = command(undefined, { kind: "rename_taxonomy", patch: undefined,
-    expectedTaxonomyRevision: taxonomy.revision, from: "Synthetic topic", to: "Renamed synthetic topic" });
+    targetTaskUuid: undefined, expectedRevision: undefined, expectedDomainRevision: taxonomy.revision, itemType: "topic", prefix: "P", from: "Synthetic topic", to: "Renamed synthetic topic" });
   committed(await h.send(syntheticSeed.owner, rename));
   const result = await h.send(syntheticSeed.owner, command(undefined, { kind: "create_task", targetTaskUuid: undefined,
     expectedRevision: undefined, expectedTaxonomyRevision: taxonomy.revision,
     patch: { prefix: "P", title: "Synthetic creation", category: "Synthetic topic" } }));
   assert.ok(["conflict", "validation_failed"].includes(result.status));
-  assert.ok((await h.inspect()).tasks.every((task) => task.category !== "Synthetic topic"));
+  assert.ok((await h.inspect()).tasks.filter((task) => task.prefix === "P").every((task) => task.category !== "Synthetic topic"));
 });
 define("T19", "restore changes epoch but never regresses counters or dedup", async (h) => {
   const value = command();

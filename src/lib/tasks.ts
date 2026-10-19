@@ -16,6 +16,8 @@ export type TaskSubtask = {
 export type Task = {
   id: string;
   cloudId?: string;
+  revision?: string;
+  writeEpoch?: string;
   ownerUserId?: string;
   sharedWithMe?: boolean;
   shareId?: string;

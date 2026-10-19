@@ -1,4 +1,13 @@
 import type { User } from "@supabase/supabase-js";
+import { currentPersistenceUser, loadPersistenceContext, observedContext, observedTask, taskCommandBase, versionedPersistenceEnabled, writeVersioned } from "@/lib/persistenceWriters";
+import type { PersistenceCommand } from "@/lib/persistenceTransport";
+async function versionedShareCommand(kind: PersistenceCommand["kind"], shareId: string, extra: Partial<PersistenceCommand> = {}) {
+  const user = await currentPersistenceUser();
+  const share = observedContext(user.id).shares.find((row) => row.id === shareId);
+  if (!share) throw new Error("יש לטעון את רשימת השיתופים לפני הפעולה.");
+  return writeVersioned(user.id, { kind, shareId, targetTaskUuid: String(share.task_id), expectedRevision: String(share.task_revision),
+    expectedWriteEpoch: String(share.write_epoch), ...extra, ...(kind === "set_shared_focus" ? { expectedShareRevision: String(share.revision) } : {}) });
+}
 import { supabase } from "@/lib/supabase";
 import type { Task, TaskPriority, TaskStatus, TaskSubtask, TaskSubtaskStatus } from "@/lib/tasks";
 
@@ -148,6 +157,11 @@ function rowToSubtaskAssignment(row: TaskSubtaskAssignmentRow): TaskSubtaskAssig
 }
 
 export async function fetchTaskShares() {
+  if (versionedPersistenceEnabled) {
+    const user = await currentPersistenceUser();
+    const context = await loadPersistenceContext(user.id);
+    return context.shares.map((row) => rowToTaskShare(row as TaskShareRow));
+  }
   const client = requireSupabase();
   const { data, error } = await client
     .from("task_shares")
@@ -170,6 +184,12 @@ export async function fetchTaskSubtaskAssignments() {
 }
 
 export async function setTaskSubtaskAssignment(taskCloudId: string, subtaskNumber: number, shareId?: string) {
+  if (versionedPersistenceEnabled) {
+    const user = await currentPersistenceUser(), task = observedTask(user.id, taskCloudId);
+    const step = task.subtasks?.find((item) => item.number === subtaskNumber);
+    if (!step) throw new Error("צעד הטיפול אינו זמין.");
+    await writeVersioned(user.id, { kind: shareId ? "assign_subtask" : "unassign_subtask", ...taskCommandBase(task), subtaskId: step.id, ...(shareId ? { shareId } : {}) }); return;
+  }
   const client = requireSupabase();
   const { error } = await client.rpc("set_task_subtask_assignment", {
     p_task_id: taskCloudId,
@@ -180,6 +200,10 @@ export async function setTaskSubtaskAssignment(taskCloudId: string, subtaskNumbe
 }
 
 export async function createTaskShare(user: User, task: Pick<Task, "cloudId" | "title" | "prefix" | "number">, email: string, ownerDisplayName?: string) {
+  if (versionedPersistenceEnabled) {
+    if (!task.cloudId) throw new Error("המשימה עדיין לא סונכרנה.");
+    await writeVersioned(user.id, { kind: "invite_share", ...taskCommandBase(observedTask(user.id, task.cloudId)), email: email.trim().toLowerCase(), role: "contributor" }); return;
+  }
   const client = requireSupabase();
   const cleanEmail = email.trim().toLowerCase();
   if (!task.cloudId) throw new Error("המשימה עדיין לא סונכרנה לענן.");
@@ -204,6 +228,7 @@ export async function createTaskShare(user: User, task: Pick<Task, "cloudId" | "
 }
 
 export async function revokeTaskShare(shareId: string) {
+  if (versionedPersistenceEnabled) { await versionedShareCommand("revoke_share", shareId); return; }
   const client = requireSupabase();
   const { error } = await client.rpc("revoke_task_share", { p_share_id: shareId });
 
@@ -211,12 +236,14 @@ export async function revokeTaskShare(shareId: string) {
 }
 
 export async function leaveTaskShare(shareId: string) {
+  if (versionedPersistenceEnabled) { await versionedShareCommand("leave_share", shareId); return; }
   const client = requireSupabase();
   const { error } = await client.rpc("leave_task_share", { p_share_id: shareId });
   if (error) throw error;
 }
 
 export async function setSharedTaskFocus(shareId: string, focused: boolean) {
+  if (versionedPersistenceEnabled) { await versionedShareCommand("set_shared_focus", shareId, { focused }); return; }
   const client = requireSupabase();
   const { error } = await client.rpc("set_shared_task_focus", { p_share_id: shareId, p_focused: focused });
   if (error) throw error;
@@ -261,18 +288,26 @@ export function historicalTaskFromShare(share: TaskShare): Task | null {
 }
 
 export async function acceptTaskShare(shareId: string) {
+  if (versionedPersistenceEnabled) { await versionedShareCommand("accept_share", shareId); return; }
   const client = requireSupabase();
   const { error } = await client.rpc("accept_task_share", { p_share_id: shareId });
   if (error) throw error;
 }
 
 export async function declineTaskShare(shareId: string) {
+  if (versionedPersistenceEnabled) { await versionedShareCommand("decline_share", shareId); return; }
   const client = requireSupabase();
   const { error } = await client.rpc("decline_task_share", { p_share_id: shareId });
   if (error) throw error;
 }
 
 export async function updateSharedTaskSubtaskStatus(taskCloudId: string, subtaskNumber: number, status: TaskSubtaskStatus) {
+  if (versionedPersistenceEnabled) {
+    const user = await currentPersistenceUser(), task = observedTask(user.id, taskCloudId);
+    const step = task.subtasks?.find((item) => item.number === subtaskNumber);
+    if (!step) throw new Error("צעד הטיפול אינו זמין.");
+    await writeVersioned(user.id, { kind: "set_subtask_status", ...taskCommandBase(task), subtaskId: step.id, status }); return;
+  }
   const client = requireSupabase();
   const { error } = await client.rpc("update_shared_task_subtask_status", {
     p_task_id: taskCloudId,

@@ -51,7 +51,7 @@ language sql stable set search_path = pg_catalog, public as $$
     'revision',t.revision::text,'writeEpoch',epoch::text,'title',t.title,'category',t.category,
     'actionType',t.action_type,'priority',t.priority,'status',t.status,'notes',t.notes,
     'dueDate',to_char(t.due_at at time zone 'UTC','YYYY-MM-DD'),'completedAt',t.completed_at,
-    'statusChangedAt',t.status_changed_at,'focused',t.focused,'subtasks',t.subtasks);
+    'statusChangedAt',t.status_changed_at,'createdAt',t.created_at,'focused',t.focused,'subtasks',t.subtasks);
 $$;
 
 create or replace function persistence_v1.valid_patch(p jsonb, allowed text[]) returns boolean
@@ -60,6 +60,7 @@ declare k text;
 begin
   if p is null or jsonb_typeof(p) <> 'object' then return false; end if;
   for k in select jsonb_object_keys(p) loop
+    if k='actionType' and p->k='null'::jsonb then continue; end if;
     if not (k=any(allowed)) then return false; end if;
     if k in ('title','category','actionType') then
       if k='actionType' and p->k='null'::jsonb then continue; end if;

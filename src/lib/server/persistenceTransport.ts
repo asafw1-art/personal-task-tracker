@@ -12,7 +12,7 @@ const headers = { "Cache-Control": "no-store", Vary: "Authorization", "X-Content
 function reply(result: Result, status: number) { return Response.json(result, { status, headers }); }
 function statusCode(result: Result) {
   switch (result.status) {
-    case "committed": case "ok": case "prepared": return 200;
+    case "committed": case "ok": case "prepared": case "context": case "backup": return 200;
     case "unknown": return 202;
     case "conflict": case "stale_epoch": case "idempotency_mismatch": case "restart_required": return 409;
     case "not_found_or_forbidden": return 404;
@@ -69,8 +69,14 @@ export async function handlePersistenceRequest(request: Request, method: "GET" |
       rpc = "persistence_command_v1"; args = { p_command: value };
     } else {
       const query = new URL(request.url).searchParams;
-      for (const name of query.keys()) if (!["operationId", "cursor", "limit"].includes(name) || query.getAll(name).length !== 1) throw new InputError(400);
-      if (query.has("operationId")) {
+      for (const name of query.keys()) if (!["operationId", "cursor", "limit", "context", "export"].includes(name) || query.getAll(name).length !== 1) throw new InputError(400);
+      if (query.has("export")) {
+        if (query.size !== 1 || query.get("export") !== "1") throw new InputError(400);
+        rpc = "persistence_export_self_v1"; args = {};
+      } else if (query.has("context")) {
+        if (query.size !== 1 || query.get("context") !== "1") throw new InputError(400);
+        rpc = "persistence_context_v1"; args = {};
+      } else if (query.has("operationId")) {
         if (query.size !== 1 || !UUID.test(query.get("operationId")!)) throw new InputError(400);
         operationId = query.get("operationId")!;
         rpc = "persistence_receipt_v1"; args = { p_operation_id: operationId };
