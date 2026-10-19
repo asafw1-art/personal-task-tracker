@@ -84,12 +84,12 @@ async function requestPersistence(expectedUserId: string, query: string, command
       && result.operationId.toLowerCase() === operationId?.toLowerCase();
     if (operationId && result.operationId && !sameOperation) return unknown();
     if (result.status === "committed") {
-      const domainResult = typeof result.domain === "string" && ["settings", "taxonomy", "import"].includes(result.domain);
+      const domainResult = typeof result.domain === "string" && ["settings", "taxonomy", "import", ...(!command ? ["restore"] : [])].includes(result.domain);
       const endedAccess = !result.task && command && ["leave_share", "decline_share"].includes(command.kind);
       if (domainResult) {
         const expectedDomain = command ? ({ save_settings: "settings", replace_taxonomy: "taxonomy", rename_taxonomy: "taxonomy", import: "import" } as Record<string, string>)[command.kind] : result.domain;
         if (!sameOperation || !response.ok || result.domain !== expectedDomain || typeof result.writeEpoch !== "string" || !version.test(result.writeEpoch)
-          || (result.domain !== "import" && (typeof result.revision !== "string" || !version.test(result.revision)))
+          || (!["import", "restore"].includes(String(result.domain)) && (typeof result.revision !== "string" || !version.test(result.revision)))
           || (result.domain === "import" && (!Array.isArray(result.items) || !Number.isInteger(result.itemCount) || result.items.length !== result.itemCount))) return unknown();
       } else if (!sameOperation || typeof result.revision !== "string" || !version.test(result.revision)
         || typeof result.writeEpoch !== "string" || !version.test(result.writeEpoch) || !response.ok

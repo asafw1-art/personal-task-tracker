@@ -504,7 +504,9 @@ export async function previewBackup(userId: string, runId: string) {
   };
 }
 
-export async function restoreBackup(userId: string, runId: string) {
+export async function restoreBackup(userId: string, runId: string, operationId?: string, expectedEpoch?: string) {
+  if (process.env.PERSISTENCE_V1_ENABLED === "true" && (!operationId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(operationId)
+    || !expectedEpoch || !/^[1-9][0-9]*$/.test(expectedEpoch))) throw new Error("נדרש מזהה פעולת שחזור וגרסת בסיס מפורשים.");
   const admin = createSupabaseAdmin();
   const connection = await getConnection(admin, userId);
   if (!connection) throw new Error("Google Drive is not connected");
@@ -516,7 +518,7 @@ export async function restoreBackup(userId: string, runId: string) {
     const account = fresh?.persistence?.accounts?.[0];
     if (!account?.read_only) throw new Error("שחזור מחייב מצב תחזוקה וגיבוי מקומי עדכני. פנה למנהל.");
     const { data: restored, error } = await admin.rpc("persistence_restore_account_v1", { p_user_id: userId, p_snapshot: snapshot.data.persistence,
-      p_operation_id: runId, p_expected_epoch: String(account.write_epoch) });
+      p_operation_id: operationId, p_expected_epoch: expectedEpoch });
     if (error) throw error;
     if (restored?.status !== "committed") throw new Error("לא התקבל אישור שחזור.");
     return { restoredAt: new Date().toISOString(), taskCount: snapshot.data.tasks.length };

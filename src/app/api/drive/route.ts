@@ -25,7 +25,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const user = await verifyRequestUser(request);
-    const body = await request.json() as { action?: string; runId?: string; confirmation?: string };
+    const body = await request.json() as { action?: string; runId?: string; confirmation?: string; operationId?: string; expectedEpoch?: string };
     switch (body.action) {
       case "connect":
         return response({ authorizationUrl: createGoogleAuthorizationUrl(user, new URL(request.url).origin) });
@@ -36,7 +36,7 @@ export async function POST(request: Request) {
         return response({ preview: await previewBackup(user.id, body.runId) });
       case "restore":
         if (!body.runId || body.confirmation !== "RESTORE") return response({ error: "נדרש אישור מפורש לשחזור." }, 400);
-        return response({ restore: await restoreBackup(user.id, body.runId) });
+        return response({ restore: await restoreBackup(user.id, body.runId, body.operationId, body.expectedEpoch) });
       case "dismiss_onboarding":
         await dismissDriveOnboarding(user.id);
         return response({ ok: true });

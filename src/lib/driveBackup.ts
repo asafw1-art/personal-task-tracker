@@ -1,4 +1,5 @@
 import { supabase } from "@/lib/supabase";
+import { currentPersistenceUser, observedContext, versionedPersistenceEnabled } from "@/lib/persistenceWriters";
 
 export type DriveBackupConnectionStatus = {
   connected: boolean;
@@ -77,7 +78,17 @@ export async function fetchDriveBackupPreview(runId: string) {
   return result.preview;
 }
 
-export function restoreDriveBackup(runId: string) {
+export async function restoreDriveBackup(runId: string) {
+  if (versionedPersistenceEnabled) {
+    const user = await currentPersistenceUser(), key = `task-tracker:persistence-v1:restore:${user.id}:${runId}`;
+    const raw = localStorage.getItem(key);
+    const operation = raw ? JSON.parse(raw) as { operationId: string; expectedEpoch: string }
+      : { operationId: crypto.randomUUID(), expectedEpoch: observedContext(user.id).writeEpoch };
+    if (!raw) localStorage.setItem(key, JSON.stringify(operation));
+    const result = await requestDrive<{ restore: { restoredAt: string; taskCount: number } }>("POST", { action: "restore", runId, confirmation: "RESTORE", ...operation });
+    if ((await currentPersistenceUser()).id !== user.id) throw new Error("החשבון השתנה. יש לברר את תוצאת השחזור בחשבון המקורי.");
+    localStorage.removeItem(key); return result;
+  }
   return requestDrive<{ restore: { restoredAt: string; taskCount: number } }>("POST", { action: "restore", runId, confirmation: "RESTORE" });
 }
 

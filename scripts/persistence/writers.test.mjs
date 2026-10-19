@@ -9,7 +9,7 @@ const check = (name, run) => test(name, { skip: !process.env.PGLITE_MODULE_PATH 
   globalThis.localStorage = { get length() { return values.size; }, key: (i) => [...values.keys()][i] ?? null,
     getItem: (k) => values.get(k) ?? null, setItem: (k, v) => values.set(k, v), removeItem: (k) => values.delete(k) };
   let actor = user.id, count = 0, after = () => {};
-  const supabase = { auth: { getSession: async () => ({ data: { session: { user: { id: actor } } } }) }, from: () => { throw new Error("Legacy DML forbidden"); } };
+  const supabase = { auth: { getSession: async () => ({ data: { session: { user: { id: actor }, access_token: "synthetic-token" } } }) }, from: () => { throw new Error("Legacy DML forbidden"); } };
   const api = load("src/lib/persistenceWriters.ts", { "@/lib/supabase": { supabase }, "@/lib/persistenceTransport": {
     fetchPersistencePage: (id, cursor, limit) => h.page(id, { cursor, limit }),
     fetchPersistenceContext: async (id) => (await h.asActor(id, "select public.persistence_context_v1() value")).rows[0].value,
@@ -19,7 +19,7 @@ const check = (name, run) => test(name, { skip: !process.env.PGLITE_MODULE_PATH 
   } });
   const dependencies = { "@/lib/supabase": { supabase }, "@/lib/persistenceWriters": { ...api, versionedPersistenceEnabled: true } };
   const tasks = load("src/lib/supabaseTasks.ts", dependencies), settings = load("src/lib/supabaseUserSettings.ts", dependencies), taxonomy = load("src/lib/supabaseTaxonomy.ts", dependencies);
-  try { await run({ h, api, tasks, settings, taxonomy, values, count: () => count, switchOnReply: () => { after = () => { actor = seed.outsider; }; } }); }
+  try { await run({ h, api, tasks, settings, taxonomy, values, supabase, count: () => count, switchOnReply: () => { after = () => { actor = seed.outsider; }; } }); }
   finally { globalThis.localStorage = oldStorage; await h.close(); }
 });
 check("W01: real readers do not write and legacy list saving is blocked", async ({ h, api, tasks, settings, taxonomy, count }) => {
@@ -81,4 +81,18 @@ check("W07: a no-op within an atomic edit does not invent a revision or lose the
   assert.equal(result.status, "committed");
   const saved = await h.read(user.id, base.cloudId);
   assert.equal(saved.title, base.title); assert.equal(saved.focused, true); assert.equal(saved.revision, "2");
+});
+check("W08: restore retry keeps its operation identity; a later confirmed restore gets a new one", async ({ api, tasks, supabase, values }) => {
+  await tasks.fetchCloudTasks(user);
+  const originalFetch = globalThis.fetch, sent = [];
+  const drive = load("src/lib/driveBackup.ts", { "@/lib/supabase": { supabase }, "@/lib/persistenceWriters": { ...api, versionedPersistenceEnabled: true } });
+  try {
+    globalThis.fetch = async (_url, options) => { sent.push(JSON.parse(options.body)); throw new Error("Synthetic lost restore ACK"); };
+    await assert.rejects(drive.restoreDriveBackup("synthetic-run"));
+    assert.equal(values.size, 1);
+    globalThis.fetch = async (_url, options) => { sent.push(JSON.parse(options.body)); return Response.json({ restore: { restoredAt: "synthetic", taskCount: 2 } }); };
+    await drive.restoreDriveBackup("synthetic-run"); assert.equal(values.size, 0);
+    assert.equal(sent[0].operationId, sent[1].operationId); assert.equal(sent[0].expectedEpoch, "1");
+    await drive.restoreDriveBackup("synthetic-run"); assert.notEqual(sent[2].operationId, sent[1].operationId);
+  } finally { globalThis.fetch = originalFetch; }
 });
