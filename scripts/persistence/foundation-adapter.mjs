@@ -38,7 +38,7 @@ export async function createHarness(seed) {
     for (const prefix of ["P", "W"]) await db.query(`insert into public.task_taxonomy_items(user_id,item_type,prefix,name)
       values($1,'topic',$2,'Synthetic topic')`, [seed.owner, prefix]);
 
-    let tail = Promise.resolve(), nextFault = null, transportInstalled = false;
+    let tail = Promise.resolve(), nextFault = null, transportInstalled = false, collaborationInstalled = false, lastShareId;
     const serialize = (fn) => {
       const result = tail.then(fn);
       tail = result.catch(() => {});
@@ -47,6 +47,8 @@ export async function createHarness(seed) {
     const as = async (actor) => {
       await db.exec("reset role");
       await db.query("select set_config('request.jwt.claim.sub',$1,false)", [actor ?? ""]);
+      const email = actor === seed.owner ? "owner@example.invalid" : actor === seed.recipient ? "recipient@example.invalid" : "outsider@example.invalid";
+      await db.query("select set_config('request.jwt.claims',$1,false)", [JSON.stringify({ sub: actor, email: actor ? email : "" })]);
       await db.exec("set role authenticated");
     };
     const admin = async () => { await db.exec("reset role"); };
@@ -110,7 +112,15 @@ export async function createHarness(seed) {
           const tasks = (await db.query("select to_jsonb(t) as task from public.tasks t order by id")).rows.map((row) => row.task);
           const receipts = (await db.query("select actor_id,operation_id as \"operationId\",payload_hash,target_id,result from persistence_v1.receipts order by actor_id,operation_id")).rows;
           const counters = Object.fromEntries((await db.query("select prefix,high_water::text from persistence_v1.counters where user_id=$1 order by prefix", [seed.owner])).rows.map((row) => [row.prefix, row.high_water]));
-          return { tasks, receipts, counters, accounts, writeEpoch: accounts.find((row) => row.user_id === seed.owner).write_epoch };
+          const result = { tasks, receipts, counters, accounts, writeEpoch: accounts.find((row) => row.user_id === seed.owner).write_epoch };
+          if (collaborationInstalled) {
+            result.proposalExecutions = (await db.query('select message_id as "proposalId",operation_id,result from persistence_v1.proposal_executions order by message_id')).rows;
+            result.shares = (await db.query("select to_jsonb(s) as item from public.task_shares s order by id")).rows.map((row) => row.item);
+            result.assignments = (await db.query("select to_jsonb(s) as item from public.task_subtask_assignments s order by id")).rows.map((row) => row.item);
+            result.messages = (await db.query("select to_jsonb(s) as item from public.assistant_messages s order by id")).rows.map((row) => row.item);
+            result.proposals = (await db.query("select to_jsonb(s) as item from persistence_v1.proposals s order by message_id")).rows.map((row) => row.item);
+          }
+          return result;
         });
       },
       async fault(point, reason) {
@@ -118,7 +128,31 @@ export async function createHarness(seed) {
         assert.ok(["lose_response", "receipt_insert_failure", "deadlock"].includes(reason));
         nextFault = { point, reason };
       },
-      async fixture(name) {
+      async fixture(name, payload = {}) {
+        if (collaborationInstalled && name === "accepted_assignment") {
+          let current = await h.read(seed.owner, payload.taskId);
+          const invite = await h.send(seed.owner, command(current, { kind: "invite_share", patch: undefined, email: "recipient@example.invalid", role: "contributor" }));
+          assert.equal(invite.status, "committed"); lastShareId = invite.shareId;
+          const accept = await h.send(seed.recipient, command(invite.task, { kind: "accept_share", patch: undefined, shareId: lastShareId }));
+          assert.equal(accept.status, "committed");
+          current = await h.read(seed.owner, payload.taskId);
+          assert.equal((await h.send(seed.owner, command(current, { kind: "assign_subtask", patch: undefined, shareId: lastShareId, subtaskId: payload.subtaskId }))).status, "committed");
+          return lastShareId;
+        }
+        if (collaborationInstalled && name === "revoke_access") {
+          const current = await h.read(seed.owner, payload.taskId);
+          const result = await h.send(seed.owner, command(current, { kind: "revoke_share", patch: undefined, shareId: lastShareId }));
+          assert.equal(result.status, "committed"); return result;
+        }
+        if (collaborationInstalled && name === "proposal") {
+          const thread = (await h.admin("insert into public.assistant_threads(user_id,title) values($1,'Synthetic proposal thread') returning id", [seed.owner])).rows[0].id;
+          const message = (await h.admin(`insert into public.assistant_messages(thread_id,user_id,role,content,proposed_action,action_status,persistence_epoch)
+            values($1,$2,'assistant','Synthetic proposal',$3::jsonb,'proposed',1) returning id`, [thread, seed.owner, JSON.stringify(payload.action)])).rows[0].id;
+          const current = await h.read(seed.owner, payload.taskId);
+          const prepared = await h.send(seed.owner, command(current, { kind: "prepare_ai_proposal", patch: undefined, messageId: message,
+            ...(payload.action.type === "create_task" ? { targetTaskUuid: undefined, expectedRevision: undefined } : {}) }));
+          assert.equal(prepared.status, "prepared"); return prepared.proposalId;
+        }
         assert.equal(name, "remove_highest_task_and_step");
         const current = await h.read(seed.owner, seed.tasks[0].id);
         assert.equal((await h.send(seed.owner, command(current, { kind: "remove_subtask", patch: undefined, subtaskId: "step-1-1" }))).status, "committed");
@@ -132,10 +166,26 @@ export async function createHarness(seed) {
         try { await as(actor); return await db.query(sql, params); } finally { await admin(); }
       }),
       reapply: () => serialize(async () => { await admin(); await db.exec(migration); }),
+      reapplyCollaboration: () => serialize(async () => {
+        await admin();
+        await db.exec(await readFile("supabase/staged/persistence-collaboration-v1.sql", "utf8"));
+      }),
       stageTransport: () => serialize(async () => {
         await admin();
         await db.exec(await readFile("supabase/staged/persistence-transport-v1.sql", "utf8"));
         transportInstalled = true;
+      }),
+      stageCollaboration: () => serialize(async () => {
+        await admin();
+        await db.exec(`create role service_role bypassrls;
+          alter table auth.users add column email text;
+          create function auth.jwt() returns jsonb language sql stable as $$ select coalesce(nullif(current_setting('request.jwt.claims',true),''),'{}')::jsonb $$;`);
+        for (const [id, email] of [[seed.owner, "owner@example.invalid"], [seed.recipient, "recipient@example.invalid"], [seed.outsider, "outsider@example.invalid"]]) await db.query("update auth.users set email=$2 where id=$1", [id, email]);
+        for (const file of ["add-task-sharing-foundation.sql", "enable-shared-task-reads.sql", "extend-task-sharing-lifecycle.sql",
+          "add-shared-subtask-assignments.sql", "harden-task-share-snapshot-access.sql", "add-assistant-chat.sql", "staged/persistence-collaboration-v1.sql"]) {
+          await db.exec(await readFile(`supabase/${file}`, "utf8"));
+        }
+        collaborationInstalled = true;
       }),
       page: (actor, { limit = 100, cursor = null } = {}) => serialize(async () => {
         assert.ok(transportInstalled);

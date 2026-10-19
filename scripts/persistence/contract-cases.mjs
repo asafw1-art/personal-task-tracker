@@ -82,7 +82,8 @@ define("T07", "timeout before and after commit is safe to replay", async (h) => 
   }
 });
 define("T08", "one AI proposal cannot execute twice with different operation IDs", async (h) => {
-  const proposalId = await h.fixture("proposal", { taskId: syntheticSeed.tasks[0].id, patch: { title: "AI synthetic edit" } });
+  const proposalId = await h.fixture("proposal", { taskId: syntheticSeed.tasks[0].id,
+    action: { type: "update_task_status", taskId: "P1", status: "waiting", label: "Synthetic status proposal" } });
   const replies = await h.race([1, 2].map(() => ({ actor: syntheticSeed.owner,
     command: command(undefined, { kind: "apply_ai_proposal", proposalId, patch: undefined }),
   })));

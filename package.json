@@ -10,7 +10,8 @@
     "test:persistence": "node --test scripts/persistence/*.test.mjs",
     "test:persistence:gate": "node scripts/persistence/release-gate.mjs",
     "test:persistence:foundation": "node scripts/persistence/run-foundation.mjs",
-    "test:persistence:transport": "node scripts/persistence/run-transport.mjs"
+    "test:persistence:transport": "node scripts/persistence/run-transport.mjs",
+    "test:persistence:collaboration": "node scripts/persistence/run-collaboration.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.8",

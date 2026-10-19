@@ -12,7 +12,7 @@ const headers = { "Cache-Control": "no-store", Vary: "Authorization", "X-Content
 function reply(result: Result, status: number) { return Response.json(result, { status, headers }); }
 function statusCode(result: Result) {
   switch (result.status) {
-    case "committed": case "ok": return 200;
+    case "committed": case "ok": case "prepared": return 200;
     case "unknown": return 202;
     case "conflict": case "stale_epoch": case "idempotency_mismatch": case "restart_required": return 409;
     case "not_found_or_forbidden": return 404;

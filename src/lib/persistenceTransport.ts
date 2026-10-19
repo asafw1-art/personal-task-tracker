@@ -1,13 +1,15 @@
 import { supabase } from "@/lib/supabase";
 
-export type PersistenceStatus = "committed" | "ok" | "unknown" | "conflict" | "stale_epoch"
+export type PersistenceStatus = "committed" | "ok" | "prepared" | "unknown" | "conflict" | "stale_epoch"
   | "idempotency_mismatch" | "restart_required" | "not_found_or_forbidden"
   | "validation_failed" | "account_read_only" | "client_upgrade_required" | "authentication_required";
 export type PersistenceCommand = {
   protocolVersion: 1;
   operationId: string;
   kind: "create_task" | "patch_task" | "set_task_status" | "set_owner_focus"
-    | "add_subtask" | "patch_subtask" | "remove_subtask" | "set_subtask_status";
+    | "add_subtask" | "patch_subtask" | "remove_subtask" | "set_subtask_status"
+    | "prepare_ai_proposal" | "apply_ai_proposal" | "invite_share" | "accept_share" | "decline_share"
+    | "revoke_share" | "leave_share" | "assign_subtask" | "unassign_subtask" | "set_shared_focus";
   expectedWriteEpoch: string;
   targetTaskUuid?: string;
   expectedRevision?: string;
@@ -15,6 +17,12 @@ export type PersistenceCommand = {
   status?: string;
   subtaskId?: string;
   focused?: boolean;
+  messageId?: string;
+  proposalId?: string;
+  shareId?: string;
+  expectedShareRevision?: string;
+  email?: string;
+  role?: "viewer" | "contributor";
 };
 export type PersistenceReply = Record<string, unknown> & {
   status: PersistenceStatus;
@@ -24,7 +32,7 @@ export type PersistenceReply = Record<string, unknown> & {
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const version = /^[1-9][0-9]*$/;
 const REQUEST_TIMEOUT_MS = 15_000;
-const statuses = new Set<PersistenceStatus>(["committed", "ok", "unknown", "conflict", "stale_epoch", "idempotency_mismatch",
+const statuses = new Set<PersistenceStatus>(["committed", "ok", "prepared", "unknown", "conflict", "stale_epoch", "idempotency_mismatch",
   "restart_required", "not_found_or_forbidden", "validation_failed", "account_read_only", "client_upgrade_required", "authentication_required"]);
 function validSnapshot(value: unknown): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -68,12 +76,16 @@ async function requestPersistence(expectedUserId: string, query: string, command
       && result.operationId.toLowerCase() === operationId?.toLowerCase();
     if (operationId && result.operationId && !sameOperation) return unknown();
     if (result.status === "committed") {
+      const endedAccess = !result.task && command && ["leave_share", "decline_share"].includes(command.kind);
       if (!sameOperation || typeof result.revision !== "string" || !version.test(result.revision)
         || typeof result.writeEpoch !== "string" || !version.test(result.writeEpoch) || !response.ok
-        || typeof result.targetTaskUuid !== "string" || !uuid.test(result.targetTaskUuid) || !validSnapshot(result.task)
-        || (result.task as Record<string, unknown>).id !== result.targetTaskUuid) return unknown();
+        || typeof result.targetTaskUuid !== "string" || !uuid.test(result.targetTaskUuid)
+        || (!endedAccess && (!validSnapshot(result.task) || (result.task as Record<string, unknown>).id !== result.targetTaskUuid))) return unknown();
       if (command?.targetTaskUuid && command.targetTaskUuid.toLowerCase() !== result.targetTaskUuid.toLowerCase()) return unknown();
     }
+    if (result.status === "prepared" && (!sameOperation || !response.ok || command?.kind !== "prepare_ai_proposal"
+      || typeof result.proposalId !== "string" || !uuid.test(result.proposalId) || !result.commandPreview
+      || typeof result.commandPreview !== "object" || Array.isArray(result.commandPreview))) return unknown();
     if (result.status === "ok" && (!response.ok || !Array.isArray(result.tasks) || !result.tasks.every(validSnapshot)
       || typeof result.complete !== "boolean" || typeof result.changeSeq !== "string" || !/^(0|[1-9][0-9]*)$/.test(result.changeSeq)
       || typeof result.writeEpoch !== "string" || !version.test(result.writeEpoch)

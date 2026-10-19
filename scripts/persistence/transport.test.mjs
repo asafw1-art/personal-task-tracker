@@ -187,3 +187,21 @@ test("C06: request deadline produces unknown with the same ID, never a retry", a
     assert.equal(result.status, "unknown"); assert.equal(result.operationId, value.operationId); assert.equal(attempts, 1);
   } finally { globalThis.setTimeout = originalTimeout; }
 });
+
+test("C07: preparation is not commit and requires an actor-bound proposal preview", async () => {
+  const h = client(), value = command(undefined, { kind: "prepare_ai_proposal", patch: undefined, messageId: seed.tasks[1].id });
+  const prepared = { status: "prepared", operationId: value.operationId, proposalId: value.messageId, commandPreview: { kind: "set_task_status", status: "waiting" } };
+  globalThis.fetch = async () => Response.json(prepared);
+  assert.equal((await h.api.sendPersistenceCommand(value, seed.owner)).status, "prepared");
+  globalThis.fetch = async () => Response.json({ ...prepared, commandPreview: [] });
+  assert.equal((await h.api.sendPersistenceCommand(value, seed.owner)).status, "unknown");
+  globalThis.fetch = async () => Response.json(prepared);
+  assert.equal((await h.api.sendPersistenceCommand({ ...value, kind: "patch_task" }, seed.owner)).status, "unknown");
+});
+test("C08: only ending access can acknowledge commit without returning task content", async () => {
+  const h = client(), value = command(undefined, { kind: "leave_share", patch: undefined, shareId: seed.tasks[1].id });
+  const metadata = resultFor(value); delete metadata.task;
+  globalThis.fetch = async () => Response.json(metadata);
+  assert.equal((await h.api.sendPersistenceCommand(value, seed.owner)).status, "committed");
+  assert.equal((await h.api.sendPersistenceCommand({ ...value, kind: "set_subtask_status" }, seed.owner)).status, "unknown");
+});
