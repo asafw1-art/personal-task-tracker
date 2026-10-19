@@ -14,6 +14,11 @@ if (adapter) {
   assert.equal(adapter.capabilities?.productionTarget, false);
   assert.equal(adapter.capabilities?.realImplementation, true, "A test-only reference engine is not a valid implementation target");
   assert.equal(typeof adapter.createHarness, "function");
+  if (adapter.capabilities.supportedCases) {
+    const allIds = new Set([...cases, ...uiCases].map((item) => item.id));
+    assert.equal(new Set(adapter.capabilities.supportedCases).size, adapter.capabilities.supportedCases.length);
+    for (const id of adapter.capabilities.supportedCases) assert.ok(allIds.has(id), `Unknown adapter case ${id}`);
+  }
 }
 
 test("test inventory: T01-T24 and U01-U16 are unique, ordered and documented", async () => {
@@ -31,16 +36,17 @@ test("test inventory: T01-T24 and U01-U16 are unique, ordered and documented", a
 test("release gate: real synthetic adapter is required, pending is not readiness", { skip: !strict }, () => {
   assert.ok(adapter, "Package 6 adapter missing: all 40 target acceptance tests remain pending; NOT release-ready");
   assert.equal(adapter.capabilities.renderedUi, true, "Release gate also requires a rendered UI adapter");
+  assert.equal(adapter.capabilities.supportedCases?.length ?? 40, 40, "Partial foundation coverage is not release readiness");
 });
 
 for (const [scope, list] of [["contract", cases], ["ui", uiCases]]) {
   for (const item of list) {
     const title = `${item.id} / TARGET ${scope}: ${item.title}`;
-    if (!adapter) {
-      test.todo(`${title} [BLOCKED: package 6 implementation adapter]`);
+    if (!adapter || (adapter.capabilities.supportedCases && !adapter.capabilities.supportedCases.includes(item.id))) {
+      test.todo(`${title} [BLOCKED: implementation not connected for this case]`);
       continue;
     }
-    test(title, async () => {
+    test(`${title}${adapter.capabilities.scheduling ? ` [${adapter.capabilities.scheduling}]` : ""}`, async () => {
       const h = await adapter.createHarness(structuredClone(syntheticSeed));
       try {
         if (scope === "ui") await item.run(await h.client());
