@@ -38,7 +38,7 @@ export async function createHarness(seed) {
     for (const prefix of ["P", "W"]) await db.query(`insert into public.task_taxonomy_items(user_id,item_type,prefix,name)
       values($1,'topic',$2,'Synthetic topic')`, [seed.owner, prefix]);
 
-    let tail = Promise.resolve(), nextFault = null;
+    let tail = Promise.resolve(), nextFault = null, transportInstalled = false;
     const serialize = (fn) => {
       const result = tail.then(fn);
       tail = result.catch(() => {});
@@ -70,7 +70,8 @@ export async function createHarness(seed) {
             await db.exec("begin");
             inTransaction = true;
             await as(actor);
-            const result = (await db.query("select persistence_v1.apply_task_command($1::jsonb) as result", [JSON.stringify(value)])).rows[0].result;
+            const sql = transportInstalled ? "select public.persistence_command_v1($1::jsonb) as result" : "select persistence_v1.apply_task_command($1::jsonb) as result";
+            const result = (await db.query(sql, [JSON.stringify(value)])).rows[0].result;
             if (fault?.point === "before_commit" && fault.reason === "lose_response") {
               await db.exec("rollback"); inTransaction = false;
               throw Object.assign(new Error("Synthetic response lost before COMMIT"), { code: "SYNTHETIC_TRANSPORT_TIMEOUT" });
@@ -131,6 +132,25 @@ export async function createHarness(seed) {
         try { await as(actor); return await db.query(sql, params); } finally { await admin(); }
       }),
       reapply: () => serialize(async () => { await admin(); await db.exec(migration); }),
+      stageTransport: () => serialize(async () => {
+        await admin();
+        await db.exec(await readFile("supabase/staged/persistence-transport-v1.sql", "utf8"));
+        transportInstalled = true;
+      }),
+      page: (actor, { limit = 100, cursor = null } = {}) => serialize(async () => {
+        assert.ok(transportInstalled);
+        try {
+          await as(actor);
+          return (await db.query("select public.persistence_page_v1($1,$2::jsonb) as result", [limit, cursor === null ? null : JSON.stringify(cursor)])).rows[0].result;
+        } finally { await admin(); }
+      }),
+      receipt: (actor, operationId) => serialize(async () => {
+        assert.ok(transportInstalled);
+        try {
+          await as(actor);
+          return (await db.query("select public.persistence_receipt_v1($1) as result", [operationId])).rows[0].result;
+        } finally { await admin(); }
+      }),
       async close() { await tail; await db.close(); },
     };
     return h;

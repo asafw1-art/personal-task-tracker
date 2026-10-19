@@ -23,6 +23,13 @@ function compile(source, requireModule = () => { throw new Error("Unexpected imp
   return loaded.exports;
 }
 
+export function loadIsolatedModule(path, dependencies) {
+  return compile(readFileSync(path, "utf8"), (name) => {
+    assert.ok(Object.hasOwn(dependencies, name), `Unexpected real dependency ${name}`);
+    return dependencies[name];
+  });
+}
+
 // Load only named pure functions; never evaluate page.tsx or personal seed tasks.
 export function numbering() {
   const source = ts.createSourceFile("page.tsx", readFileSync("src/app/page.tsx", "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
