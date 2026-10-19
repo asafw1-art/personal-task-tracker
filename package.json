@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test:persistence": "node --test scripts/persistence/*.test.mjs",
+    "test:persistence:gate": "node scripts/persistence/release-gate.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.110.8",
