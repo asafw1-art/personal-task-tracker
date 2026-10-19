@@ -1,6 +1,7 @@
 import { supabase } from "@/lib/supabase";
 import type { Task, TaskSubtask } from "@/lib/tasks";
 import { checkPersistenceOperation, fetchPersistenceBackup, fetchPersistenceContext, fetchPersistencePage, sendPersistenceCommand, type PersistenceCommand, type PersistenceReply } from "@/lib/persistenceTransport";
+import { newerTask, operationPrefix, reconcileDraftAccess, recordPersistenceOperation, setPersistencePartial } from "@/lib/persistenceUx";
 
 export const versionedPersistenceEnabled = process.env.NEXT_PUBLIC_PERSISTENCE_V1_ENABLED === "true";
 type Context = PersistenceReply & { writeEpoch: string; settingsRevision: string; taxonomyRevision: string;
@@ -8,6 +9,12 @@ type Context = PersistenceReply & { writeEpoch: string; settingsRevision: string
 const contexts = new Map<string, Context>();
 const observedTasks = new Map<string, Task>();
 const inFlight = new Set<string>();
+const resolving = new Set<string>();
+const readSequence = new Map<string, number>();
+const publishedSequence = new Map<string, number>();
+const publishedTasks = new Map<string, Task[]>();
+const contextSequence = new Map<string, number>();
+const contextPublished = new Map<string, number>();
 const messageFor = (status: string) => ({ conflict: "הנתונים השתנו בענן. יש לרענן ולבחון את ההבדלים לפני אישור חדש.", unknown: "טרם התקבל אישור שמירה. הפעולה נשמרה לבירור; אין לשלוח פעולה חדשה.",
   stale_epoch: "בוצע שחזור או מעבר גרסה. יש לטעון מחדש לפני שמירה.", account_read_only: "החשבון במצב תחזוקה לקריאה בלבד.", authentication_required: "יש להתחבר מחדש לחשבון.",
   validation_failed: "הפעולה לא תקינה או מכילה נושא או פעולה שכבר אינם קיימים.", not_found_or_forbidden: "המשימה או הרשאת השיתוף אינן זמינות עוד.",
@@ -25,10 +32,12 @@ export function observedContext(userId: string): Context {
   return context;
 }
 export async function loadPersistenceContext(userId: string) {
+  const sequence = (contextSequence.get(userId) ?? 0) + 1; contextSequence.set(userId, sequence);
   const reply = await fetchPersistenceContext(userId);
   await assertActor(userId);
   if (reply.status !== "context" || !reply.sharedComplete) throw new PersistenceWriteError(reply.status === "context" ? { status: "restart_required" } : reply);
-  contexts.set(userId, reply as Context);
+  if (sequence < (contextPublished.get(userId) ?? 0)) return observedContext(userId);
+  contextPublished.set(userId, sequence); contexts.set(userId, reply as Context);
   return reply as Context;
 }
 export function snapshotToTask(value: Record<string, unknown>, userId: string, remember = true): Task {
@@ -36,8 +45,9 @@ export function snapshotToTask(value: Record<string, unknown>, userId: string, r
   const task = { ...rest, id: value.ownerUserId && value.ownerUserId !== userId ? `shared:${id}` : `${value.prefix}${value.number}`, cloudId: id, ownerUserId: value.ownerUserId ?? userId,
     sharedWithMe: Boolean(value.ownerUserId && value.ownerUserId !== userId), actionType: value.actionType ?? undefined,
     notes: value.notes ?? undefined, dueDate: value.dueDate ?? undefined, completedAt: value.completedAt ?? undefined } as Task;
-  if (remember) observedTasks.set(`${userId}:${id}`, structuredClone(task));
-  return task;
+  const accepted = remember ? newerTask(observedTasks.get(`${userId}:${id}`), task) : task;
+  if (remember) observedTasks.set(`${userId}:${id}`, structuredClone(accepted));
+  return structuredClone(accepted);
 }
 export function observedTask(userId: string, cloudId: string) {
   const task = observedTasks.get(`${userId}:${cloudId}`);
@@ -45,7 +55,9 @@ export function observedTask(userId: string, cloudId: string) {
   return structuredClone(task);
 }
 export async function loadVersionedTasks(userId: string) {
+  const sequence = (readSequence.get(userId) ?? 0) + 1; readSequence.set(userId, sequence);
   const tasks: Record<string, unknown>[] = []; let cursor: Record<string, unknown> | null = null;
+  try {
   do {
     const page = await fetchPersistencePage(userId, cursor);
     if (page.status !== "ok") throw new PersistenceWriteError(page);
@@ -54,21 +66,42 @@ export async function loadVersionedTasks(userId: string) {
   } while (cursor);
   const context = await loadPersistenceContext(userId);
   await assertActor(userId);
-  return [...tasks, ...context.sharedTasks].map((row) => snapshotToTask(row, userId));
+  if (sequence < (publishedSequence.get(userId) ?? 0)) return structuredClone(publishedTasks.get(userId) ?? []);
+  const loaded = [...tasks, ...context.sharedTasks].map((row) => snapshotToTask(row, userId));
+  for (const [key, task] of observedTasks) if (key.startsWith(`${userId}:`) && task.sharedWithMe && !loaded.some((row) => row.cloudId === task.cloudId)) observedTasks.delete(key);
+  publishedSequence.set(userId, sequence); publishedTasks.set(userId, loaded);
+  reconcileDraftAccess(userId, loaded); setPersistencePartial(userId, false);
+  return loaded;
+  } catch (error) {
+    if (error instanceof PersistenceWriteError && ["restart_required", "unknown"].includes(error.reply.status)) setPersistencePartial(userId, true);
+    throw error;
+  }
 }
-const journalPrefix = (userId: string) => `task-tracker:persistence-v1:operation:${userId}:`;
+const journalPrefix = operationPrefix;
 const pendingKeys = (userId: string) => Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index))
   .filter((key): key is string => Boolean(key?.startsWith(journalPrefix(userId))));
-export async function resolvePendingPersistence(userId: string, retrySameOperation = false) {
-  const key = pendingKeys(userId)[0];
+export async function resolvePendingPersistence(userId: string, retrySameOperation = false, operationId?: string) {
+  await assertActor(userId);
+  if (resolving.has(userId) || inFlight.has(userId)) return null;
+  const key = operationId ? pendingKeys(userId).find((value) => value === journalPrefix(userId) + operationId) : pendingKeys(userId)[0];
   const raw = key ? localStorage.getItem(key) : null;
   if (!raw) return null;
   const pending = JSON.parse(raw) as PersistenceCommand;
+  if (key !== journalPrefix(userId) + pending.operationId) throw new Error("יומן הפעולה אינו תקין. אין לשלוח אותו מחדש.");
+  resolving.add(userId);
+  recordPersistenceOperation(userId, pending, "checking");
+  try {
   let result = await checkPersistenceOperation(pending.operationId, userId);
-  if (result.status === "unknown" && retrySameOperation) result = await sendPersistenceCommand(pending, userId);
+  if (result.status === "unknown" && retrySameOperation) {
+    const context = await loadPersistenceContext(userId);
+    if (context.writeEpoch !== pending.expectedWriteEpoch) result = { status: "stale_epoch", operationId: pending.operationId };
+    else result = await sendPersistenceCommand(pending, userId);
+  }
   await assertActor(userId);
   if (["committed", "conflict", "not_found_or_forbidden", "idempotency_mismatch", "stale_epoch", "validation_failed", "prepared"].includes(result.status)) localStorage.removeItem(key);
+  recordPersistenceOperation(userId, pending, result.status, result);
   return result;
+  } finally { resolving.delete(userId); }
 }
 export async function currentPersistenceUser() {
   const session = await supabase?.auth.getSession();
@@ -94,16 +127,19 @@ export async function writeVersioned(userId: string, input: Omit<PersistenceComm
   await assertActor(userId);
   if (inFlight.has(userId) || pendingKeys(userId).length) throw new PersistenceWriteError({ status: "unknown" });
   const context = observedContext(userId);
+  if (context.readOnly) throw new PersistenceWriteError({ status: "account_read_only" });
   const command: PersistenceCommand = { ...input, protocolVersion: 1, operationId: crypto.randomUUID(), expectedWriteEpoch: input.expectedWriteEpoch ?? context.writeEpoch };
   const key = journalPrefix(userId) + command.operationId;
   // Refuse dispatch if the immutable operation cannot survive a reload.
   try { localStorage.setItem(key, JSON.stringify(command)); }
   catch { throw new Error("לא ניתן לשמור את מזהה הפעולה במכשיר. הפעולה לא נשלחה; שמור את הטיוטה לפני רענון."); }
   inFlight.add(userId);
+  recordPersistenceOperation(userId, command, "submitting");
   try {
     const result = await sendPersistenceCommand(command, userId);
     await assertActor(userId);
     if (result.status !== "unknown") localStorage.removeItem(key);
+    recordPersistenceOperation(userId, command, result.status, result);
     if (!["committed", "prepared"].includes(result.status)) throw new PersistenceWriteError(result);
     if (result.task) snapshotToTask(result.task as Record<string, unknown>, userId);
     if (result.domain === "settings") context.settingsRevision = String(result.revision);

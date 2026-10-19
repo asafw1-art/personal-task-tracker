@@ -10,7 +10,8 @@ const check = (name, run) => test(name, { skip: !process.env.PGLITE_MODULE_PATH 
     getItem: (k) => values.get(k) ?? null, setItem: (k, v) => values.set(k, v), removeItem: (k) => values.delete(k) };
   let actor = user.id, count = 0, after = () => {};
   const supabase = { auth: { getSession: async () => ({ data: { session: { user: { id: actor }, access_token: "synthetic-token" } } }) }, from: () => { throw new Error("Legacy DML forbidden"); } };
-  const api = load("src/lib/persistenceWriters.ts", { "@/lib/supabase": { supabase }, "@/lib/persistenceTransport": {
+  const ux = load("src/lib/persistenceUx.ts", {});
+  const api = load("src/lib/persistenceWriters.ts", { "@/lib/persistenceUx": ux, "@/lib/supabase": { supabase }, "@/lib/persistenceTransport": {
     fetchPersistencePage: (id, cursor, limit) => h.page(id, { cursor, limit }),
     fetchPersistenceContext: async (id) => (await h.asActor(id, "select public.persistence_context_v1() value")).rows[0].value,
     checkPersistenceOperation: (op, id) => h.receipt(id, op),
@@ -42,10 +43,11 @@ check("W03: unknown keeps per-operation identity and resolves without a new writ
   const base = (await tasks.fetchCloudTasks(user))[0];
   await h.fault("after_commit", "lose_response");
   await assert.rejects(api.writeVersioned(user.id, { kind: "set_task_status", ...api.taskCommandBase(base), status: "waiting" }));
-  assert.equal(values.size, 1); assert.ok([...values.keys()][0].endsWith(JSON.parse([...values.values()][0]).operationId));
+  const journal = () => [...values.keys()].filter((key) => key.includes(":operation:"));
+  assert.equal(journal().length, 1); assert.ok(journal()[0].endsWith(JSON.parse(values.get(journal()[0])).operationId));
   await assert.rejects(api.writeVersioned(user.id, { kind: "set_task_status", ...api.taskCommandBase(base), status: "done" }));
   assert.equal(count(), 1); assert.equal((await api.resolvePendingPersistence(user.id)).status, "committed");
-  assert.equal(values.size, 0); assert.equal((await h.read(user.id, base.cloudId)).revision, "2");
+  assert.equal(journal().length, 0); assert.equal((await h.read(user.id, base.cloudId)).revision, "2");
 });
 check("W04: failed journal refuses sending and an account switch discards a late reply", async ({ h, api, tasks, count, switchOnReply }) => {
   const base = (await tasks.fetchCloudTasks(user))[0], storage = globalThis.localStorage;

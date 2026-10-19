@@ -8,6 +8,8 @@ import { useNotificationReceipts } from "@/lib/useNotificationReceipts";
 import { useServiceHealth } from "@/lib/useServiceHealth";
 import { ServiceHealthPanel } from "@/components/ServiceHealthPanel";
 import { AssistantContextReview } from "@/components/AssistantContextReview";
+import { lockPageScroll, PersistenceDialog, PersistenceDiff, PersistenceWorkspace } from "@/components/PersistenceWorkspace";
+import { describePersistenceCommand, draftKey, hydratePersistenceWorkspace, persistenceServerSnapshot, persistenceSnapshot, persistenceStatusText, persistenceSubscribe, removeTaskDraft, storeTaskDraft, type TaskDraft, type TaskDraftRecord } from "@/lib/persistenceUx";
 import type { AssistantContextPreview } from "@/lib/assistantPrivacy";
 import type { AssistantArchiveSearchResult, AssistantMessage, AssistantProposedAction, AssistantThread } from "@/lib/assistant";
 import { canonicalTaskId, initialTasks, Task, TaskPrefix, TaskPriority, TaskStatus, TaskSubtask, TaskSubtaskStatus } from "@/lib/tasks";
@@ -17,8 +19,8 @@ import { fetchUserDevices, registerCurrentDevice, type UserDevice } from "@/lib/
 import { acceptTaskShare, createTaskShare, declineTaskShare, fetchTaskShares, fetchTaskSubtaskAssignments, historicalTaskFromShare, leaveTaskShare, revokeTaskShare, setSharedTaskFocus, setTaskSubtaskAssignment, updateSharedTaskSubtaskStatus, type TaskShare, type TaskSubtaskAssignment } from "@/lib/supabaseSharing";
 import { countCloudTasks, fetchCloudTasks, saveCloudTasks } from "@/lib/supabaseTasks";
 import { fetchCloudTaxonomy, renameCloudTaxonomy, replaceCloudTaxonomy } from "@/lib/supabaseTaxonomy";
-import { exportVersionedAccount, observedContext, recoverySnapshotTasks, snapshotToTask, taskCommandBase, taskEditItems, versionedPersistenceEnabled, writeVersioned } from "@/lib/persistenceWriters";
-import type { PersistenceCommand } from "@/lib/persistenceTransport";
+import { exportVersionedAccount, observedContext, PersistenceWriteError, recoverySnapshotTasks, snapshotToTask, taskCommandBase, taskEditItems, versionedPersistenceEnabled, writeVersioned } from "@/lib/persistenceWriters";
+import type { PersistenceCommand, PersistenceReply } from "@/lib/persistenceTransport";
 import { fetchUserSettings, saveUserSettings } from "@/lib/supabaseUserSettings";
 import { fetchAdminOverview, type AdminOverview } from "@/lib/supabaseAdmin";
 import { createDriveBackup, deleteDriveBackupFiles, disconnectDriveBackup, dismissDriveBackupOnboarding, fetchDriveBackupOverview, fetchDriveBackupPreview, restoreDriveBackup, startDriveConnection, type DriveBackupOverview, type DriveBackupPreview } from "@/lib/driveBackup";
@@ -186,18 +188,6 @@ function LoadingSkeleton() {
     </section>
   );
 }
-
-type TaskDraft = {
-  prefix: TaskPrefix;
-  title: string;
-  category: string;
-  actionType: string;
-  priority: TaskPriority;
-  status: TaskStatus;
-  dueDate: string;
-  notes: string;
-  subtasks: TaskSubtask[];
-};
 
 type TaskEditorState =
   | { mode: "create"; draft: TaskDraft; initialDraft: TaskDraft }
@@ -447,6 +437,7 @@ function taskToDraft(task: Task): TaskDraft {
     status: task.status,
     dueDate: task.dueDate ?? "",
     notes: task.notes ?? "",
+    focused: task.focused,
     subtasks: [...(task.subtasks ?? [])].sort((a, b) => a.number - b.number),
   };
 }
@@ -870,6 +861,46 @@ export default function Home() {
   const [isMobileHeroCompact, setIsMobileHeroCompact] = useState(false);
   const [taskEditor, setTaskEditor] = useState<TaskEditorState>(null);
   const [taskEditorError, setTaskEditorError] = useState("");
+  const hasTaskEditor = Boolean(taskEditor);
+  const [editorSaveStatus, setEditorSaveStatus] = useState("draft");
+  const [editorBusy, setEditorBusy] = useState(false);
+  const editorBusyRef = useRef(false);
+  const editorDialogRef = useRef<HTMLElement>(null);
+  const editorOpenerRef = useRef<HTMLElement | null>(null);
+  const editorOwnerRef = useRef<string | null>(null);
+  const [editorCloseDecision, setEditorCloseDecision] = useState(false);
+  const [persistenceConflict, setPersistenceConflict] = useState<{ base: Task; server: Task; draft: TaskDraft } | null>(null);
+  const [persistenceReview, setPersistenceReview] = useState<{ title: string; lines: string[]; resolve: (approved: boolean) => void } | null>(null);
+  const reviewRef = useRef<((approved: boolean) => void) | null>(null);
+  const [importPreview, setImportPreview] = useState<{ name: string; rows: { task: Task; base?: Task; selected: boolean }[]; invalid: number } | null>(null);
+  const [online, setOnline] = useState(true);
+  const persistenceView = useSyncExternalStore(persistenceSubscribe, () => persistenceSnapshot(versionedPersistenceEnabled ? cloudUser?.id : undefined), persistenceServerSnapshot);
+  const persistenceBlocked = persistenceView.operations.some((op) => ["submitting", "checking", "unknown"].includes(op.status));
+  const actorRef = useRef(cloudUser?.id);
+  useEffect(() => { actorRef.current = cloudUser?.id; }, [cloudUser?.id]);
+  useEffect(() => {
+    if (!versionedPersistenceEnabled) return;
+    if (cloudUser) hydratePersistenceWorkspace(cloudUser.id);
+    const sync = () => setOnline(navigator.onLine);
+    sync(); window.addEventListener("online", sync); window.addEventListener("offline", sync);
+    return () => { window.removeEventListener("online", sync); window.removeEventListener("offline", sync); };
+  }, [cloudUser]);
+  useEffect(() => {
+    if (!versionedPersistenceEnabled || !cloudUser || !taskEditor || editorOwnerRef.current !== cloudUser.id) return;
+    if (JSON.stringify(taskEditor.draft) === JSON.stringify(taskEditor.initialDraft)) return;
+    storeTaskDraft(cloudUser.id, taskEditor.mode === "edit" ? taskEditor.baseTask ?? null : null, taskEditor.draft);
+  }, [cloudUser, taskEditor]);
+  useEffect(() => {
+    if (!versionedPersistenceEnabled || !hasTaskEditor) return;
+    const opener = document.activeElement as HTMLElement | null;
+    const viewport = window.visualViewport;
+    const resize = () => {
+      editorDialogRef.current?.style.setProperty("--editor-viewport-height", `${viewport?.height ?? innerHeight}px`);
+      if (editorDialogRef.current?.contains(document.activeElement)) (document.activeElement as HTMLElement)?.scrollIntoView({ block: "nearest" });
+    };
+    resize(); viewport?.addEventListener("resize", resize);
+    return () => { viewport?.removeEventListener("resize", resize); if (opener?.isConnected) opener.focus(); };
+  }, [hasTaskEditor]);
   const [expandedSubtaskTaskIds, setExpandedSubtaskTaskIds] = useState<Set<string>>(() => new Set());
   const [inlineSubtaskDrafts, setInlineSubtaskDrafts] = useState<Record<string, string>>({});
   const [editingInlineSubtaskKey, setEditingInlineSubtaskKey] = useState<string | null>(null);
@@ -921,6 +952,15 @@ export default function Home() {
   const [cloudStatus, setCloudStatus] = useState(
     isSupabaseConfigured ? "בודק חיבור ל-Supabase..." : "Supabase עדיין לא מוגדר. עובדים במצב מקומי."
   );
+  useEffect(() => {
+    if (!versionedPersistenceEnabled || !taskEditor || taskEditor.mode !== "edit" || !taskEditor.baseTask?.sharedWithMe || !cloudUser) return;
+    if (tasks.some((task) => task.cloudId === taskEditor.baseTask?.cloudId && task.sharedWithMe)) return;
+    const timer = window.setTimeout(() => {
+      removeTaskDraft(cloudUser.id, draftKey(taskEditor.baseTask ?? null));
+      setTaskEditor(null); setPersistenceConflict(null); setCloudStatus(persistenceStatusText("not_found_or_forbidden"));
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [tasks, taskEditor, cloudUser]);
 
   const mergeCloudTasksIntoLocal = useCallback((cloudTasks: Task[]) => {
     if (versionedPersistenceEnabled) { setTasks(cloudTasks); return; }
@@ -938,28 +978,88 @@ export default function Home() {
     if (session?.data.session?.user.id !== cloudUser.id) return;
     setTasks(loaded);
     setCloudSyncEnabled(true); setCloudTaskCount(loaded.length); setLastCloudPullAt(nowIso());
+    return loaded;
+  }
+  function reviewPersistence(title: string, lines: string[]) {
+    return new Promise<boolean>((resolve) => { reviewRef.current = resolve; setPersistenceReview({ title, lines, resolve }); });
+  }
+  function finishPersistenceReview(approved: boolean) {
+    reviewRef.current?.(approved); reviewRef.current = null; setPersistenceReview(null);
+  }
+  async function handlePersistenceFailure(error: unknown, base?: Task | null, draft?: TaskDraft) {
+    if (!cloudUser || actorRef.current !== cloudUser.id) return;
+    const status = error instanceof PersistenceWriteError ? error.reply.status : "validation_failed";
+    setEditorSaveStatus(status); setCloudStatus(errorMessage(error)); setTaskEditorError(errorMessage(error));
+    if ((status === "conflict" || status === "stale_epoch") && base && draft) {
+      try {
+        const loaded = await refreshVersionedView();
+        if (actorRef.current !== cloudUser.id) return;
+        const server = loaded?.find((task) => task.cloudId === base.cloudId);
+        if (server && !server.sharedWithMe) setPersistenceConflict({ base, server, draft: structuredClone(draft) });
+        else if (!server) { removeTaskDraft(cloudUser.id, draftKey(base)); closeTaskEditor(); setCloudStatus(persistenceStatusText("not_found_or_forbidden")); }
+      } catch { setTaskEditorError("לא ניתן לטעון את הגרסה העדכנית. הטיוטה נשמרה; אין לאשר שינוי עד לבדיקת הגרסה."); }
+    }
+    if (status === "not_found_or_forbidden" && base?.sharedWithMe) {
+      removeTaskDraft(cloudUser.id, draftKey(base)); setTasks((current) => current.filter((task) => task.cloudId !== base.cloudId)); closeTaskEditor();
+    }
+  }
+  async function resumePersistenceDraft(row: TaskDraftRecord) {
+    if (!cloudUser || row.userId !== cloudUser.id) return;
+    try {
+      const loaded = await refreshVersionedView();
+      if (actorRef.current !== cloudUser.id) return;
+      const current = row.base ? loaded?.find((task) => task.cloudId === row.base?.cloudId) : null;
+      if (row.base && !current) { removeTaskDraft(cloudUser.id, row.key); setCloudStatus(persistenceStatusText("not_found_or_forbidden")); return; }
+      editorOwnerRef.current = cloudUser.id; setEditorSaveStatus("draft"); setTaskEditorError("");
+      setTaskEditor(row.base ? { mode: "edit", taskId: row.base.id, baseTask: row.base, draft: row.draft, initialDraft: taskToDraft(row.base) }
+        : { mode: "create", draft: row.draft, initialDraft: defaultTaskDraft(row.draft.prefix) });
+      if (row.base && current && (row.base.revision !== current.revision || row.base.writeEpoch !== current.writeEpoch)) setPersistenceConflict({ base: row.base, server: current, draft: row.draft });
+    } catch (error) { setCloudStatus(errorMessage(error)); }
+  }
+  async function persistenceResolved(reply: PersistenceReply) {
+    if (!cloudUser || actorRef.current !== cloudUser.id) return;
+    setEditorSaveStatus(reply.status);
+    if (reply.status === "committed") {
+      // A draft may have been edited after dispatch: never delete a newer intention on a late receipt.
+      await refreshVersionedView();
+      if (assistantThreadId && actorRef.current === cloudUser.id) setAssistantMessages(await fetchAssistantMessages(assistantThreadId));
+      setCloudStatus("נשמר בענן. יש להשוות את הטיוטה שנותרה למצב העדכני לפני שליחה נוספת.");
+    } else setCloudStatus(persistenceStatusText(reply.status));
   }
   async function performTaskCommand(task: Task, kind: PersistenceCommand["kind"], extra: Partial<PersistenceCommand> = {}) {
     if (!cloudUser) return false;
     try {
       const result = await writeVersioned(cloudUser.id, { kind, ...taskCommandBase(task), ...extra });
+      if (actorRef.current !== cloudUser.id) return false;
       if (result.task) {
         const saved = snapshotToTask(result.task as Record<string, unknown>, cloudUser.id);
         setTasks((current) => current.map((row) => row.cloudId === saved.cloudId ? saved : row));
       }
       setCloudStatus("השינוי נשמר בענן."); return true;
-    } catch (error) { setCloudStatus(errorMessage(error)); setTaskEditorError(errorMessage(error)); return false; }
+    } catch (error) {
+      const draft = taskToDraft({ ...task, ...(extra.patch ?? {}), ...(kind === "set_task_status" ? { status: extra.status as TaskStatus } : {}) });
+      if (kind === "set_subtask_status") draft.subtasks = draft.subtasks.map((step) => step.id === extra.subtaskId ? { ...step, status: extra.status as TaskSubtaskStatus } : step);
+      if (kind === "set_owner_focus") draft.focused = extra.focused;
+      if (kind === "remove_subtask") draft.subtasks = draft.subtasks.filter((step) => step.id !== extra.subtaskId);
+      if (kind === "add_subtask") draft.subtasks = [...draft.subtasks, { id: `draft:${crypto.randomUUID()}`, number: nextSubtaskNumber(draft.subtasks), title: String(extra.patch?.title ?? ""), status: "open" }];
+      storeTaskDraft(cloudUser.id, task, draft);
+      await handlePersistenceFailure(error, task, draft); return false;
+    }
   }
-  async function performAtomicEdit(base: Task | null, next: Task) {
+  async function performAtomicEdit(base: Task | null, next: Task, draftForReview?: TaskDraft) {
     if (!cloudUser) return false;
     try {
       if (base) taskCommandBase(base);
       const items = taskEditItems(base, next);
-      if (items.length) await writeVersioned(cloudUser.id, { kind: "import", expectedWriteEpoch: base?.writeEpoch, items });
+      if (!items.length) { removeTaskDraft(cloudUser.id, draftKey(base)); setCloudStatus("אין שינויים חדשים לשמירה. לא נשלחה פעולה לענן."); return true; }
+      await writeVersioned(cloudUser.id, { kind: "import", expectedWriteEpoch: base?.writeEpoch, items });
+      if (actorRef.current !== cloudUser.id) return false;
+      setEditorSaveStatus("committed");
+      removeTaskDraft(cloudUser.id, draftKey(base));
       try { await refreshVersionedView(); setCloudStatus("השינוי נשמר בענן."); }
       catch { setCloudStatus("השינוי נשמר בענן, אך רענון הרשימה נכשל. יש לרענן ללא שליחה נוספת."); }
       return true;
-    } catch (error) { setCloudStatus(errorMessage(error)); setTaskEditorError(errorMessage(error)); return false; }
+    } catch (error) { const draft = draftForReview ?? taskToDraft(next); storeTaskDraft(cloudUser.id, base, draft); await handlePersistenceFailure(error, base, draft); return false; }
   }
 
   const refreshDriveBackups = useCallback(async (allowPrompt = true) => {
@@ -1107,6 +1207,10 @@ export default function Home() {
       const user = data.session?.user ?? null;
       setTaskStorageUser(user?.id ?? null);
       setCloudUser(user);
+      actorRef.current = user?.id;
+      reviewRef.current?.(false); reviewRef.current = null;
+      setPersistenceReview(null); setPersistenceConflict(null); setImportPreview(null); setEditorCloseDecision(false);
+      editorOwnerRef.current = null; editorBusyRef.current = false; setEditorBusy(false); setEditorSaveStatus("draft");
       setIsCloudReady(!user);
       setCloudStatus(user ? "טוען משימות מהענן..." : "לא מחובר. יש להתחבר כדי לראות את המשימות.");
     }).finally(() => setAuthChecked(true));
@@ -1117,6 +1221,10 @@ export default function Home() {
       setTaskStorageUser(user?.id ?? null);
       setCloudUser(user);
       setCloudSyncEnabled(false);
+      actorRef.current = user?.id;
+      reviewRef.current?.(false); reviewRef.current = null;
+      setPersistenceReview(null); setPersistenceConflict(null); setImportPreview(null); setEditorCloseDecision(false);
+      editorOwnerRef.current = null; editorBusyRef.current = false; setEditorBusy(false); setEditorSaveStatus("draft");
       setCloudTaskCount(null);
       setLastCloudPullAt(null);
       setCloudDevices([]);
@@ -1352,7 +1460,7 @@ export default function Home() {
         } else {
           setTasks([]);
           setCloudTaskCount(0);
-          setCloudSyncEnabled(false);
+          setCloudSyncEnabled(versionedPersistenceEnabled);
           setLastCloudPullAt(new Date().toISOString());
           setCloudStatus("מחובר לענן, אבל עדיין אין משימות בענן. אפשר להעלות נתונים מקומיים מההגדרות.");
         }
@@ -1461,9 +1569,13 @@ export default function Home() {
     }
 
     const intervalId = window.setInterval(refreshFromCloud, 60_000);
+    window.addEventListener("focus", refreshFromCloud);
+    window.addEventListener("online", refreshFromCloud);
     return () => {
       cancelled = true;
       window.clearInterval(intervalId);
+      window.removeEventListener("focus", refreshFromCloud);
+      window.removeEventListener("online", refreshFromCloud);
     };
   }, [cloudSyncEnabled, cloudUser, mergeCloudTasksIntoLocal]);
 
@@ -1582,10 +1694,13 @@ export default function Home() {
   }, []);
 
   const openCreateTask = useCallback(() => {
+    editorOpenerRef.current = document.activeElement as HTMLElement | null;
     setTaskEditorError("");
-    const draft = defaultTaskDraft(prefixFilter === "W" ? "W" : "P");
-    setTaskEditor({ mode: "create", draft, initialDraft: draft });
-  }, [prefixFilter]);
+    editorOwnerRef.current = cloudUser?.id ?? null; setEditorSaveStatus("draft");
+    const initialDraft = defaultTaskDraft(prefixFilter === "W" ? "W" : "P");
+    const draft = versionedPersistenceEnabled && cloudUser ? persistenceSnapshot(cloudUser.id).drafts.find((row) => !row.base)?.draft ?? initialDraft : initialDraft;
+    setTaskEditor({ mode: "create", draft, initialDraft });
+  }, [prefixFilter, cloudUser]);
 
   const emptyTaskState = useMemo(() => {
     const hasNarrowingFilters = activeFilters.length > 0;
@@ -1938,6 +2053,7 @@ export default function Home() {
       : "neutral";
   const hasBlockingOverlay = isSettingsOpen
     || Boolean(taskEditor)
+    || Boolean(persistenceReview) || Boolean(persistenceConflict) || Boolean(importPreview) || editorCloseDecision
     || isDriveOnboardingOpen
     || Boolean(analyticsTaskModal)
     || isNotificationCenterOpen;
@@ -1962,26 +2078,7 @@ export default function Home() {
 
   useEffect(() => {
     if (!hasBlockingOverlay) return;
-    const scrollY = window.scrollY;
-    const previous = {
-      position: document.body.style.position,
-      top: document.body.style.top,
-      width: document.body.style.width,
-      overflow: document.body.style.overflow,
-    };
-    document.documentElement.classList.add("modal-open");
-    document.body.style.position = "fixed";
-    document.body.style.top = `-${scrollY}px`;
-    document.body.style.width = "100%";
-    document.body.style.overflow = "hidden";
-    return () => {
-      document.documentElement.classList.remove("modal-open");
-      document.body.style.position = previous.position;
-      document.body.style.top = previous.top;
-      document.body.style.width = previous.width;
-      document.body.style.overflow = previous.overflow;
-      window.scrollTo(0, scrollY);
-    };
+    return lockPageScroll();
   }, [hasBlockingOverlay]);
 
   function tasksForAnalyticsAction(action: NonNullable<AnalyticsInsight["action"]>) {
@@ -3104,13 +3201,18 @@ export default function Home() {
   }
 
   function openEditTask(task: Task) {
+    editorOpenerRef.current = document.activeElement as HTMLElement | null;
     setTaskEditorError("");
     setSharingPanelTaskId(null);
-    const draft = taskToDraft(task);
-    setTaskEditor({ mode: "edit", taskId: task.id, draft, initialDraft: draft, baseTask: structuredClone(task) });
+    editorOwnerRef.current = cloudUser?.id ?? null; setEditorSaveStatus("draft");
+    const savedDraft = versionedPersistenceEnabled && cloudUser ? persistenceSnapshot(cloudUser.id).drafts.find((row) => row.base?.cloudId === task.cloudId) : undefined;
+    const draft = savedDraft?.draft ?? taskToDraft(task), baseTask = savedDraft?.base ?? structuredClone(task);
+    setTaskEditor({ mode: "edit", taskId: task.id, draft, initialDraft: taskToDraft(baseTask), baseTask });
+    if (savedDraft && (baseTask.revision !== task.revision || baseTask.writeEpoch !== task.writeEpoch)) setPersistenceConflict({ base: baseTask, server: task, draft });
   }
 
   function openTaskSharing(task: Task) {
+    if (versionedPersistenceEnabled) { openEditTask(task); setSharingPanelTaskId(task.id); return; }
     setTaskEditorError("");
     setSharingStatus("");
     setSharingPanelTaskId(task.id);
@@ -3246,8 +3348,7 @@ export default function Home() {
       return;
     }
     if (versionedPersistenceEnabled) {
-      const title = window.prompt("שם צעד הטיפול")?.trim();
-      if (title) void performTaskCommand(task, "add_subtask", { patch: { title } });
+      openEditTask(task); addDraftSubtask();
       return;
     }
     const subtasks = task.subtasks ?? [];
@@ -3547,7 +3648,7 @@ export default function Home() {
       || message.actionStatus === "approved"
       || assistantActionsInFlightRef.current.has(message.id)
     ) return;
-    if (isDestructiveAssistantAction(message.proposedAction)) {
+    if (!versionedPersistenceEnabled && isDestructiveAssistantAction(message.proposedAction)) {
       const approved = window.confirm(`לאשר פעולה רגישה?\n${assistantActionDescription(message.proposedAction)}`);
       if (!approved) return;
     }
@@ -3568,11 +3669,12 @@ export default function Home() {
         const target = "taskId" in action ? tasks.find((row) => isOwnTask(row, cloudUser) && row.id === action.taskId) : undefined;
         const prepared = await writeVersioned(cloudUser.id, { kind: "prepare_ai_proposal", messageId: message.id,
           ...(target ? taskCommandBase(target) : { expectedWriteEpoch: observedContext(cloudUser.id).writeEpoch }) });
-        if (!window.confirm(`לבצע את השינוי הבא?\n${JSON.stringify(prepared.commandPreview, null, 2)}`)) {
+        if (!await reviewPersistence("אישור שינוי שהציע AI", [assistantActionDescription(action), ...describePersistenceCommand(prepared.commandPreview as Record<string, unknown>)])) {
           setAssistantMessages((current) => current.map((row) => row.id === message.id ? { ...row, actionStatus: "proposed" } : row)); return;
         }
         await writeVersioned(cloudUser.id, { kind: "apply_ai_proposal", proposalId: String(prepared.proposalId),
           ...(target ? taskCommandBase(target) : { expectedWriteEpoch: observedContext(cloudUser.id).writeEpoch }) });
+        if (actorRef.current !== cloudUser.id) return;
         setAssistantMessages((current) => current.map((row) => row.id === message.id ? { ...row, actionStatus: "done" } : row));
         await refreshVersionedView().catch(() => setAssistantStatus("הפעולה נשמרה; רענון הרשימה נכשל. אין צורך לבצע שוב."));
         return;
@@ -3614,7 +3716,8 @@ export default function Home() {
       }
     } catch (error) {
       const failureMessage = errorMessage(error);
-      setAssistantMessages((current) => current.map((item) => item.id === message.id ? { ...item, actionStatus: "failed" } : item));
+      const unresolved = versionedPersistenceEnabled && error instanceof PersistenceWriteError && ["unknown", "authentication_required"].includes(error.reply.status);
+      setAssistantMessages((current) => current.map((item) => item.id === message.id ? { ...item, actionStatus: unresolved ? "approved" : "failed" } : item));
       setAssistantActionErrors((current) => ({ ...current, [message.id]: failureMessage }));
       if (!versionedPersistenceEnabled) await updateAssistantMessageActionStatus(message.id, "failed").catch(() => undefined);
     } finally {
@@ -3820,6 +3923,7 @@ export default function Home() {
   }
 
   function updateTaskDraft(updates: Partial<TaskDraft>) {
+    if (versionedPersistenceEnabled && editorBusyRef.current) return;
     setTaskEditor((current) => {
       if (!current) return current;
       const draft = { ...current.draft, ...updates };
@@ -3828,6 +3932,7 @@ export default function Home() {
   }
 
   function updateTaskDraftSubtasks(updater: (subtasks: TaskSubtask[], editor: Exclude<TaskEditorState, null>) => TaskSubtask[]) {
+    if (versionedPersistenceEnabled && editorBusyRef.current) return;
     setTaskEditor((current) => {
       if (!current) return current;
       const subtasks = updater(current.draft.subtasks, current);
@@ -3879,14 +3984,21 @@ export default function Home() {
   }
 
   function closeTaskEditor() {
+    const opener = editorOpenerRef.current;
     setTaskEditor(null);
+    setEditorCloseDecision(false); setPersistenceConflict(null);
     setTaskEditorError("");
     setSharingPanelTaskId(null);
+    if (versionedPersistenceEnabled) window.setTimeout(() => { if (opener?.isConnected) opener.focus(); }, 0);
   }
 
   function requestCloseTaskEditor() {
     if (!taskEditor) return;
     const hasUnsavedChanges = JSON.stringify(taskEditor.draft) !== JSON.stringify(taskEditor.initialDraft);
+    if (versionedPersistenceEnabled) {
+      if (hasUnsavedChanges) setEditorCloseDecision(true); else closeTaskEditor();
+      return;
+    }
     if (hasUnsavedChanges && !window.confirm("יש שינויים שלא נשמרו. לצאת בלי לשמור?")) return;
     closeTaskEditor();
   }
@@ -3894,6 +4006,7 @@ export default function Home() {
   async function saveTaskEditor(event: FormEvent) {
     event.preventDefault();
     if (!taskEditor) return;
+    if (versionedPersistenceEnabled && (!cloudUser || editorBusyRef.current || persistenceBlocked || !online || ["conflict", "account_read_only", "client_upgrade_required", "authentication_required", "stale_epoch"].includes(editorSaveStatus))) return;
 
     const draft = taskEditor.draft;
     if (taskEditor.mode === "edit") {
@@ -3903,6 +4016,20 @@ export default function Home() {
         return;
       }
       if (editedTask?.sharedWithMe) {
+        if (versionedPersistenceEnabled && cloudUser && taskEditor.baseTask) {
+          editorBusyRef.current = true; setEditorBusy(true); setEditorSaveStatus("submitting");
+          try {
+            const base = taskEditor.baseTask;
+            if (draft.subtasks.filter((step) => base.subtasks?.some((row) => row.id === step.id && row.status !== step.status)).length > 1) {
+              setTaskEditorError("במשימה משותפת יש לשמור סטטוס של צעד אחד בכל פעם כדי לא להציג שמירה חלקית כהצלחה."); setEditorSaveStatus("draft"); return;
+            }
+            const step = draft.subtasks.find((step) => base.subtasks?.some((row) => row.id === step.id && row.status !== step.status));
+            if (!step || await performTaskCommand(base, "set_subtask_status", { subtaskId: step.id, status: step.status })) {
+              removeTaskDraft(cloudUser.id, draftKey(base)); closeTaskEditor();
+            }
+          } finally { editorBusyRef.current = false; setEditorBusy(false); }
+          return;
+        }
         draft.subtasks.forEach((subtask) => {
           const originalSubtask = editedTask.subtasks?.find((item) => item.number === subtask.number);
           if (originalSubtask && originalSubtask.status !== subtask.status) {
@@ -3941,7 +4068,9 @@ export default function Home() {
       if (taskEditor.mode === "edit" && !base) { setTaskEditorError("יש לפתוח מחדש את המשימה כדי לקבל גרסת בסיס."); return; }
       const next = { ...(base ?? {}), ...draft, title, category, id: base?.id ?? "draft", number: base?.number ?? 0,
         actionType: draft.actionType || undefined, notes: draft.notes || undefined, dueDate: draft.dueDate || undefined } as Task;
-      if (await performAtomicEdit(base ?? null, next)) closeTaskEditor();
+      editorBusyRef.current = true; setEditorBusy(true); setEditorSaveStatus("submitting");
+      try { if (await performAtomicEdit(base ?? null, next, draft)) closeTaskEditor(); }
+      finally { editorBusyRef.current = false; setEditorBusy(false); }
       return;
     }
     setTasks((current) => {
@@ -4070,8 +4199,12 @@ export default function Home() {
     const cleanName = nextName.trim();
     if (!cleanName || cleanName === topic) return;
     if (versionedPersistenceEnabled && cloudUser) {
-      void renameCloudTaxonomy(cloudUser, "topic", topic, cleanName, prefix).then(async () => {
-        setTaxonomy(await fetchCloudTaxonomy()); await refreshVersionedView(); setTaxonomyStatus("שם הנושא עודכן בענן.");
+      const affected = tasks.filter((task) => isOwnTask(task, cloudUser) && task.prefix === prefix && task.category === topic).length;
+      void reviewPersistence("אישור שינוי נושא", [`${topic} ← ${cleanName}`, `${affected} משימות מושפעות. ${taxonomy.topics[prefix].includes(cleanName) ? "הנושאים ימוזגו." : "שם הנושא יעודכן."}`, "השינוי אטומי; כשל ידחה את כל העדכון."]).then(async (approved) => {
+        if (!approved || actorRef.current !== cloudUser.id) return;
+        await renameCloudTaxonomy(cloudUser, "topic", topic, cleanName, prefix);
+        setTaxonomyStatus("שם הנושא נשמר בענן.");
+        setTaxonomy(await fetchCloudTaxonomy()); await refreshVersionedView();
       }).catch((error: unknown) => setTaxonomyStatus(errorMessage(error))); return;
     }
     const willMerge = taxonomy.topics[prefix].includes(cleanName);
@@ -4095,8 +4228,12 @@ export default function Home() {
     const cleanName = nextName.trim();
     if (!cleanName || cleanName === action) return;
     if (versionedPersistenceEnabled && cloudUser) {
-      void renameCloudTaxonomy(cloudUser, "action", action, cleanName).then(async () => {
-        setTaxonomy(await fetchCloudTaxonomy()); await refreshVersionedView(); setTaxonomyStatus("שם הפעולה עודכן בענן.");
+      const affected = tasks.filter((task) => isOwnTask(task, cloudUser) && (task.actionType === action || task.subtasks?.some((step) => step.actionType === action))).length;
+      void reviewPersistence("אישור שינוי פעולה", [`${action} ← ${cleanName}`, `${affected} משימות וצעדי הטיפול שלהן מושפעים.`, "השינוי אטומי; כשל ידחה את כל העדכון."]).then(async (approved) => {
+        if (!approved || actorRef.current !== cloudUser.id) return;
+        await renameCloudTaxonomy(cloudUser, "action", action, cleanName);
+        setTaxonomyStatus("שם הפעולה נשמר בענן.");
+        setTaxonomy(await fetchCloudTaxonomy()); await refreshVersionedView();
       }).catch((error: unknown) => setTaxonomyStatus(errorMessage(error))); return;
     }
     const willMerge = taxonomy.actions.includes(cleanName);
@@ -4193,18 +4330,15 @@ export default function Home() {
       const imported = getImportTasks(parsed).map(normalizeImportedTask);
       const validTasks = imported.filter((task): task is Task => Boolean(task));
       if (versionedPersistenceEnabled && cloudUser) {
-        const items: Record<string, unknown>[] = [];
-        const plan: string[] = [];
+        const rows: { task: Task; base?: Task; selected: boolean }[] = [];
+        let invalid = imported.length - validTasks.length;
         for (const row of validTasks) {
           const base = row.cloudId && row.ownerUserId === cloudUser.id ? tasks.find((task) => task.cloudId === row.cloudId && isOwnTask(task, cloudUser)) : undefined;
-          if (base && !window.confirm(`לעדכן את ${base.id} — ${base.title}?\nמקור: ${file.name}\nUUID: ${base.cloudId}\n${JSON.stringify(taskEditItems(base, row), null, 2)}`)) continue;
-          if (!base && !window.confirm(`ליצור משימה חדשה מתוך ${row.id} — ${row.title}?\nהמספר יוקצה בשרת ואינו מובטח להיות מספר המקור. משימה קיימת לא תוחלף לפי מספר בלבד.`)) continue;
-          taskEditItems(base ?? null, row, items); plan.push(`${base ? "עדכון" : "יצירה"}: ${row.title}`);
+          try { taskEditItems(base ?? null, row); rows.push({ task: row, base, selected: false }); }
+          catch { invalid++; }
         }
-        if (!items.length) { setImportMessage("לא אושרו שינויים לייבוא."); return; }
-        if (!window.confirm(`לאשר ייבוא אטומי מ־${file.name}?\n${plan.join("\n")}\n${imported.length - validTasks.length} רשומות לא תקינות לא ייובאו.`)) return;
-        const result = await writeVersioned(cloudUser.id, { kind: "import", items });
-        await refreshVersionedView(); setImportMessage(`הייבוא נשמר בענן: ${result.itemCount} פעולות. המספור הסופי מוצג ברשימה.`); return;
+        setImportMessage(""); setImportPreview({ name: file.name, invalid, rows });
+        return;
       }
       const summary: ImportSummary = { added: 0, updated: 0, skipped: imported.length - validTasks.length };
 
@@ -4222,6 +4356,24 @@ export default function Home() {
     } catch (error) {
       setImportMessage(versionedPersistenceEnabled ? errorMessage(error) : "לא הצלחתי לקרוא את הקובץ. יש לבחור קובץ JSON תקין של האפליקציה.");
     }
+  }
+
+  async function confirmPersistenceImport() {
+    if (!importPreview || !cloudUser || editorBusyRef.current || persistenceBlocked || !online) return;
+    const items: Record<string, unknown>[] = [];
+    for (const row of importPreview.rows.filter((row) => row.selected)) taskEditItems(row.base ?? null, row.task, items);
+    if (!items.length || items.length > 100 || new TextEncoder().encode(JSON.stringify(items)).length > 60_000) {
+      setImportMessage("יש לבחור יחידת ייבוא של 1–100 פעולות ועד 60KB. הקטן את הבחירה לפני אישור."); return;
+    }
+    editorBusyRef.current = true; setEditorBusy(true);
+    try {
+      const result = await writeVersioned(cloudUser.id, { kind: "import", items });
+      if (actorRef.current !== cloudUser.id) return;
+      setImportPreview(null);
+      setImportMessage(`הייבוא נשמר בענן: ${result.itemCount} פעולות.`);
+      await refreshVersionedView().catch(() => setImportMessage("הייבוא נשמר; טעינת הרשימה נכשלה. יש לרענן ללא ייבוא נוסף."));
+    } catch (error) { setImportMessage(errorMessage(error)); }
+    finally { editorBusyRef.current = false; setEditorBusy(false); }
   }
 
   async function signIn(event: FormEvent) {
@@ -4281,10 +4433,7 @@ export default function Home() {
 
     try {
       if (versionedPersistenceEnabled) {
-        if (!window.confirm("ליצור משימות חדשות מהנתונים המקומיים? המספרים יוקצו בשרת; משימות קיימות לא יוחלפו.")) return;
-        const items: Record<string, unknown>[] = [];
-        for (const task of tasks.filter((row) => isOwnTask(row, cloudUser))) taskEditItems(null, task, items);
-        await writeVersioned(cloudUser.id, { kind: "import", items }); await refreshVersionedView(); setCloudStatus("הנתונים נשמרו בענן."); return;
+        setImportPreview({ name: "נתונים מהמכשיר", invalid: 0, rows: tasks.filter((row) => isOwnTask(row, cloudUser)).map((task) => ({ task, selected: false })) }); return;
       }
       await saveCloudTasks(tasks, cloudUser);
       setCloudSyncEnabled(true);
@@ -4676,6 +4825,9 @@ export default function Home() {
         </>
       )}
 
+      {versionedPersistenceEnabled && cloudUser && isCloudReady && <PersistenceWorkspace key={cloudUser.id} userId={cloudUser.id}
+        onResume={(row) => void resumePersistenceDraft(row)} onResolved={persistenceResolved} onRefresh={async () => { await refreshVersionedView(); }} />}
+
       {!authChecked ? (
         <LoadingSkeleton />
       ) : !cloudUser ? (
@@ -5052,7 +5204,7 @@ export default function Home() {
                   </div>
                 )}
                 {filteredTasks.map((task) => (
-                  <article className={`task-card status-${task.status}${isOverdue(task) ? " is-overdue" : ""}${subtaskProgress(task.subtasks).open >= 3 ? " has-open-subtasks" : ""}${task.sharedWithMe ? " is-shared-task" : ""}${task.cloudId || task.shareId ? " has-share-control" : ""}`} key={task.id}>
+                  <article className={`task-card status-${task.status}${isOverdue(task) ? " is-overdue" : ""}${subtaskProgress(task.subtasks).open >= 3 ? " has-open-subtasks" : ""}${task.sharedWithMe ? " is-shared-task" : ""}${task.cloudId || task.shareId ? " has-share-control" : ""}`} data-task-uuid={task.cloudId} data-task-revision={task.revision} key={task.id}>
                     <button
                       className={`focus-button${task.focused ? " active" : ""}`}
                       aria-label={task.focused ? `הסרת ${task.title} ממיקוד` : `סימון ${task.title} במיקוד`}
@@ -5720,7 +5872,7 @@ export default function Home() {
                           <div className="assistant-action-copy">
                             <span className="assistant-action-kicker">
                               {actionStatus === "done" ? <CircleCheck size={16} aria-hidden="true" /> : actionStatus === "failed" ? <CircleAlert size={16} aria-hidden="true" /> : actionStatus === "approved" ? (actionIsRunning ? <LoaderCircle className="assistant-action-spinner" size={16} aria-hidden="true" /> : <Check size={16} aria-hidden="true" />) : <Sparkles size={16} aria-hidden="true" />}
-                              {actionStatus === "done" ? "בוצע" : actionStatus === "failed" ? "הפעולה לא בוצעה" : actionStatus === "approved" ? (actionIsRunning ? "מבצע..." : "הפעולה אושרה") : "פעולה מוצעת"}
+                              {actionStatus === "done" ? "בוצע" : actionStatus === "failed" ? "הפעולה לא בוצעה" : actionStatus === "approved" ? (actionIsRunning ? "מבצע..." : versionedPersistenceEnabled ? "תוצאת הפעולה בבדיקה — יש לפתוח שמירה וטיוטות" : "הפעולה אושרה") : "פעולה מוצעת"}
                             </span>
                             <strong>{assistantActionDescription(message.proposedAction)}</strong>
                             {actionDetails && <small>{actionDetails}</small>}
@@ -5808,7 +5960,7 @@ export default function Home() {
         </div>
       )}
 
-      {isSettingsOpen && (
+      {isSettingsOpen && !persistenceReview && !importPreview && (
         <div className="modal-backdrop" role="presentation">
           <section className="settings-drawer" role="dialog" aria-modal="true" aria-label="הגדרות">
             <div className="drawer-header">
@@ -6310,9 +6462,60 @@ export default function Home() {
         </div>
       )}
 
-      {taskEditor && (
+      {persistenceReview && <PersistenceDialog title={persistenceReview.title} onClose={() => finishPersistenceReview(false)}>
+        <div className="persistence-dialog-content"><ul>{persistenceReview.lines.map((line, index) => <li key={index} dir="auto">{line}</li>)}</ul></div>
+        <footer><button type="button" onClick={() => finishPersistenceReview(true)}><Check size={18} />אישור וביצוע</button><button type="button" onClick={() => finishPersistenceReview(false)}>חזרה ללא ביצוע</button></footer>
+      </PersistenceDialog>}
+
+      {importPreview && <PersistenceDialog title={`בדיקת ייבוא — ${importPreview.name}`} onClose={() => { if (!editorBusy) setImportPreview(null); }}>
+        <div className="persistence-dialog-content">
+          <p>יש לבחור במפורש אילו רשומות לייבא. עדכון מזוהה לפי UUID של החשבון בלבד, לא לפי P/W. למשימה חדשה יוקצה מספר חדש בשרת.</p>
+          <p>{importPreview.invalid} רשומות לא תקינות לא ייובאו. כל הבחירה תישמר יחד או תידחה יחד.</p>
+          {importPreview.rows.map((row, index) => <fieldset className="persistence-diff-field" key={index}>
+            <legend>{row.base ? `עדכון ${row.base.id}` : `יצירה חדשה (מקור ${row.task.id})`} — {row.task.title}</legend>
+            <label><input type="checkbox" checked={row.selected} disabled={editorBusy} onChange={(event) => setImportPreview((value) => value ? { ...value, rows: value.rows.map((item, i) => i === index ? { ...item, selected: event.target.checked } : item) } : value)} />צירוף לייבוא</label>
+            {row.base && <code dir="ltr">{row.base.cloudId}</code>}
+            <ul>{taskEditItems(row.base ?? null, row.task).flatMap((command) => describePersistenceCommand(command)).map((line, i) => <li key={i}>{line}</li>)}</ul>
+          </fieldset>)}
+          {importMessage && <p role="status">{importMessage}</p>}
+        </div>
+        <footer><button type="button" disabled={editorBusy || persistenceBlocked || !online || !importPreview.rows.some((row) => row.selected)} onClick={() => void confirmPersistenceImport()}><Check size={18} />אישור וייבוא הבחירה</button></footer>
+      </PersistenceDialog>}
+
+      {persistenceConflict && !persistenceReview && <PersistenceDiff key={`${persistenceConflict.server.cloudId}:${persistenceConflict.server.writeEpoch}:${persistenceConflict.server.revision}`}
+        {...persistenceConflict} busy={editorBusy} onCancel={() => setPersistenceConflict(null)}
+        onDiscard={() => { void reviewPersistence("מחיקת טיוטה", ["הערכים בענן יישארו ללא שינוי. הטיוטה המקומית תימחק. לא תתבצע כתיבה לענן."]).then((approved) => {
+          if (approved && cloudUser) { removeTaskDraft(cloudUser.id, draftKey(persistenceConflict.base)); closeTaskEditor(); }
+        }); }}
+        onConfirm={(next) => { if (editorBusyRef.current) return; editorBusyRef.current = true; setEditorBusy(true);
+          void performAtomicEdit(persistenceConflict.server, next).then((saved) => { if (saved) closeTaskEditor(); }).finally(() => { editorBusyRef.current = false; setEditorBusy(false); }); }} />}
+
+      {editorCloseDecision && taskEditor && !persistenceReview && <PersistenceDialog title="סגירת העריכה" onClose={() => setEditorCloseDecision(false)}>
+        <div className="persistence-dialog-content"><p role="status">{persistenceBlocked || editorBusy ? "אפשר לסגור; בדיקת התוצאה תישאר ברשימת הפעולות. סגירה אינה מבטלת שמירה שנשלחה." : "הטיוטה טרם נשמרה בענן. היא לא תישלח אוטומטית."}</p>
+          {persistenceView.storageWarning && <p role="alert">הטיוטה קיימת במסך בלבד. סגירה או רענון עלולים לאבד אותה.</p>}
+        </div>
+        <footer><button type="button" onClick={() => setEditorCloseDecision(false)}>חזרה לעריכה</button>
+          <button type="button" disabled={persistenceView.storageWarning} onClick={() => {
+            if (!cloudUser) return;
+            if (storeTaskDraft(cloudUser.id, taskEditor.mode === "edit" ? taskEditor.baseTask ?? null : null, taskEditor.draft)) closeTaskEditor();
+          }}><Check size={18} />שמירת טיוטה וסגירה</button>
+          {!persistenceBlocked && !editorBusy && <button type="button" onClick={() => { void reviewPersistence("מחיקת טיוטה", ["השינויים שלא נשלחו יימחקו מהמכשיר. המידע בענן לא ישתנה."]).then((approved) => {
+            if (approved && cloudUser) { removeTaskDraft(cloudUser.id, draftKey(taskEditor.mode === "edit" ? taskEditor.baseTask ?? null : null)); closeTaskEditor(); }
+          }); }}>מחיקת טיוטה</button>}
+        </footer>
+      </PersistenceDialog>}
+
+      {taskEditor && !persistenceConflict && !editorCloseDecision && !persistenceReview && (
         <div className="modal-backdrop" role="presentation">
-          <section className="task-drawer" role="dialog" aria-modal="true" aria-label={taskEditor.mode === "create" ? "משימה חדשה" : "עריכת משימה"}>
+          <section ref={editorDialogRef} className={`task-drawer${versionedPersistenceEnabled ? " persistence-editor" : ""}`} role="dialog" aria-modal="true" aria-label={taskEditor.mode === "create" ? "משימה חדשה" : "עריכת משימה"}
+            onKeyDown={(event) => {
+              if (!versionedPersistenceEnabled) return;
+              if (event.key === "Escape") { event.stopPropagation(); requestCloseTaskEditor(); }
+              if (event.key !== "Tab") return;
+              const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled)')).filter((node) => node.getClientRects().length);
+              if (event.shiftKey && document.activeElement === controls[0]) { event.preventDefault(); controls.at(-1)?.focus(); }
+              else if (!event.shiftKey && document.activeElement === controls.at(-1)) { event.preventDefault(); controls[0]?.focus(); }
+            }}>
             <div className="drawer-header">
               <div>
                 <p className="eyebrow">{taskEditor.mode === "create" ? "משימה חדשה" : "עריכת משימה"}</p>
@@ -6379,26 +6582,26 @@ export default function Home() {
               <div className="edit-grid">
                 <label>
                   <span>נושא</span>
-                  <select value={taskEditor.draft.category} onChange={(event) => updateTaskDraft({ category: event.target.value })} disabled={taskEditorIsReadOnly}>
+                  <select aria-label="נושא" value={taskEditor.draft.category} onChange={(event) => updateTaskDraft({ category: event.target.value })} disabled={taskEditorIsReadOnly}>
                     {topicOptions[taskEditor.draft.prefix].map((topic) => <option value={topic} key={topic}>{topic}</option>)}
                   </select>
                 </label>
                 <label>
                   <span>פעולה</span>
-                  <select value={taskEditor.draft.actionType} onChange={(event) => updateTaskDraft({ actionType: event.target.value })} disabled={taskEditorIsReadOnly}>
+                  <select aria-label="פעולה" value={taskEditor.draft.actionType} onChange={(event) => updateTaskDraft({ actionType: event.target.value })} disabled={taskEditorIsReadOnly}>
                     <option value="">ללא פעולה</option>
                     {actionOptions.map((action) => <option value={action} key={action}>{action}</option>)}
                   </select>
                 </label>
                 <label>
                   <span>סטטוס</span>
-                  <select value={taskEditor.draft.status} onChange={(event) => updateTaskDraft({ status: event.target.value as TaskStatus })} disabled={taskEditorIsReadOnly}>
+                  <select aria-label="סטטוס משימה" value={taskEditor.draft.status} onChange={(event) => updateTaskDraft({ status: event.target.value as TaskStatus })} disabled={taskEditorIsReadOnly}>
                     {Object.entries(statusLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
                   </select>
                 </label>
                 <label>
                   <span>עדיפות</span>
-                  <select value={taskEditor.draft.priority} onChange={(event) => updateTaskDraft({ priority: event.target.value as TaskPriority })} disabled={taskEditorIsReadOnly}>
+                  <select aria-label="עדיפות" value={taskEditor.draft.priority} onChange={(event) => updateTaskDraft({ priority: event.target.value as TaskPriority })} disabled={taskEditorIsReadOnly}>
                     {Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
                   </select>
                 </label>
@@ -6415,7 +6618,7 @@ export default function Home() {
               </div>
               <label className="notes-field">
                 <span>הערות</span>
-                <textarea {...freeTextInputProps} value={taskEditor.draft.notes} onChange={(event) => updateTaskDraft({ notes: event.target.value })} rows={5} disabled={taskEditorIsReadOnly} />
+                <textarea {...freeTextInputProps} aria-label="הערות" value={taskEditor.draft.notes} onChange={(event) => updateTaskDraft({ notes: event.target.value })} rows={5} disabled={taskEditorIsReadOnly} />
               </label>
               {taskEditor.mode === "edit" && taskEditorTask && sharingPanelTaskId === taskEditorTask.id && (
                 <section className="sharing-panel">
@@ -6582,10 +6785,22 @@ export default function Home() {
               {taskEditor.mode === "create" && (
                 <p className="editor-help">המספר ייווצר אוטומטית לפי הרצף הקיים ולא ניתן לבחור אותו ידנית.</p>
               )}
-              {taskEditorError && <p className="editor-error">{taskEditorError}</p>}
+              {versionedPersistenceEnabled && <div className="persistence-editor-status" role="status" aria-live="polite" aria-atomic="true" data-save-state={editorBusy ? "submitting" : editorSaveStatus}>
+                {editorBusy ? persistenceStatusText("submitting") : !online ? "אין חיבור. אפשר להמשיך בטיוטה; היא לא תישלח אוטומטית." : persistenceStatusText(editorSaveStatus)}
+                {persistenceView.storageWarning ? <p>הטיוטה קיימת כרגע במסך בלבד. סגירה או רענון עלולים לאבד אותה.</p> : persistenceView.drafts.some((row) => row.key === draftKey(taskEditor.mode === "edit" ? taskEditor.baseTask ?? null : null)) && <p>טיוטה נשמרה במכשיר</p>}
+                {["account_read_only", "client_upgrade_required", "stale_epoch"].includes(editorSaveStatus) && <button type="button" onClick={() => { void refreshVersionedView().then(() => {
+                  if (!cloudUser || actorRef.current !== cloudUser.id) return;
+                  if (!observedContext(cloudUser.id).readOnly) setEditorSaveStatus("draft");
+                }).catch(() => setTaskEditorError("טעינת המצב נכשלה. הטיוטה לא נשלחה.")); }}>בדיקת זמינות מחדש</button>}
+                {editorSaveStatus === "conflict" && taskEditor.mode === "edit" && taskEditor.baseTask && <button type="button" onClick={() => void handlePersistenceFailure(new PersistenceWriteError({ status: "conflict" }), taskEditor.baseTask, taskEditor.draft)}>השוואת שינויים</button>}
+                {editorSaveStatus === "client_upgrade_required" && <button type="button" disabled={persistenceView.storageWarning} onClick={() => {
+                  if (cloudUser && storeTaskDraft(cloudUser.id, taskEditor.mode === "edit" ? taskEditor.baseTask ?? null : null, taskEditor.draft)) window.location.reload();
+                }}>שמירת טיוטה ועדכון</button>}
+              </div>}
+              {taskEditorError && <p className="editor-error" role="alert">{taskEditorError}</p>}
               {!taskEditorIsHistorical && (
                 <div className="drawer-actions">
-                  <button type="submit">{taskEditor.mode === "create" ? "יצירת משימה" : taskEditorIsShared ? "שמירת סטטוס צעדים" : "שמירת שינויים"}</button>
+                  <button type="submit" disabled={versionedPersistenceEnabled && (editorBusy || persistenceBlocked || !online || ["conflict", "account_read_only", "client_upgrade_required", "authentication_required", "stale_epoch"].includes(editorSaveStatus))}>{editorBusy ? "שומר בענן…" : taskEditor.mode === "create" ? "יצירת משימה" : taskEditorIsShared ? "שמירת סטטוס צעדים" : "שמירת שינויים"}</button>
                 </div>
               )}
             </form>
