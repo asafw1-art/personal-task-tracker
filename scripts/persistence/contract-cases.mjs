@@ -198,7 +198,7 @@ define("T19", "restore changes epoch but never regresses counters or dedup", asy
   await h.fixture("restore_older_snapshot", {});
   const after = await h.inspect();
   assert.ok(BigInt(after.writeEpoch) > BigInt(before.writeEpoch));
-  for (const prefix of ["P", "W"]) assert.ok(after.counters[prefix] >= before.counters[prefix]);
+  for (const prefix of ["P", "W"]) assert.ok(BigInt(after.counters[prefix]) >= BigInt(before.counters[prefix]));
   assert.ok(after.receipts.some((item) => item.operationId === value.operationId));
   assert.equal((await h.send(syntheticSeed.owner, command())).status, "stale_epoch");
 });
